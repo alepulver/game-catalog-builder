@@ -1,0 +1,11 @@
+# Core dependencies
+pandas>=2.0.0
+requests>=2.31.0
+pyyaml>=6.0
+
+# Fuzzy matching (rapidfuzz is preferred for performance)
+rapidfuzz>=3.0.0
+
+# Game data APIs
+howlongtobeatpy>=1.0.0
+
