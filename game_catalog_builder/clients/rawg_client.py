@@ -4,7 +4,7 @@ import requests
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .utilities import (
+from ..utils.utilities import (
     normalize_game_name,
     pick_best_match,
     load_json_cache,

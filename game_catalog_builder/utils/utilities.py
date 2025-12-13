@@ -226,8 +226,8 @@ def load_credentials(credentials_path: str | Path | None = None) -> Dict[str, An
     """
     if credentials_path is None:
         # Try to find credentials.yaml in the project root
-        # Look for it relative to the utilities.py file
-        root = Path(__file__).resolve().parent.parent
+        # Look for it relative to the utilities.py file (go up to project root)
+        root = Path(__file__).resolve().parent.parent.parent
         credentials_path = root / "credentials.yaml"
     else:
         credentials_path = Path(credentials_path)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from howlongtobeatpy import HowLongToBeat
 
-from .utilities import (
+from ..utils.utilities import (
     normalize_game_name,
     load_json_cache,
     save_json_cache,

@@ -4,7 +4,7 @@ import requests
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .utilities import (
+from ..utils.utilities import (
     load_json_cache,
     save_json_cache,
     RateLimiter,

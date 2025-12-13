@@ -22,4 +22,9 @@ ENV/
 *.csv
 *.json
 data/
+output/
+temp/
+
+# Old modules (replaced by package structure)
+modules/
 

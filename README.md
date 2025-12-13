@@ -28,7 +28,7 @@ A Python tool for enriching video game catalogs with metadata from multiple APIs
    cd game-catalog-builder
    ```
 
-2. Create a virtual environment (recommended):
+2. Create and activate a virtual environment:
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -38,6 +38,8 @@ A Python tool for enriching video game catalogs with metadata from multiple APIs
    ```bash
    pip install -r requirements.txt
    ```
+
+   **Note**: Always activate the virtual environment (step 2) before running the tool. After activation, `python` will use the venv's Python automatically.
 
 ### Configuration
 
@@ -67,46 +69,93 @@ A Python tool for enriching video game catalogs with metadata from multiple APIs
 
 ## Usage
 
-### Individual Scripts
+**Important**: Make sure your virtual environment is activated (see Setup step 2) before running commands.
 
-Run individual enrichment scripts:
+### Basic Usage
+
+Process all sources with a single command:
 
 ```bash
-# Enrich with IGDB data
-python run_igdb.py
-
-# Enrich with RAWG data
-python run_rawg.py
-
-# Enrich with Steam data
-python run_steam.py
-
-# Enrich with SteamSpy data
-python run_steamspy.py
-
-# Enrich with HowLongToBeat data
-python run_hltb.py
+python run.py data/input/Games_Personal.csv
 ```
 
-### Run All
+This will:
+- Process all API sources (IGDB, RAWG, Steam, SteamSpy, HLTB)
+- Save individual results to `data/processed/`
+- Automatically merge all results into `Games_Final.csv`
 
-Run all enrichment scripts sequentially:
+### Process Specific Sources
+
+Process only specific API sources:
 
 ```bash
-python run_all.py
+# Process only IGDB
+python run.py data/input/Games_Personal.csv --source igdb
+
+# Process only RAWG
+python run.py data/input/Games_Personal.csv --source rawg
+
+# Process only Steam
+python run.py data/input/Games_Personal.csv --source steam
+
+# Process SteamSpy (requires Steam data first)
+python run.py data/input/Games_Personal.csv --source steamspy
+
+# Process only HowLongToBeat
+python run.py data/input/Games_Personal.csv --source hltb
+```
+
+### Custom Output and Cache Directories
+
+```bash
+# Specify custom output directory
+python run.py data/input/Games_Personal.csv --output my_output/
+
+# Specify custom cache directory
+python run.py data/input/Games_Personal.csv --cache my_cache/
+
+# Use custom credentials file (default: credentials.yaml in project root)
+python run.py data/input/Games_Personal.csv --credentials my_credentials.yaml
+```
+
+### Merge Only
+
+If you've already processed files and just want to merge:
+
+```bash
+python run.py data/input/Games_Personal.csv --source all --merge
+```
+
+### Command-Line Options
+
+```
+positional arguments:
+  input                 Input CSV file with game catalog
+
+optional arguments:
+  --output OUTPUT       Output directory for processed files (default: data/processed)
+  --cache CACHE        Cache directory for API responses (default: data/raw)
+  --credentials CREDENTIALS
+                       Path to credentials.yaml file (default: credentials.yaml in project root)
+  --source {igdb,rawg,steam,steamspy,hltb,all}
+                       Which API source to process (default: all)
+  --merge              Merge all processed files into a final CSV
+  --merge-output MERGE_OUTPUT
+                       Output file for merged results (default: data/processed/Games_Final.csv)
 ```
 
 ### Input/Output
 
-- **Input**: Place your game catalog CSV file in `data/input/Games_Personal.csv`
-- **Output**: Processed files are saved in `data/processed/` with names like:
+- **Input**: Any CSV file with a "Name" column containing game names
+- **Output**: Processed files are saved in the output directory (default: `data/processed/`):
   - `Games_IGDB.csv`
   - `Games_RAWG.csv`
   - `Games_Steam.csv`
   - `Games_SteamSpy.csv`
   - `Games_HLTB.csv`
+  - `Games_Final.csv` (merged result)
 
-The scripts will:
+The tool will:
 - Create output directories if they don't exist
 - Resume processing from where it left off (skips already processed rows)
 - Save progress incrementally every 10 processed games
@@ -115,28 +164,30 @@ The scripts will:
 
 ```
 game-catalog-builder/
-├── modules/
-│   ├── igdb_client.py      # IGDB API client
-│   ├── rawg_client.py       # RAWG API client
-│   ├── steam_client.py      # Steam API client
-│   ├── steamspy_client.py   # SteamSpy API client
-│   ├── hltb_client.py       # HowLongToBeat client
-│   ├── merger.py           # Merge utilities
-│   └── utilities.py         # Common utilities
-├── run_igdb.py             # IGDB enrichment script
-├── run_rawg.py             # RAWG enrichment script
-├── run_steam.py            # Steam enrichment script
-├── run_steamspy.py         # SteamSpy enrichment script
-├── run_hltb.py             # HowLongToBeat enrichment script
-├── run_all.py              # Run all scripts
-├── credentials.yaml        # API credentials (not in git)
-├── requirements.txt        # Python dependencies
-└── README.md               # This file
+├── game_catalog_builder/      # Main package
+│   ├── __init__.py
+│   ├── cli.py                 # Command-line interface
+│   ├── clients/              # API clients
+│   │   ├── __init__.py
+│   │   ├── hltb_client.py
+│   │   ├── igdb_client.py
+│   │   ├── rawg_client.py
+│   │   ├── steam_client.py
+│   │   └── steamspy_client.py
+│   └── utils/                # Utilities
+│       ├── __init__.py
+│       ├── merger.py
+│       └── utilities.py
+├── run.py                     # Entry point
+├── pyproject.toml            # Project metadata
+├── requirements.txt          # Python dependencies
+├── credentials.yaml          # API credentials (not in git)
+└── README.md                 # This file
 ```
 
 ## Data Fields
 
-The scripts add various columns to your CSV:
+The tool adds various columns to your CSV:
 
 ### IGDB Fields
 - `IGDB_ID`: IGDB game ID
@@ -187,6 +238,22 @@ See `requirements.txt` for the complete list. Main dependencies include:
 - `pyyaml`: YAML file parsing
 - `rapidfuzz`: Fast fuzzy string matching
 - `howlongtobeatpy`: HowLongToBeat API client
+
+## Development
+
+### Installing in Development Mode
+
+```bash
+pip install -e .
+```
+
+This installs the package in editable mode, allowing you to modify the code without reinstalling.
+
+### Running Tests
+
+```bash
+python -m unittest discover tests
+```
 
 ## License
 

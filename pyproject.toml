@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "game-catalog-builder"
+version = "0.1.0"
+description = "Enrich video game catalogs with metadata from multiple APIs (IGDB, RAWG, Steam, SteamSpy, HowLongToBeat)"
+requires-python = ">=3.8"
+readme = "README.md"
+dependencies = [
+    "pandas>=2.0.0",
+    "requests>=2.31.0",
+    "pyyaml>=6.0",
+    "rapidfuzz>=3.0.0",
+    "howlongtobeatpy>=1.0.0",
+]
+
+[project.scripts]
+gcb = "game_catalog_builder.cli:main"
+
+[tool.setuptools]
+packages = ["game_catalog_builder", "game_catalog_builder.clients", "game_catalog_builder.utils"]
+

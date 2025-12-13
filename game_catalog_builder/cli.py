@@ -1,0 +1,426 @@
+"""Command-line interface for game catalog builder."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Optional
+
+from .clients import (
+    HLTBClient,
+    IGDBClient,
+    RAWGClient,
+    SteamClient,
+    SteamSpyClient,
+)
+from .utils import (
+    ProjectPaths,
+    ensure_columns,
+    is_row_processed,
+    load_credentials,
+    merge_all,
+    read_csv,
+    write_csv,
+    PUBLIC_DEFAULT_COLS,
+)
+
+
+def process_igdb(
+    input_csv: Path,
+    output_csv: Path,
+    cache_path: Path,
+    credentials: dict,
+    required_cols: list[str],
+) -> None:
+    """Process games with IGDB data."""
+    client = IGDBClient(
+        client_id=credentials.get("igdb", {}).get("client_id", ""),
+        client_secret=credentials.get("igdb", {}).get("client_secret", ""),
+        cache_path=cache_path,
+        min_interval_s=0.8,
+    )
+
+    if output_csv.exists():
+        df = read_csv(output_csv)
+    else:
+        df = read_csv(input_csv)
+
+    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+
+    processed = 0
+    for idx, row in df.iterrows():
+        name = row.get("Name", "").strip()
+        if not name:
+            continue
+
+        if is_row_processed(df, idx, required_cols):
+            continue
+
+        print(f"[IGDB] Processing: {name}")
+
+        data = client.search(name)
+        if not data:
+            print("  ↳ Not found in IGDB")
+            continue
+
+        for k, v in data.items():
+            df.at[idx, k] = v
+
+        processed += 1
+        if processed % 10 == 0:
+            # Save only Name + IGDB columns
+            igdb_cols = ["Name"] + [c for c in df.columns if c.startswith("IGDB_")]
+            write_csv(df[igdb_cols], output_csv)
+
+    # Save only Name + IGDB columns
+    igdb_cols = ["Name"] + [c for c in df.columns if c.startswith("IGDB_")]
+    write_csv(df[igdb_cols], output_csv)
+    print("✔ IGDB completed:", output_csv)
+
+
+def process_rawg(
+    input_csv: Path,
+    output_csv: Path,
+    cache_path: Path,
+    credentials: dict,
+    required_cols: list[str],
+) -> None:
+    """Process games with RAWG data."""
+    client = RAWGClient(
+        api_key=credentials.get("rawg", {}).get("api_key", ""),
+        cache_path=cache_path,
+        min_interval_s=1.0,
+    )
+
+    if output_csv.exists():
+        df = read_csv(output_csv)
+    else:
+        df = read_csv(input_csv)
+
+    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+
+    processed = 0
+    for idx, row in df.iterrows():
+        name = row.get("Name", "").strip()
+        if not name:
+            continue
+
+        if is_row_processed(df, idx, required_cols):
+            continue
+
+        print(f"[RAWG] Processing: {name}")
+
+        result = client.search(name)
+        if not result:
+            print("  ↳ Not found")
+            continue
+
+        fields = client.extract_fields(result)
+        for k, v in fields.items():
+            df.at[idx, k] = v
+
+        processed += 1
+        if processed % 10 == 0:
+            # Save only Name + RAWG columns
+            rawg_cols = ["Name"] + [c for c in df.columns if c.startswith("RAWG_")]
+            write_csv(df[rawg_cols], output_csv)
+
+    # Save only Name + RAWG columns
+    rawg_cols = ["Name"] + [c for c in df.columns if c.startswith("RAWG_")]
+    write_csv(df[rawg_cols], output_csv)
+    print("✔ RAWG completed:", output_csv)
+
+
+def process_steam(
+    input_csv: Path,
+    output_csv: Path,
+    cache_path: Path,
+    required_cols: list[str],
+) -> None:
+    """Process games with Steam data."""
+    client = SteamClient(
+        cache_path=cache_path,
+        min_interval_s=1.0,
+    )
+
+    if output_csv.exists():
+        df = read_csv(output_csv)
+    else:
+        df = read_csv(input_csv)
+
+    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+
+    processed = 0
+    for idx, row in df.iterrows():
+        name = row.get("Name", "").strip()
+        if not name:
+            continue
+
+        if is_row_processed(df, idx, required_cols):
+            continue
+
+        print(f"[STEAM] Processing: {name}")
+
+        search = client.search_appid(name)
+        if not search:
+            print("  ↳ Not on Steam")
+            continue
+
+        appid = search.get("id")
+        details = client.get_app_details(appid)
+        if not details:
+            continue
+
+        fields = client.extract_fields(appid, details)
+        for k, v in fields.items():
+            df.at[idx, k] = v
+
+        processed += 1
+        if processed % 10 == 0:
+            # Save only Name + Steam columns
+            steam_cols = ["Name"] + [c for c in df.columns if c.startswith("Steam_")]
+            write_csv(df[steam_cols], output_csv)
+
+    # Save only Name + Steam columns
+    steam_cols = ["Name"] + [c for c in df.columns if c.startswith("Steam_")]
+    write_csv(df[steam_cols], output_csv)
+    print("✔ Steam completed:", output_csv)
+
+
+def process_steamspy(
+    input_csv: Path,
+    output_csv: Path,
+    cache_path: Path,
+    required_cols: list[str],
+) -> None:
+    """Process games with SteamSpy data."""
+    client = SteamSpyClient(
+        cache_path=cache_path,
+        min_interval_s=1.0,
+    )
+
+    if not input_csv.exists():
+        raise FileNotFoundError(
+            f"{input_csv} not found. Run steam processing first."
+        )
+
+    if output_csv.exists():
+        df = read_csv(output_csv)
+    else:
+        df = read_csv(input_csv)
+
+    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+
+    processed = 0
+    for idx, row in df.iterrows():
+        appid = row.get("Steam_AppID", "").strip()
+        name = row.get("Name", "").strip()
+
+        if not appid:
+            continue
+
+        if is_row_processed(df, idx, required_cols):
+            continue
+
+        print(f"[STEAMSPY] {name} (AppID {appid})")
+
+        data = client.fetch(int(appid))
+        if not data:
+            print("  ↳ No data in SteamSpy")
+            continue
+
+        for k, v in data.items():
+            df.at[idx, k] = v
+
+        processed += 1
+        if processed % 10 == 0:
+            # Save only Name + SteamSpy columns
+            steamspy_cols = ["Name"] + [c for c in df.columns if c.startswith("SteamSpy_")]
+            write_csv(df[steamspy_cols], output_csv)
+
+    # Save only Name + SteamSpy columns
+    steamspy_cols = ["Name"] + [c for c in df.columns if c.startswith("SteamSpy_")]
+    write_csv(df[steamspy_cols], output_csv)
+    print("✔ SteamSpy completed:", output_csv)
+
+
+def process_hltb(
+    input_csv: Path,
+    output_csv: Path,
+    cache_path: Path,
+    required_cols: list[str],
+) -> None:
+    """Process games with HowLongToBeat data."""
+    client = HLTBClient(cache_path=cache_path)
+
+    if output_csv.exists():
+        df = read_csv(output_csv)
+    else:
+        df = read_csv(input_csv)
+
+    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+
+    processed = 0
+    for idx, row in df.iterrows():
+        name = row.get("Name", "").strip()
+        if not name:
+            continue
+
+        if is_row_processed(df, idx, required_cols):
+            continue
+
+        print(f"[HLTB] Processing: {name}")
+
+        data = client.search(name)
+        if not data:
+            print("  ↳ Not found")
+            continue
+
+        for k, v in data.items():
+            df.at[idx, k] = v
+
+        processed += 1
+        if processed % 10 == 0:
+            # Save only Name + HLTB columns
+            hltb_cols = ["Name"] + [c for c in df.columns if c.startswith("HLTB_")]
+            write_csv(df[hltb_cols], output_csv)
+
+    # Save only Name + HLTB columns
+    hltb_cols = ["Name"] + [c for c in df.columns if c.startswith("HLTB_")]
+    write_csv(df[hltb_cols], output_csv)
+    print("✔ HLTB completed:", output_csv)
+
+
+def main() -> None:
+    """Main CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Enrich video game catalogs with metadata from multiple APIs"
+    )
+    parser.add_argument(
+        "input",
+        type=Path,
+        help="Input CSV file with game catalog",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output directory for processed files (default: data/processed)",
+    )
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        help="Cache directory for API responses (default: data/raw)",
+    )
+    parser.add_argument(
+        "--credentials",
+        type=Path,
+        help="Path to credentials.yaml file (default: credentials.yaml in project root)",
+    )
+    parser.add_argument(
+        "--source",
+        choices=["igdb", "rawg", "steam", "steamspy", "hltb", "all"],
+        default="all",
+        help="Which API source to process (default: all)",
+    )
+    parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge all processed files into a final CSV",
+    )
+    parser.add_argument(
+        "--merge-output",
+        type=Path,
+        help="Output file for merged results (default: data/processed/Games_Final.csv)",
+    )
+
+    args = parser.parse_args()
+
+    # Determine project root (parent of game_catalog_builder package)
+    project_root = Path(__file__).resolve().parent.parent
+    paths = ProjectPaths.from_root(project_root)
+    paths.ensure()
+
+    # Set up paths
+    input_csv = args.input
+    if not input_csv.exists():
+        parser.error(f"Input file not found: {input_csv}")
+
+    output_dir = args.output or paths.data_processed
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_dir = args.cache or paths.data_raw
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load credentials
+    if args.credentials:
+        credentials_path = args.credentials
+    else:
+        # Default: look for credentials.yaml in project root
+        credentials_path = project_root / "credentials.yaml"
+    
+    credentials = load_credentials(credentials_path)
+
+    # Process based on source
+    sources_to_process = (
+        ["igdb", "rawg", "steam", "steamspy", "hltb"]
+        if args.source == "all"
+        else [args.source]
+    )
+
+    for source in sources_to_process:
+        if source == "igdb":
+            process_igdb(
+                input_csv=input_csv,
+                output_csv=output_dir / "Games_IGDB.csv",
+                cache_path=cache_dir / "igdb_cache.json",
+                credentials=credentials,
+                required_cols=["IGDB_ID"],
+            )
+        elif source == "rawg":
+            process_rawg(
+                input_csv=input_csv,
+                output_csv=output_dir / "Games_RAWG.csv",
+                cache_path=cache_dir / "rawg_cache.json",
+                credentials=credentials,
+                required_cols=["RAWG_ID", "RAWG_Year", "RAWG_Genre"],
+            )
+        elif source == "steam":
+            process_steam(
+                input_csv=input_csv,
+                output_csv=output_dir / "Games_Steam.csv",
+                cache_path=cache_dir / "steam_cache.json",
+                required_cols=["Steam_AppID"],
+            )
+        elif source == "steamspy":
+            process_steamspy(
+                input_csv=output_dir / "Games_Steam.csv",
+                output_csv=output_dir / "Games_SteamSpy.csv",
+                cache_path=cache_dir / "steamspy_cache.json",
+                required_cols=["SteamSpy_Owners"],
+            )
+        elif source == "hltb":
+            process_hltb(
+                input_csv=input_csv,
+                output_csv=output_dir / "Games_HLTB.csv",
+                cache_path=cache_dir / "hltb_cache.json",
+                required_cols=["HLTB_Main"],
+            )
+
+    # Merge if requested
+    if args.merge or args.source == "all":
+        merge_output = args.merge_output or (output_dir / "Games_Final.csv")
+        merge_all(
+            personal_csv=input_csv,
+            rawg_csv=output_dir / "Games_RAWG.csv",
+            hltb_csv=output_dir / "Games_HLTB.csv",
+            steam_csv=output_dir / "Games_Steam.csv",
+            steamspy_csv=output_dir / "Games_SteamSpy.csv",
+            output_csv=merge_output,
+            igdb_csv=output_dir / "Games_IGDB.csv",
+        )
+        print("✔ Games_Final.csv generated successfully")
+
+
+if __name__ == "__main__":
+    main()
+
