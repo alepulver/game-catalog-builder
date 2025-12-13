@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -37,7 +39,7 @@ def process_igdb(
         client_id=credentials.get("igdb", {}).get("client_id", ""),
         client_secret=credentials.get("igdb", {}).get("client_secret", ""),
         cache_path=cache_path,
-        min_interval_s=0.8,
+        min_interval_s=0.5,
     )
 
     if output_csv.exists():
@@ -56,11 +58,10 @@ def process_igdb(
         if is_row_processed(df, idx, required_cols):
             continue
 
-        print(f"[IGDB] Processing: {name}")
+        logging.info(f"[IGDB] Processing: {name}")
 
         data = client.search(name)
         if not data:
-            print("  ↳ Not found in IGDB")
             continue
 
         for k, v in data.items():
@@ -75,7 +76,7 @@ def process_igdb(
     # Save only Name + IGDB columns
     igdb_cols = ["Name"] + [c for c in df.columns if c.startswith("IGDB_")]
     write_csv(df[igdb_cols], output_csv)
-    print("✔ IGDB completed:", output_csv)
+    logging.info(f"✔ IGDB completed: {output_csv}")
 
 
 def process_rawg(
@@ -108,11 +109,10 @@ def process_rawg(
         if is_row_processed(df, idx, required_cols):
             continue
 
-        print(f"[RAWG] Processing: {name}")
+        logging.info(f"[RAWG] Processing: {name}")
 
         result = client.search(name)
         if not result:
-            print("  ↳ Not found")
             continue
 
         fields = client.extract_fields(result)
@@ -128,7 +128,7 @@ def process_rawg(
     # Save only Name + RAWG columns
     rawg_cols = ["Name"] + [c for c in df.columns if c.startswith("RAWG_")]
     write_csv(df[rawg_cols], output_csv)
-    print("✔ RAWG completed:", output_csv)
+    logging.info(f"✔ RAWG completed: {output_csv}")
 
 
 def process_steam(
@@ -140,7 +140,7 @@ def process_steam(
     """Process games with Steam data."""
     client = SteamClient(
         cache_path=cache_path,
-        min_interval_s=1.0,
+        min_interval_s=0.5,
     )
 
     if output_csv.exists():
@@ -159,11 +159,10 @@ def process_steam(
         if is_row_processed(df, idx, required_cols):
             continue
 
-        print(f"[STEAM] Processing: {name}")
+        logging.info(f"[STEAM] Processing: {name}")
 
         search = client.search_appid(name)
         if not search:
-            print("  ↳ Not on Steam")
             continue
 
         appid = search.get("id")
@@ -184,7 +183,7 @@ def process_steam(
     # Save only Name + Steam columns
     steam_cols = ["Name"] + [c for c in df.columns if c.startswith("Steam_")]
     write_csv(df[steam_cols], output_csv)
-    print("✔ Steam completed:", output_csv)
+    logging.info(f"✔ Steam completed: {output_csv}")
 
 
 def process_steamspy(
@@ -196,13 +195,13 @@ def process_steamspy(
     """Process games with SteamSpy data."""
     client = SteamSpyClient(
         cache_path=cache_path,
-        min_interval_s=1.0,
+        min_interval_s=0.5,
     )
 
     if not input_csv.exists():
-        raise FileNotFoundError(
-            f"{input_csv} not found. Run steam processing first."
-        )
+        error_msg = f"{input_csv} not found. Run steam processing first."
+        logging.error(error_msg)
+        raise FileNotFoundError(error_msg)
 
     if output_csv.exists():
         df = read_csv(output_csv)
@@ -222,11 +221,11 @@ def process_steamspy(
         if is_row_processed(df, idx, required_cols):
             continue
 
-        print(f"[STEAMSPY] {name} (AppID {appid})")
+        logging.info(f"[STEAMSPY] {name} (AppID {appid})")
 
         data = client.fetch(int(appid))
         if not data:
-            print("  ↳ No data in SteamSpy")
+            logging.warning(f"  ↳ No data in SteamSpy: {name} (AppID {appid})")
             continue
 
         for k, v in data.items():
@@ -241,7 +240,7 @@ def process_steamspy(
     # Save only Name + SteamSpy columns
     steamspy_cols = ["Name"] + [c for c in df.columns if c.startswith("SteamSpy_")]
     write_csv(df[steamspy_cols], output_csv)
-    print("✔ SteamSpy completed:", output_csv)
+    logging.info(f"✔ SteamSpy completed: {output_csv}")
 
 
 def process_hltb(
@@ -269,11 +268,10 @@ def process_hltb(
         if is_row_processed(df, idx, required_cols):
             continue
 
-        print(f"[HLTB] Processing: {name}")
+        logging.info(f"[HLTB] Processing: {name}")
 
         data = client.search(name)
         if not data:
-            print("  ↳ Not found")
             continue
 
         for k, v in data.items():
@@ -288,7 +286,37 @@ def process_hltb(
     # Save only Name + HLTB columns
     hltb_cols = ["Name"] + [c for c in df.columns if c.startswith("HLTB_")]
     write_csv(df[hltb_cols], output_csv)
-    print("✔ HLTB completed:", output_csv)
+    logging.info(f"✔ HLTB completed: {output_csv}")
+
+
+def setup_logging(log_file: Path) -> None:
+    """Configure logging to both console and file."""
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create formatters
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    console_formatter = logging.Formatter('%(message)s')
+
+    # File handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(file_formatter)
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(console_formatter)
+
+    # Root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+    logging.info(f"Logging to file: {log_file}")
 
 
 def main() -> None:
@@ -332,6 +360,11 @@ def main() -> None:
         type=Path,
         help="Output file for merged results (default: data/processed/Games_Final.csv)",
     )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: output/enrichment.log)",
+    )
 
     args = parser.parse_args()
 
@@ -339,6 +372,15 @@ def main() -> None:
     project_root = Path(__file__).resolve().parent.parent
     paths = ProjectPaths.from_root(project_root)
     paths.ensure()
+
+    # Set up logging (after paths are ensured)
+    if args.log_file:
+        log_file = args.log_file
+    else:
+        log_file = project_root / "output" / "enrichment.log"
+
+    setup_logging(log_file)
+    logging.info("Starting game catalog enrichment")
 
     # Set up paths
     input_csv = args.input
@@ -418,7 +460,7 @@ def main() -> None:
             output_csv=merge_output,
             igdb_csv=output_dir / "Games_IGDB.csv",
         )
-        print("✔ Games_Final.csv generated successfully")
+        logging.info(f"✔ Games_Final.csv generated successfully: {merge_output}")
 
 
 if __name__ == "__main__":

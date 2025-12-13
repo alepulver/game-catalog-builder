@@ -114,19 +114,33 @@ def fuzzy_score(a: str, b: str) -> int:
     return int(fuzz.partial_ratio(normalize_game_name(a), normalize_game_name(b)))
 
 
-def pick_best_match(query: str, candidates: list[Dict[str, Any]], name_key: str = "name") -> Tuple[Optional[Dict[str, Any]], int]:
+def pick_best_match(query: str, candidates: list[Dict[str, Any]], name_key: str = "name") -> Tuple[Optional[Dict[str, Any]], int, list[Tuple[str, int]]]:
     """
     Given a query and a list of dicts (candidates), choose the candidate with the best fuzzy score.
-    Returns (best_candidate, best_score).
+    Returns (best_candidate, best_score, top_matches).
+    top_matches is a list of (name, score) tuples for the top 5 matches (excluding the best itself).
     """
-    best = None
-    best_score = -1
+    scored = []
     for c in candidates:
         cname = str(c.get(name_key, "") or "")
         score = fuzzy_score(query, cname)
-        if score > best_score:
-            best, best_score = c, score
-    return best, best_score
+        scored.append((c, cname, score))
+
+    # Sort by score descending
+    scored.sort(key=lambda x: x[2], reverse=True)
+
+    if not scored:
+        return None, -1, []
+
+    best, best_name, best_score = scored[0]
+
+    # Get top 5 matches (excluding the best itself)
+    top_matches = [
+        (name, score) for _, name, score in scored[1:6]  # Top 5 after the best
+        if score > 0
+    ]
+
+    return best, best_score, top_matches
 
 
 # ----------------------------

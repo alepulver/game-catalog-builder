@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import requests
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -92,16 +93,34 @@ class IGDBClient:
         '''
 
         data = self._post("games", query)
-        if not data:
+        if not data or not isinstance(data, list) or len(data) == 0:
+            # No results from API - log warning
+            logging.warning(f"Not found in IGDB: '{game_name}'. No results from API.")
             self.cache[key] = None
             save_json_cache(self.cache, self.cache_path)
             return None
 
-        best, score = pick_best_match(game_name, data, name_key="name")
+        best, score, top_matches = pick_best_match(game_name, data, name_key="name")
         if not best or score < 65:
+            # Log top 5 closest matches when not found
+            if top_matches:
+                top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
+                logging.warning(
+                    f"Not found in IGDB: '{game_name}'. Closest matches: {', '.join(top_names)}"
+                )
+            else:
+                logging.warning(f"Not found in IGDB: '{game_name}'. No matches found.")
             self.cache[key] = None
             save_json_cache(self.cache, self.cache_path)
             return None
+
+        # Warn if there are close matches (but not if it's a perfect 100% match)
+        if top_matches and score < 100:
+            top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
+            logging.warning(
+                f"Close match for '{game_name}': Selected '{best.get('name', '')}' (score: {score}%), "
+                f"alternatives: {', '.join(top_names)}"
+            )
 
         # Resolve IDs to names
         enriched = self._resolve_fields(best)
