@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
+
 from .clients import (
     HLTBClient,
     IGDBClient,
@@ -27,6 +29,36 @@ from .utils import (
 )
 
 
+def load_or_merge_dataframe(input_csv: Path, output_csv: Path) -> pd.DataFrame:
+    """
+    Load dataframe from input CSV, merging in existing data from output CSV if it exists.
+
+    This ensures we always process all games from the input, while preserving
+    already-processed data from previous runs.
+    """
+    # Always read from input_csv to get all games
+    df = read_csv(input_csv)
+
+    # If output_csv exists, merge its data to preserve already-processed games
+    if output_csv.exists():
+        df_output = read_csv(output_csv)
+        # Merge on Name, keeping data from output_csv where it exists
+        df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
+        # Drop duplicate columns from merge
+        for col in df.columns:
+            if col.endswith("_existing"):
+                original_col = col.replace("_existing", "")
+                if original_col in df.columns:
+                    # Use existing value if available and non-empty, otherwise use original
+                    # Handle both NaN and empty strings
+                    mask = (df[col].notna()) & (df[col] != "")
+                    df.loc[mask, original_col] = df.loc[mask, col]
+                df = df.drop(columns=[col])
+
+    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+    return df
+
+
 def process_igdb(
     input_csv: Path,
     output_csv: Path,
@@ -42,12 +74,7 @@ def process_igdb(
         min_interval_s=0.5,
     )
 
-    if output_csv.exists():
-        df = read_csv(output_csv)
-    else:
-        df = read_csv(input_csv)
-
-    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+    df = load_or_merge_dataframe(input_csv, output_csv)
 
     processed = 0
     for idx, row in df.iterrows():
@@ -93,12 +120,7 @@ def process_rawg(
         min_interval_s=1.0,
     )
 
-    if output_csv.exists():
-        df = read_csv(output_csv)
-    else:
-        df = read_csv(input_csv)
-
-    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+    df = load_or_merge_dataframe(input_csv, output_csv)
 
     processed = 0
     for idx, row in df.iterrows():
@@ -143,12 +165,7 @@ def process_steam(
         min_interval_s=0.5,
     )
 
-    if output_csv.exists():
-        df = read_csv(output_csv)
-    else:
-        df = read_csv(input_csv)
-
-    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+    df = load_or_merge_dataframe(input_csv, output_csv)
 
     processed = 0
     for idx, row in df.iterrows():
@@ -203,12 +220,7 @@ def process_steamspy(
         logging.error(error_msg)
         raise FileNotFoundError(error_msg)
 
-    if output_csv.exists():
-        df = read_csv(output_csv)
-    else:
-        df = read_csv(input_csv)
-
-    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+    df = load_or_merge_dataframe(input_csv, output_csv)
 
     processed = 0
     for idx, row in df.iterrows():
@@ -252,12 +264,7 @@ def process_hltb(
     """Process games with HowLongToBeat data."""
     client = HLTBClient(cache_path=cache_path)
 
-    if output_csv.exists():
-        df = read_csv(output_csv)
-    else:
-        df = read_csv(input_csv)
-
-    df = ensure_columns(df, PUBLIC_DEFAULT_COLS)
+    df = load_or_merge_dataframe(input_csv, output_csv)
 
     processed = 0
     for idx, row in df.iterrows():
@@ -399,7 +406,7 @@ def main() -> None:
     else:
         # Default: look for credentials.yaml in project root
         credentials_path = project_root / "credentials.yaml"
-    
+
     credentials = load_credentials(credentials_path)
 
     # Process based on source
