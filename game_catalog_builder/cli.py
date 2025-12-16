@@ -46,8 +46,18 @@ def load_or_merge_dataframe(input_csv: Path, output_csv: Path) -> pd.DataFrame:
     # If output_csv exists, merge its data to preserve already-processed games
     if output_csv.exists():
         df_output = read_csv(output_csv)
-        # Merge on Name, keeping data from output_csv where it exists
-        df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
+        # Merge on Name, keeping data from output_csv where it exists.
+        # If names repeat, merge using (Name, per-name occurrence) to avoid cartesian growth.
+        if "Name" in df.columns and "Name" in df_output.columns:
+            if df["Name"].duplicated().any() or df_output["Name"].duplicated().any():
+                df["__occ"] = df.groupby("Name").cumcount()
+                df_output["__occ"] = df_output.groupby("Name").cumcount()
+                df = df.merge(df_output, on=["Name", "__occ"], how="left", suffixes=("", "_existing"))
+                df = df.drop(columns=["__occ"])
+            else:
+                df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
+        else:
+            df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
         # Drop duplicate columns from merge
         for col in df.columns:
             if col.endswith("_existing"):
@@ -83,13 +93,7 @@ def process_steam_and_steamspy_streaming(
     df_steamspy = read_csv(input_csv)
     df_steamspy = ensure_columns(df_steamspy, PUBLIC_DEFAULT_COLS)
 
-    name_to_index: dict[str, int] = {}
-    for idx, row in df_steamspy.iterrows():
-        name = str(row.get("Name", "") or "").strip()
-        if name and name not in name_to_index:
-            name_to_index[name] = int(idx)
-
-    q: Queue[tuple[str, str] | None] = Queue()
+    q: Queue[tuple[int, str, str] | None] = Queue()
 
     def steam_producer() -> None:
         processed = 0
@@ -113,7 +117,7 @@ def process_steam_and_steamspy_streaming(
 
             # Persist appid early so SteamSpy can start immediately.
             df_steam.at[idx, "Steam_AppID"] = appid
-            q.put((name, appid))
+            q.put((int(idx), name, appid))
 
             details = steam_client.get_app_details(int(appid))
             if not details:
@@ -139,10 +143,7 @@ def process_steam_and_steamspy_streaming(
             if item is None:
                 break
 
-            name, appid = item
-            idx = name_to_index.get(name)
-            if idx is None:
-                continue
+            idx, name, appid = item
 
             if is_row_processed(df_steamspy, idx, ["SteamSpy_Owners"]):
                 continue
