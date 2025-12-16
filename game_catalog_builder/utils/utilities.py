@@ -22,8 +22,8 @@ from rapidfuzz import fuzz
 class ProjectPaths:
     root: Path
     data_input: Path
-    data_raw: Path
-    data_processed: Path
+    data_cache: Path
+    data_output: Path
 
     @staticmethod
     def from_root(root: str | Path) -> "ProjectPaths":
@@ -31,14 +31,14 @@ class ProjectPaths:
         return ProjectPaths(
             root=rootp,
             data_input=rootp / "data" / "input",
-            data_raw=rootp / "data" / "raw",
-            data_processed=rootp / "data" / "processed",
+            data_cache=rootp / "data" / "cache",
+            data_output=rootp / "data" / "output",
         )
 
     def ensure(self) -> None:
         self.data_input.mkdir(parents=True, exist_ok=True)
-        self.data_raw.mkdir(parents=True, exist_ok=True)
-        self.data_processed.mkdir(parents=True, exist_ok=True)
+        self.data_cache.mkdir(parents=True, exist_ok=True)
+        self.data_output.mkdir(parents=True, exist_ok=True)
 
 
 # ----------------------------
@@ -176,11 +176,12 @@ class RateLimiter:
         self._last = 0.0
 
     def wait(self) -> None:
-        now = time.time()
+        # Use monotonic time to avoid issues if the system clock changes.
+        now = time.monotonic()
         delta = now - self._last
         if delta < self.min_interval_s:
             time.sleep(self.min_interval_s - delta)
-        self._last = time.time()
+        self._last = time.monotonic()
 
 
 def with_retries(
@@ -233,23 +234,23 @@ def load_credentials(credentials_path: str | Path | None = None) -> Dict[str, An
     
     Args:
         credentials_path: Path to credentials.yaml file. If None, looks for
-                         credentials.yaml in the project root.
+                         data/credentials.yaml in the project root.
     
     Returns:
         Dictionary with credentials (e.g., {'igdb': {...}, 'rawg': {...}})
     """
     if credentials_path is None:
-        # Try to find credentials.yaml in the project root
+        # Try to find data/credentials.yaml in the project root
         # Look for it relative to the utilities.py file (go up to project root)
         root = Path(__file__).resolve().parent.parent.parent
-        credentials_path = root / "credentials.yaml"
+        credentials_path = root / "data" / "credentials.yaml"
     else:
         credentials_path = Path(credentials_path)
     
     if not credentials_path.exists():
         raise FileNotFoundError(
             f"Credentials file not found: {credentials_path}\n"
-            "Please create credentials.yaml with your API keys."
+            "Please create data/credentials.yaml with your API keys."
         )
     
     with open(credentials_path, "r", encoding="utf-8") as f:
@@ -281,6 +282,7 @@ PUBLIC_DEFAULT_COLS: Dict[str, Any] = {
     "IGDB_Franchise": "",
     "IGDB_Engine": "",
     "IGDB_Companies": "",
+    "IGDB_SteamAppID": "",
 
     # Steam
     "Steam_AppID": "",

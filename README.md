@@ -30,20 +30,29 @@ A Python tool for enriching video game catalogs with metadata from multiple APIs
 
 2. Create and activate a virtual environment:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
    ```
 
 3. Install dependencies:
    ```bash
+   pip install -e .
+   # or:
    pip install -r requirements.txt
    ```
+
+For local development tools (linting/type-checking/tests):
+
+```bash
+pip install -e ".[dev]"
+python -m pytest
+```
 
    **Note**: Always activate the virtual environment (step 2) before running the tool. After activation, `python` will use the venv's Python automatically.
 
 ### Configuration
 
-1. Create a `credentials.yaml` file in the project root with your API credentials:
+1. Create a `data/credentials.yaml` file with your API credentials (start from `data/credentials.example.yaml`):
 
    ```yaml
    # API Credentials
@@ -65,7 +74,17 @@ A Python tool for enriching video game catalogs with metadata from multiple APIs
    - Sign up at [RAWG API](https://rawg.io/apidocs)
    - Get your API key from the dashboard
 
-> **Note**: The `credentials.yaml` file is already in `.gitignore` and will not be committed to version control.
+> **Note**: The `data/credentials.yaml` file is ignored by git and will not be committed to version control.
+
+### Provider JSON examples
+
+To capture full provider responses (useful for deciding what additional fields to extract), run:
+
+```bash
+python -m game_catalog_builder.fetch_provider_examples "Doom (2016)"
+```
+
+This writes example files under `docs/examples/doom/`.
 
 ## Usage
 
@@ -81,7 +100,7 @@ python run.py data/input/Games_Personal.csv
 
 This will:
 - Process all API sources (IGDB, RAWG, Steam, SteamSpy, HLTB)
-- Save individual results to `data/processed/`
+- Save individual results to `data/output/`
 - Automatically merge all results into `Games_Final.csv`
 
 ### Process Specific Sources
@@ -114,7 +133,7 @@ python run.py data/input/Games_Personal.csv --output my_output/
 # Specify custom cache directory
 python run.py data/input/Games_Personal.csv --cache my_cache/
 
-# Use custom credentials file (default: credentials.yaml in project root)
+# Use custom credentials file (default: data/credentials.yaml)
 python run.py data/input/Games_Personal.csv --credentials my_credentials.yaml
 ```
 
@@ -133,21 +152,23 @@ positional arguments:
   input                 Input CSV file with game catalog
 
 optional arguments:
-  --output OUTPUT       Output directory for processed files (default: data/processed)
-  --cache CACHE        Cache directory for API responses (default: data/raw)
+  --output OUTPUT       Output directory for generated files (default: data/output)
+  --cache CACHE        Cache directory for API responses (default: data/cache)
   --credentials CREDENTIALS
-                       Path to credentials.yaml file (default: credentials.yaml in project root)
+                       Path to credentials.yaml file (default: data/credentials.yaml)
   --source {igdb,rawg,steam,steamspy,hltb,all}
                        Which API source to process (default: all)
   --merge              Merge all processed files into a final CSV
   --merge-output MERGE_OUTPUT
-                       Output file for merged results (default: data/processed/Games_Final.csv)
+                       Output file for merged results (default: data/output/Games_Final.csv)
+  --log-file LOG_FILE  Log file path (default: data/output/enrichment.log)
+  --debug              Enable DEBUG logging (default: INFO)
 ```
 
 ### Input/Output
 
 - **Input**: Any CSV file with a "Name" column containing game names
-- **Output**: Processed files are saved in the output directory (default: `data/processed/`):
+- **Output**: Generated files are saved in the output directory (default: `data/output/`):
   - `Games_IGDB.csv`
   - `Games_RAWG.csv`
   - `Games_Steam.csv`
@@ -159,6 +180,10 @@ The tool will:
 - Create output directories if they don't exist
 - Resume processing from where it left off (skips already processed rows)
 - Save progress incrementally every 10 processed games
+
+### Caching
+
+Provider caches are stored under `data/cache/` and are keyed by provider IDs when available, with a separate name-to-id mapping to avoid repeated searches on reruns.
 
 ## Project Structure
 
@@ -178,10 +203,14 @@ game-catalog-builder/
 │       ├── __init__.py
 │       ├── merger.py
 │       └── utilities.py
+├── data/
+│   ├── input/                 # Input CSVs (ignored; keep folder)
+│   ├── output/                # Generated outputs + logs (ignored; keep folder)
+│   └── cache/                 # API caches (ignored; keep folder)
 ├── run.py                     # Entry point
 ├── pyproject.toml            # Project metadata
 ├── requirements.txt          # Python dependencies
-├── credentials.yaml          # API credentials (not in git)
+├── data/credentials.yaml     # API credentials (not in git)
 └── README.md                 # This file
 ```
 

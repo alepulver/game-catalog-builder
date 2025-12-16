@@ -1,0 +1,496 @@
+{
+  "id": 2454,
+  "slug": "doom",
+  "name": "DOOM (2016)",
+  "name_original": "DOOM (2016)",
+  "description": "<p>Return of the classic FPS, Doom (2016) acts as a reboot of the series and brings back the Doomslayer, protagonist of the original Doom games. In order to solve the energy crisis, humanity learned to harvest the energy from Hell, and when something went wrong and a demon invasion has started, it’s up to the player to control the Doomslayer and destroy the evil.</p>\n<p>Doom is a fast-paced game that restores the concept of instant health packs and leaves the player against armies of Hell with no cover, no health regeneration, or help from anyone. After damaging monsters enough, they will start glowing, which will allow players to perform glory kills to restore some health. While exploring the levels, players will come across secrets, collectible items, or upgrade points for the weapons and armor. The single-player campaign silent protagonist has a noticeable personality. He gets visibly annoyed and angry in his actions during expository cutscenes and forces his way through the game. Multiplayer maps gather players in Deathmatch/”king-of-the-hill” type game modes, with all the weapons from the single-player campaign.</p>",
+  "metacritic": 85,
+  "metacritic_platforms": [],
+  "released": "2016-05-12",
+  "tba": false,
+  "updated": "2025-12-03T22:11:39",
+  "background_image": "https://media.rawg.io/media/games/587/587588c64afbff80e6f444eb2e46f9da.jpg",
+  "background_image_additional": "https://media.rawg.io/media/screenshots/d3b/d3b881ae214f9ad14724afc41b49dcea.jpg",
+  "website": "https://bethesda.net/game/doom",
+  "rating": 4.38,
+  "rating_top": 5,
+  "ratings": [
+    {
+      "id": 5,
+      "title": "exceptional",
+      "count": 1891,
+      "percent": 51.99
+    },
+    {
+      "id": 4,
+      "title": "recommended",
+      "count": 1400,
+      "percent": 38.49
+    },
+    {
+      "id": 3,
+      "title": "meh",
+      "count": 261,
+      "percent": 7.18
+    },
+    {
+      "id": 1,
+      "title": "skip",
+      "count": 85,
+      "percent": 2.34
+    }
+  ],
+  "reactions": {
+    "1": 10,
+    "2": 3,
+    "3": 7,
+    "4": 3,
+    "5": 1,
+    "6": 5,
+    "7": 1,
+    "10": 2,
+    "11": 6,
+    "12": 10,
+    "15": 1,
+    "16": 1
+  },
+  "added": 13956,
+  "added_by_status": {
+    "yet": 602,
+    "owned": 8758,
+    "beaten": 2989,
+    "toplay": 527,
+    "dropped": 774,
+    "playing": 306
+  },
+  "playtime": 10,
+  "screenshots_count": 17,
+  "movies_count": 1,
+  "creators_count": 50,
+  "achievements_count": 334,
+  "parent_achievements_count": 71,
+  "reddit_url": "https://www.reddit.com/r/Doom/",
+  "reddit_name": "",
+  "reddit_description": "",
+  "reddit_logo": "",
+  "reddit_count": 972,
+  "twitch_count": 0,
+  "youtube_count": 1000000,
+  "reviews_text_count": 40,
+  "ratings_count": 3596,
+  "suggestions_count": 672,
+  "alternative_names": [],
+  "metacritic_url": "",
+  "parents_count": 0,
+  "additions_count": 1,
+  "game_series_count": 9,
+  "user_game": null,
+  "reviews_count": 3637,
+  "saturated_color": "0f0f0f",
+  "dominant_color": "0f0f0f",
+  "parent_platforms": [
+    {
+      "platform": {
+        "id": 1,
+        "name": "PC",
+        "slug": "pc"
+      }
+    },
+    {
+      "platform": {
+        "id": 2,
+        "name": "PlayStation",
+        "slug": "playstation"
+      }
+    },
+    {
+      "platform": {
+        "id": 3,
+        "name": "Xbox",
+        "slug": "xbox"
+      }
+    },
+    {
+      "platform": {
+        "id": 7,
+        "name": "Nintendo",
+        "slug": "nintendo"
+      }
+    }
+  ],
+  "platforms": [
+    {
+      "platform": {
+        "id": 4,
+        "name": "PC",
+        "slug": "pc",
+        "image": null,
+        "year_end": null,
+        "year_start": null,
+        "games_count": 560082,
+        "image_background": "https://media.rawg.io/media/games/d82/d82990b9c67ba0d2d09d4e6fa88885a7.jpg"
+      },
+      "released_at": "2016-05-12",
+      "requirements": {
+        "minimum": "Minimum:\nOS: Windows7,Windows8,Windows10\nProcessor: Intel cpu i3\nMemory: 4 GB RAM\nGraphics: GTX 650\nStorage: 2 GB available space\nSound Card: Realtek",
+        "recommended": "Recommended:\nOS: Windows7,Windows8,Windows10\nProcessor: Intel cpu i5\nMemory: 8 GB RAM\nGraphics: GTX 770\nStorage: 4 GB available space\nSound Card: Realtek"
+      }
+    },
+    {
+      "platform": {
+        "id": 18,
+        "name": "PlayStation 4",
+        "slug": "playstation4",
+        "image": null,
+        "year_end": null,
+        "year_start": null,
+        "games_count": 6959,
+        "image_background": "https://media.rawg.io/media/games/4cf/4cfc6b7f1850590a4634b08bfab308ab.jpg"
+      },
+      "released_at": "2016-05-13",
+      "requirements": {}
+    },
+    {
+      "platform": {
+        "id": 7,
+        "name": "Nintendo Switch",
+        "slug": "nintendo-switch",
+        "image": null,
+        "year_end": null,
+        "year_start": null,
+        "games_count": 5734,
+        "image_background": "https://media.rawg.io/media/games/618/618c2031a07bbff6b4f611f10b6bcdbc.jpg"
+      },
+      "released_at": "2016-05-13",
+      "requirements": {}
+    },
+    {
+      "platform": {
+        "id": 1,
+        "name": "Xbox One",
+        "slug": "xbox-one",
+        "image": null,
+        "year_end": null,
+        "year_start": null,
+        "games_count": 5720,
+        "image_background": "https://media.rawg.io/media/games/562/562553814dd54e001a541e4ee83a591c.jpg"
+      },
+      "released_at": "2016-05-13",
+      "requirements": {}
+    }
+  ],
+  "stores": [
+    {
+      "id": 1003369,
+      "url": "",
+      "store": {
+        "id": 5,
+        "name": "GOG",
+        "slug": "gog",
+        "domain": "gog.com",
+        "games_count": 7098,
+        "image_background": "https://media.rawg.io/media/games/c80/c80bcf321da44d69b18a06c04d942662.jpg"
+      }
+    },
+    {
+      "id": 355582,
+      "url": "",
+      "store": {
+        "id": 1,
+        "name": "Steam",
+        "slug": "steam",
+        "domain": "store.steampowered.com",
+        "games_count": 122934,
+        "image_background": "https://media.rawg.io/media/games/7fa/7fa0b586293c5861ee32490e953a4996.jpg"
+      }
+    },
+    {
+      "id": 2571,
+      "url": "",
+      "store": {
+        "id": 3,
+        "name": "PlayStation Store",
+        "slug": "playstation-store",
+        "domain": "store.playstation.com",
+        "games_count": 8062,
+        "image_background": "https://media.rawg.io/media/games/4cf/4cfc6b7f1850590a4634b08bfab308ab.jpg"
+      }
+    },
+    {
+      "id": 38659,
+      "url": "",
+      "store": {
+        "id": 6,
+        "name": "Nintendo Store",
+        "slug": "nintendo",
+        "domain": "nintendo.com",
+        "games_count": 9144,
+        "image_background": "https://media.rawg.io/media/games/d46/d46373f39458670305704ef089387520.jpg"
+      }
+    },
+    {
+      "id": 8223,
+      "url": "",
+      "store": {
+        "id": 2,
+        "name": "Xbox Store",
+        "slug": "xbox-store",
+        "domain": "microsoft.com",
+        "games_count": 4931,
+        "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"
+      }
+    }
+  ],
+  "developers": [
+    {
+      "id": 4,
+      "name": "Bethesda Softworks",
+      "slug": "bethesda-softworks",
+      "games_count": 63,
+      "image_background": "https://media.rawg.io/media/games/596/596a48ef3b62b63b4cc59633e28be903.jpg"
+    },
+    {
+      "id": 343,
+      "name": "id Software",
+      "slug": "id-software",
+      "games_count": 90,
+      "image_background": "https://media.rawg.io/media/games/38a/38af969459ad6e5de116ec8a4a84218c.jpg"
+    },
+    {
+      "id": 28246,
+      "name": "Panic Button",
+      "slug": "panic-button",
+      "games_count": 15,
+      "image_background": "https://media.rawg.io/media/screenshots/81b/81be6ccabc6d2cb81803050e08b8faf0.jpg"
+    },
+    {
+      "id": 8770,
+      "name": "Tango Gameworks",
+      "slug": "tango-gameworks",
+      "games_count": 11,
+      "image_background": "https://media.rawg.io/media/games/157/1570121f5c4d240504f1eae5c3854733.jpg"
+    },
+    {
+      "id": 7693,
+      "name": "Escalation Studios",
+      "slug": "escalation-studios",
+      "games_count": 8,
+      "image_background": "https://media.rawg.io/media/games/8a7/8a75028028592f9323d1e6e86668bb91.jpg"
+    },
+    {
+      "id": 14037,
+      "name": "Certain Affinity",
+      "slug": "certain-affinity",
+      "games_count": 4,
+      "image_background": "https://media.rawg.io/media/screenshots/b00/b0007d5ef7b77844d4e4501abc93475c.jpg"
+    },
+    {
+      "id": 15466,
+      "name": "Digital Domain",
+      "slug": "digital-domain",
+      "games_count": 5,
+      "image_background": "https://media.rawg.io/media/screenshots/8b2/8b2d2a6e73f53ac6e9610ebb5d710fd7.jpg"
+    },
+    {
+      "id": 19800,
+      "name": "BattleCry Studios",
+      "slug": "battlecry-studios",
+      "games_count": 2,
+      "image_background": "https://media.rawg.io/media/screenshots/475/4751a16ab53098e55dc2958a4c0a8fac.jpg"
+    }
+  ],
+  "genres": [
+    {
+      "id": 4,
+      "name": "Action",
+      "slug": "action",
+      "games_count": 191319,
+      "image_background": "https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"
+    },
+    {
+      "id": 2,
+      "name": "Shooter",
+      "slug": "shooter",
+      "games_count": 59608,
+      "image_background": "https://media.rawg.io/media/games/26d/26d4437715bee60138dab4a7c8c59c92.jpg"
+    }
+  ],
+  "tags": [
+    {
+      "id": 31,
+      "name": "Singleplayer",
+      "slug": "singleplayer",
+      "language": "eng",
+      "games_count": 250602,
+      "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b124392ee50317b99.jpg"
+    },
+    {
+      "id": 7,
+      "name": "Multiplayer",
+      "slug": "multiplayer",
+      "language": "eng",
+      "games_count": 42504,
+      "image_background": "https://media.rawg.io/media/games/198/1988a337305e008b41d7f536ce9b73f6.jpg"
+    },
+    {
+      "id": 13,
+      "name": "Atmospheric",
+      "slug": "atmospheric",
+      "language": "eng",
+      "games_count": 39654,
+      "image_background": "https://media.rawg.io/media/games/b45/b45575f34285f2c4479c9a5f719d972e.jpg"
+    },
+    {
+      "id": 42,
+      "name": "Great Soundtrack",
+      "slug": "great-soundtrack",
+      "language": "eng",
+      "games_count": 3451,
+      "image_background": "https://media.rawg.io/media/games/ee3/ee3e10193aafc3230ba1cae426967d10.jpg"
+    },
+    {
+      "id": 18,
+      "name": "Co-op",
+      "slug": "co-op",
+      "language": "eng",
+      "games_count": 14362,
+      "image_background": "https://media.rawg.io/media/games/da1/da1b267764d77221f07a4386b6548e5a.jpg"
+    },
+    {
+      "id": 411,
+      "name": "cooperative",
+      "slug": "cooperative",
+      "language": "eng",
+      "games_count": 6572,
+      "image_background": "https://media.rawg.io/media/games/736/73619bd336c894d6941d926bfd563946.jpg"
+    },
+    {
+      "id": 8,
+      "name": "First-Person",
+      "slug": "first-person",
+      "language": "eng",
+      "games_count": 37350,
+      "image_background": "https://media.rawg.io/media/games/6c5/6c55e22185876626881b76c11922b073.jpg"
+    },
+    {
+      "id": 32,
+      "name": "Sci-fi",
+      "slug": "sci-fi",
+      "language": "eng",
+      "games_count": 22045,
+      "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b124392ee50317b99.jpg"
+    },
+    {
+      "id": 40845,
+      "name": "Partial Controller Support",
+      "slug": "partial-controller-support",
+      "language": "eng",
+      "games_count": 13980,
+      "image_background": "https://media.rawg.io/media/games/960/960b601d9541cec776c5fa42a00bf6c4.jpg"
+    },
+    {
+      "id": 16,
+      "name": "Horror",
+      "slug": "horror",
+      "language": "eng",
+      "games_count": 49119,
+      "image_background": "https://media.rawg.io/media/games/157/15742f2f67eacff546738e1ab5c19d20.jpg"
+    },
+    {
+      "id": 30,
+      "name": "FPS",
+      "slug": "fps",
+      "language": "eng",
+      "games_count": 14969,
+      "image_background": "https://media.rawg.io/media/games/157/15742f2f67eacff546738e1ab5c19d20.jpg"
+    },
+    {
+      "id": 26,
+      "name": "Gore",
+      "slug": "gore",
+      "language": "eng",
+      "games_count": 6658,
+      "image_background": "https://media.rawg.io/media/games/8d4/8d46786ca86b1d95f3dc7e700e2dc4dd.jpg"
+    },
+    {
+      "id": 49,
+      "name": "Difficult",
+      "slug": "difficult",
+      "language": "eng",
+      "games_count": 14295,
+      "image_background": "https://media.rawg.io/media/games/f90/f90ee1a4239247a822771c40488e68c5.jpg"
+    },
+    {
+      "id": 193,
+      "name": "Classic",
+      "slug": "classic",
+      "language": "eng",
+      "games_count": 1838,
+      "image_background": "https://media.rawg.io/media/games/174/174fabfca02d5730531bab2153a7dfcb.jpg"
+    },
+    {
+      "id": 63,
+      "name": "Zombies",
+      "slug": "zombies",
+      "language": "eng",
+      "games_count": 11205,
+      "image_background": "https://media.rawg.io/media/games/8d6/8d69eb6c32ed6acfd75f82d532144993.jpg"
+    },
+    {
+      "id": 120,
+      "name": "Memes",
+      "slug": "memes",
+      "language": "eng",
+      "games_count": 2183,
+      "image_background": "https://media.rawg.io/media/games/ffe/ffed87105b14f5beff72ff44a7793fd5.jpg"
+    },
+    {
+      "id": 131,
+      "name": "Fast-Paced",
+      "slug": "fast-paced",
+      "language": "eng",
+      "games_count": 10818,
+      "image_background": "https://media.rawg.io/media/games/e04/e04963f3ac4c4fa83a1dc0b9231e50db.jpg"
+    },
+    {
+      "id": 271,
+      "name": "Remake",
+      "slug": "remake",
+      "language": "eng",
+      "games_count": 1738,
+      "image_background": "https://media.rawg.io/media/games/a50/a505bccdcfdc79970a93574c747f6e0d.jpg"
+    },
+    {
+      "id": 270,
+      "name": "Blood",
+      "slug": "blood",
+      "language": "eng",
+      "games_count": 2155,
+      "image_background": "https://media.rawg.io/media/games/ae4/ae4a8087739c065fb6ddda1308820ece.jpg"
+    },
+    {
+      "id": 187,
+      "name": "Demons",
+      "slug": "demons",
+      "language": "eng",
+      "games_count": 3470,
+      "image_background": "https://media.rawg.io/media/screenshots/4ef/4efd33ac1ca2e3799cda7ff379f03708.jpg"
+    }
+  ],
+  "publishers": [
+    {
+      "id": 339,
+      "name": "Bethesda Softworks",
+      "slug": "bethesda-softworks",
+      "games_count": 189,
+      "image_background": "https://media.rawg.io/media/games/5a4/5a4e70bb8a862829dbaa398aa5f66afc.jpg"
+    }
+  ],
+  "esrb_rating": {
+    "id": 4,
+    "name": "Mature",
+    "slug": "mature"
+  },
+  "clip": null,
+  "description_raw": "Return of the classic FPS, Doom (2016) acts as a reboot of the series and brings back the Doomslayer, protagonist of the original Doom games. In order to solve the energy crisis, humanity learned to harvest the energy from Hell, and when something went wrong and a demon invasion has started, it’s up to the player to control the Doomslayer and destroy the evil.\n\nDoom is a fast-paced game that restores the concept of instant health packs and leaves the player against armies of Hell with no cover, no health regeneration, or help from anyone. After damaging monsters enough, they will start glowing, which will allow players to perform glory kills to restore some health. While exploring the levels, players will come across secrets, collectible items, or upgrade points for the weapons and armor. The single-player campaign silent protagonist has a noticeable personality. He gets visibly annoyed and angry in his actions during expository cutscenes and forces his way through the game. Multiplayer maps gather players in Deathmatch/”king-of-the-hill” type game modes, with all the weapons from the single-player campaign."
+}

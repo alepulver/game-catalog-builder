@@ -1,0 +1,252 @@
+[
+  {
+    "id": 7351,
+    "aggregated_rating": 86.96875,
+    "aggregated_rating_count": 28,
+    "dlcs": [
+      25571,
+      26558,
+      22431
+    ],
+    "external_games": [
+      {
+        "id": 1934827,
+        "uid": "B01CTWZEDE"
+      },
+      {
+        "id": 138274,
+        "uid": "20654"
+      },
+      {
+        "id": 1930257,
+        "uid": "B00M3D8IYM"
+      },
+      {
+        "id": 1930098,
+        "uid": "B00M3D8IPQ"
+      },
+      {
+        "id": 1932010,
+        "uid": "B00M3D8ISS"
+      },
+      {
+        "id": 210461,
+        "uid": "C3QH42WRGM3R"
+      },
+      {
+        "id": 3002571,
+        "uid": "1390579243"
+      },
+      {
+        "id": 245203,
+        "uid": "6715"
+      },
+      {
+        "id": 1937369,
+        "uid": "B00ZF3255A"
+      },
+      {
+        "id": 189465,
+        "uid": "UCkEMDJYfbI3rW0cqQMUaoLQ"
+      },
+      {
+        "id": 2162825,
+        "uid": "66acd000-77fe-1000-9115-d80258410824"
+      },
+      {
+        "id": 2452790,
+        "uid": "C3QH42WRGM3R"
+      },
+      {
+        "id": 2176160,
+        "uid": "201101"
+      },
+      {
+        "id": 8104,
+        "uid": "379720"
+      }
+    ],
+    "first_release_date": 1463011200,
+    "franchises": [
+      798
+    ],
+    "game_engines": [
+      172
+    ],
+    "game_modes": [
+      1,
+      2,
+      3
+    ],
+    "genres": [
+      5,
+      9
+    ],
+    "involved_companies": [
+      198290,
+      198292,
+      198294,
+      198295,
+      198288,
+      198289,
+      198293,
+      198291
+    ],
+    "keywords": [
+      3,
+      129,
+      175,
+      274,
+      558,
+      578,
+      905,
+      923,
+      977,
+      1069,
+      1158,
+      1293,
+      1299,
+      1308,
+      1333,
+      1898,
+      1986,
+      2153,
+      2199,
+      2498,
+      2543,
+      2746,
+      3203,
+      3486,
+      3831,
+      4004,
+      4134,
+      4150,
+      4213,
+      4245,
+      4282,
+      4345,
+      4351,
+      4353,
+      4357,
+      4397,
+      4465,
+      4467,
+      4473,
+      4484,
+      4544,
+      4580,
+      4586,
+      4614,
+      4621,
+      4623,
+      4637,
+      4724,
+      4777,
+      4781,
+      4871,
+      4890,
+      4891,
+      4918,
+      4989,
+      4991,
+      4992,
+      4993,
+      4998,
+      5029,
+      5105,
+      5164,
+      5175,
+      5254,
+      5257,
+      5264,
+      5345,
+      5379,
+      5387,
+      5408,
+      5425,
+      5523,
+      5599,
+      5638,
+      6003,
+      6137,
+      6370,
+      6493,
+      6620,
+      6621,
+      6655,
+      6735,
+      6828,
+      7062,
+      7315,
+      7397,
+      7473,
+      7603,
+      10048,
+      10919,
+      11827,
+      12556,
+      14051,
+      14063,
+      14076,
+      14079,
+      16826,
+      23933,
+      39005,
+      39006,
+      39049
+    ],
+    "name": "Doom",
+    "platforms": [
+      48,
+      6,
+      49
+    ],
+    "player_perspectives": [
+      1
+    ],
+    "rating": 85.30925725648731,
+    "rating_count": 1794,
+    "similar_games": [
+      1006,
+      19531,
+      2031,
+      571,
+      533,
+      9498,
+      3188,
+      9727,
+      7342,
+      231
+    ],
+    "slug": "doom--2",
+    "storyline": "You’ve come here for a reason. The Union Aerospace Corporation’s massive research facility on Mars is overwhelmed by fierce and powerful demons, and only one person stands between their world and ours. As the lone DOOM Marine, you’ve been activated to do one thing – kill them all.",
+    "summary": "Developed by id software, the studio that pioneered the first-person shooter genre and created multiplayer Deathmatch, Doom returns as a brutally fun and challenging modern-day shooter experience. Relentless demons, impossibly destructive guns, and fast, fluid movement provide the foundation for intense, first-person combat – whether you’re obliterating demon hordes through the depths of Hell in the single-player campaign, or competing against your friends in numerous multiplayer modes. Expand your gameplay experience using Doom SnapMap game editor to easily create, play, and share your content with the world.",
+    "themes": [
+      1,
+      18,
+      19
+    ],
+    "total_rating": 86.13900362824366,
+    "total_rating_count": 1822,
+    "websites": [
+      61572,
+      799146,
+      730848,
+      904973,
+      904974,
+      904975,
+      904976,
+      799147,
+      61571,
+      5601,
+      43279,
+      51206,
+      332473,
+      43278,
+      61570
+    ],
+    "ports": [
+      76217
+    ]
+  }
+]

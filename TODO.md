@@ -1,8 +1,6 @@
-- Run providers in parallel (keeping individual limits)
-- Remove year from user collections as they don't show up in IGDB
-- Add a doc reference with examples (and perhaps configuration) of data available from different providers in JSON
-- Make limit adjustments part of credentials.yaml and rename to general configuration file
-- Separate the process of obtaining and confirming provider IDs for each game, from data fetching process (store the ID only next to user data, then join)
-- Make user data (input) and output columns configurable
+
+- Create a cross-check mechahism to verify all providers fetched the same title
+- Separate the process of obtaining and confirming provider IDs for each game, from data fetching process (store the ID only next to user data, then join); show matching score to spot games not found
+- Make user data (input) and output columns configurable; for the latter, keep a schema or flat list of available data per provider with description (so they can be mapped to the output)
 - Keep working on derived metrics with ChatGPT (tags, estimated popularity, users, production level, replayability, mods, "must play classic", etc)
-- Use local directory or home dot directory for cache and partial information, not hardcoded
+- Investigate localization (how to retrieve results in other languages if available); would impact caching

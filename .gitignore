@@ -1,12 +1,10 @@
-# Credentials
-credentials.yaml
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+.venv/
 venv/
 env/
 ENV/
@@ -18,13 +16,13 @@ ENV/
 *.swo
 *~
 
-# Data files
-*.csv
-*.json
-data/
-output/
-temp/
+# Data files (generated/local)
+/data/**
+!/data/
+!/data/**/
+!/data/**/.gitkeep
+!/data/credentials.example.yaml
+/output/
 
 # Old modules (replaced by package structure)
 modules/
-

@@ -1,0 +1,185 @@
+[
+  {
+    "term": "Doom (2016)",
+    "response": {
+      "total": 0,
+      "items": []
+    }
+  },
+  {
+    "term": "Doom",
+    "response": {
+      "total": 10,
+      "items": [
+        {
+          "type": "app",
+          "name": "DOOM: The Dark Ages",
+          "id": 3017860,
+          "price": {
+            "currency": "USD",
+            "initial": 6999,
+            "final": 6999
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3017860/4b39d554fb3b3a48ff02e2f05bba7186a58052ce/capsule_231x87.jpg?t=1764606093",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false,
+          "controller_support": "full"
+        },
+        {
+          "type": "app",
+          "name": "DOOM Eternal",
+          "id": 782330,
+          "price": {
+            "currency": "USD",
+            "initial": 3999,
+            "final": 3999
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/782330/capsule_231x87.jpg?t=1755109910",
+          "metascore": "88",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false
+        },
+        {
+          "type": "app",
+          "name": "DOOM",
+          "id": 379720,
+          "price": {
+            "currency": "USD",
+            "initial": 1999,
+            "final": 1999
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/379720/capsule_231x87.jpg?t=1750784856",
+          "metascore": "85",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false
+        },
+        {
+          "type": "app",
+          "name": "DOOM + DOOM II",
+          "id": 2280,
+          "price": {
+            "currency": "USD",
+            "initial": 999,
+            "final": 999
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2280/capsule_231x87.jpg?t=1750785073",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false,
+          "controller_support": "full"
+        },
+        {
+          "type": "app",
+          "name": "Banana of Doom",
+          "id": 3898830,
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3898830/fb0757bf60251755b361158c5dccc0c2e646539b/capsule_231x87.jpg?t=1765257305",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": true,
+            "linux": true
+          },
+          "streamingvideo": false
+        },
+        {
+          "type": "app",
+          "name": "Bio Goddess : Doomsday Begins",
+          "id": 2806120,
+          "price": {
+            "currency": "USD",
+            "initial": 2399,
+            "final": 2399
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2806120/56ea1ec4a7d70c68a3121d3b9e5c2367054295a2/capsule_231x87.jpg?t=1765262633",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false
+        },
+        {
+          "type": "app",
+          "name": "DOOM 3",
+          "id": 208200,
+          "price": {
+            "currency": "USD",
+            "initial": 999,
+            "final": 999
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/208200/capsule_231x87.jpg?t=1664292843",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false
+        },
+        {
+          "type": "app",
+          "name": "Doomsday: Last Survivors",
+          "id": 2439510,
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2439510/capsule_231x87.jpg?t=1760020574",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false
+        },
+        {
+          "type": "app",
+          "name": "DOOM 64",
+          "id": 1148590,
+          "price": {
+            "currency": "USD",
+            "initial": 499,
+            "final": 499
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1148590/capsule_231x87.jpg?t=1750784988",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false
+        },
+        {
+          "type": "app",
+          "name": "DOOM: The Dark Ages - Premium Upgrade",
+          "id": 3698350,
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3698350/536abfc362260c807f8fcca04846e392579ade6a/capsule_231x87.jpg?t=1761681035",
+          "metascore": "",
+          "platforms": {
+            "windows": true,
+            "mac": false,
+            "linux": false
+          },
+          "streamingvideo": false,
+          "controller_support": "full"
+        }
+      ]
+    }
+  }
+]

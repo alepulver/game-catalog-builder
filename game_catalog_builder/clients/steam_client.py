@@ -25,8 +25,45 @@ class SteamClient:
         min_interval_s: float = 1.0,
     ):
         self.cache_path = Path(cache_path)
-        self.cache: Dict[str, Any] = load_json_cache(self.cache_path)
+        self._by_id: Dict[str, Any] = {}
+        self._by_name: Dict[str, Optional[str]] = {}
+        self._details_by_id: Dict[str, Any] = {}
+        self._load_cache(load_json_cache(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
+
+    def _load_cache(self, raw: Any) -> None:
+        if not isinstance(raw, dict) or not raw:
+            return
+
+        by_id = raw.get("by_id")
+        by_name = raw.get("by_name")
+        by_details = raw.get("by_details")
+        if isinstance(by_id, dict) and isinstance(by_name, dict):
+            self._by_id = {str(k): v for k, v in by_id.items()}
+            self._by_name = {str(k): (str(v) if v else None) for k, v in by_name.items()}
+            if isinstance(by_details, dict):
+                self._details_by_id = {str(k): v for k, v in by_details.items()}
+            return
+
+        # Backward compatibility: old caches stored name_key -> best item / None.
+        for name_key, value in raw.items():
+            if value is None:
+                self._by_name[str(name_key)] = None
+                continue
+            if not isinstance(value, dict):
+                continue
+            appid = value.get("id")
+            if appid is None:
+                continue
+            appid_str = str(appid)
+            self._by_id[appid_str] = value
+            self._by_name[str(name_key)] = appid_str
+
+    def _save_cache(self) -> None:
+        save_json_cache(
+            {"by_id": self._by_id, "by_name": self._by_name, "by_details": self._details_by_id},
+            self.cache_path,
+        )
 
     # -------------------------------------------------
     # Search AppID by name
@@ -34,8 +71,11 @@ class SteamClient:
     def search_appid(self, game_name: str) -> Optional[Dict[str, Any]]:
         key = normalize_game_name(game_name)
 
-        if key in self.cache:
-            return self.cache[key]
+        if key in self._by_name:
+            appid = self._by_name[key]
+            if not appid:
+                return None
+            return self._by_id.get(str(appid))
 
         def _request():
             self.ratelimiter.wait()
@@ -55,8 +95,8 @@ class SteamClient:
         if not data or "items" not in data or not data["items"]:
             # No results from API - log warning
             logging.warning(f"Not found on Steam: '{game_name}'. No results from API.")
-            self.cache[key] = None
-            save_json_cache(self.cache, self.cache_path)
+            self._by_name[key] = None
+            self._save_cache()
             return None
 
         best, score, top_matches = pick_best_match(game_name, data["items"], name_key="name")
@@ -70,8 +110,8 @@ class SteamClient:
                 )
             else:
                 logging.warning(f"Not found on Steam: '{game_name}'. No matches found.")
-            self.cache[key] = None
-            save_json_cache(self.cache, self.cache_path)
+            self._by_name[key] = None
+            self._save_cache()
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
@@ -82,14 +122,22 @@ class SteamClient:
                 f"alternatives: {', '.join(top_names)}"
             )
 
-        self.cache[key] = best
-        save_json_cache(self.cache, self.cache_path)
+        appid = best.get("id")
+        if appid is not None:
+            appid_str = str(appid)
+            self._by_id[appid_str] = best
+            self._by_name[key] = appid_str
+            self._save_cache()
         return best
 
     # -------------------------------------------------
     # Game details
     # -------------------------------------------------
     def get_app_details(self, appid: int) -> Optional[Dict[str, Any]]:
+        cached = self._details_by_id.get(str(appid))
+        if isinstance(cached, dict):
+            return cached
+
         def _request():
             self.ratelimiter.wait()
             r = requests.get(
@@ -108,7 +156,11 @@ class SteamClient:
         if not entry.get("success"):
             return None
 
-        return entry.get("data")
+        details = entry.get("data")
+        if isinstance(details, dict):
+            self._details_by_id[str(appid)] = details
+            self._save_cache()
+        return details
 
     # -------------------------------------------------
     # Metadata extraction
