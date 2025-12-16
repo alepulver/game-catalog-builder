@@ -127,8 +127,8 @@
         "image": null,
         "year_end": null,
         "year_start": null,
-        "games_count": 560082,
-        "image_background": "https://media.rawg.io/media/games/d82/d82990b9c67ba0d2d09d4e6fa88885a7.jpg"
+        "games_count": 560107,
+        "image_background": "https://media.rawg.io/media/games/6fc/6fcf4cd3b17c288821388e6085bb0fc9.jpg"
       },
       "released_at": "2016-05-12",
       "requirements": {
@@ -144,8 +144,8 @@
         "image": null,
         "year_end": null,
         "year_start": null,
-        "games_count": 6959,
-        "image_background": "https://media.rawg.io/media/games/4cf/4cfc6b7f1850590a4634b08bfab308ab.jpg"
+        "games_count": 6963,
+        "image_background": "https://media.rawg.io/media/games/be0/be01c3d7d8795a45615da139322ca080.jpg"
       },
       "released_at": "2016-05-13",
       "requirements": {}
@@ -158,8 +158,8 @@
         "image": null,
         "year_end": null,
         "year_start": null,
-        "games_count": 5734,
-        "image_background": "https://media.rawg.io/media/games/618/618c2031a07bbff6b4f611f10b6bcdbc.jpg"
+        "games_count": 5739,
+        "image_background": "https://media.rawg.io/media/games/8cc/8cce7c0e99dcc43d66c8efd42f9d03e3.jpg"
       },
       "released_at": "2016-05-13",
       "requirements": {}
@@ -172,8 +172,8 @@
         "image": null,
         "year_end": null,
         "year_start": null,
-        "games_count": 5720,
-        "image_background": "https://media.rawg.io/media/games/562/562553814dd54e001a541e4ee83a591c.jpg"
+        "games_count": 5722,
+        "image_background": "https://media.rawg.io/media/games/490/49016e06ae2103881ff6373248843069.jpg"
       },
       "released_at": "2016-05-13",
       "requirements": {}
@@ -188,8 +188,8 @@
         "name": "GOG",
         "slug": "gog",
         "domain": "gog.com",
-        "games_count": 7098,
-        "image_background": "https://media.rawg.io/media/games/c80/c80bcf321da44d69b18a06c04d942662.jpg"
+        "games_count": 7113,
+        "image_background": "https://media.rawg.io/media/games/f6b/f6bed028b02369d4cab548f4f9337e81.jpg"
       }
     },
     {
@@ -200,8 +200,8 @@
         "name": "Steam",
         "slug": "steam",
         "domain": "store.steampowered.com",
-        "games_count": 122934,
-        "image_background": "https://media.rawg.io/media/games/7fa/7fa0b586293c5861ee32490e953a4996.jpg"
+        "games_count": 122944,
+        "image_background": "https://media.rawg.io/media/games/7cf/7cfc9220b401b7a300e409e539c9afd5.jpg"
       }
     },
     {
@@ -212,8 +212,8 @@
         "name": "PlayStation Store",
         "slug": "playstation-store",
         "domain": "store.playstation.com",
-        "games_count": 8062,
-        "image_background": "https://media.rawg.io/media/games/4cf/4cfc6b7f1850590a4634b08bfab308ab.jpg"
+        "games_count": 8064,
+        "image_background": "https://media.rawg.io/media/games/f87/f87457e8347484033cb34cde6101d08d.jpg"
       }
     },
     {
@@ -224,8 +224,8 @@
         "name": "Nintendo Store",
         "slug": "nintendo",
         "domain": "nintendo.com",
-        "games_count": 9144,
-        "image_background": "https://media.rawg.io/media/games/d46/d46373f39458670305704ef089387520.jpg"
+        "games_count": 9145,
+        "image_background": "https://media.rawg.io/media/games/1f4/1f47a270b8f241e4676b14d39ec620f7.jpg"
       }
     },
     {
@@ -236,8 +236,8 @@
         "name": "Xbox Store",
         "slug": "xbox-store",
         "domain": "microsoft.com",
-        "games_count": 4931,
-        "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"
+        "games_count": 4932,
+        "image_background": "https://media.rawg.io/media/games/da1/da1b267764d77221f07a4386b6548e5a.jpg"
       }
     }
   ],
@@ -304,14 +304,14 @@
       "id": 4,
       "name": "Action",
       "slug": "action",
-      "games_count": 191319,
-      "image_background": "https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"
+      "games_count": 191338,
+      "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"
     },
     {
       "id": 2,
       "name": "Shooter",
       "slug": "shooter",
-      "games_count": 59608,
+      "games_count": 59610,
       "image_background": "https://media.rawg.io/media/games/26d/26d4437715bee60138dab4a7c8c59c92.jpg"
     }
   ],
@@ -321,8 +321,8 @@
       "name": "Singleplayer",
       "slug": "singleplayer",
       "language": "eng",
-      "games_count": 250602,
-      "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b124392ee50317b99.jpg"
+      "games_count": 250603,
+      "image_background": "https://media.rawg.io/media/games/b45/b45575f34285f2c4479c9a5f719d972e.jpg"
     },
     {
       "id": 7,
@@ -330,15 +330,15 @@
       "slug": "multiplayer",
       "language": "eng",
       "games_count": 42504,
-      "image_background": "https://media.rawg.io/media/games/198/1988a337305e008b41d7f536ce9b73f6.jpg"
+      "image_background": "https://media.rawg.io/media/games/b8c/b8c243eaa0fbac8115e0cdccac3f91dc.jpg"
     },
     {
       "id": 13,
       "name": "Atmospheric",
       "slug": "atmospheric",
       "language": "eng",
-      "games_count": 39654,
-      "image_background": "https://media.rawg.io/media/games/b45/b45575f34285f2c4479c9a5f719d972e.jpg"
+      "games_count": 39656,
+      "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"
     },
     {
       "id": 42,
@@ -377,8 +377,8 @@
       "name": "Sci-fi",
       "slug": "sci-fi",
       "language": "eng",
-      "games_count": 22045,
-      "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b124392ee50317b99.jpg"
+      "games_count": 22046,
+      "image_background": "https://media.rawg.io/media/games/198/1988a337305e008b41d7f536ce9b73f6.jpg"
     },
     {
       "id": 40845,
@@ -386,15 +386,15 @@
       "slug": "partial-controller-support",
       "language": "eng",
       "games_count": 13980,
-      "image_background": "https://media.rawg.io/media/games/960/960b601d9541cec776c5fa42a00bf6c4.jpg"
+      "image_background": "https://media.rawg.io/media/games/15c/15c95a4915f88a3e89c821526afe05fc.jpg"
     },
     {
       "id": 16,
       "name": "Horror",
       "slug": "horror",
       "language": "eng",
-      "games_count": 49119,
-      "image_background": "https://media.rawg.io/media/games/157/15742f2f67eacff546738e1ab5c19d20.jpg"
+      "games_count": 49120,
+      "image_background": "https://media.rawg.io/media/games/63f/63f0e68688cad279ed38cde931dbfcdb.jpg"
     },
     {
       "id": 30,

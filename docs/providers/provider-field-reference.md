@@ -1,6 +1,6 @@
 # Provider field reference
 
-This reference is generated from `docs/provider-field-catalog.yaml` and enriched with observed examples from `docs/examples/` when available.
+This reference is generated from `docs/providers/provider-field-catalog.yaml` and enriched with observed examples from `docs/examples/` when available.
 
 Legend:
 - **Observed types/example**: derived from example JSON captures; may be empty if not present in current examples.

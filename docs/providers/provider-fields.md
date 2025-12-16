@@ -4,7 +4,7 @@ This document lists the main fields obtainable from each provider endpoint used 
 
 It is intentionally “practical” rather than an exhaustive copy of each provider’s full API schema. For complete schemas, refer to provider documentation.
 
-For a generated “catalog + observed examples” reference, see `docs/provider-field-reference.md` (generated from `docs/provider-field-catalog.yaml`).
+For a generated “catalog + observed examples” reference, see `docs/providers/provider-field-reference.md` (generated from `docs/providers/provider-field-catalog.yaml`).
 
 ## Conventions
 
@@ -153,3 +153,4 @@ Current output columns (from the best match object):
 Other useful attributes commonly present:
 
 - `profile_dev`, `profile_platform`, `release_world`, `rating` (varies by library version/data)
+

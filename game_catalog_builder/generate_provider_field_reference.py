@@ -216,7 +216,7 @@ def generate_markdown(catalog: dict[str, Any], examples_root: Path) -> str:
     lines: list[str] = []
     lines.append("# Provider field reference")
     lines.append("")
-    lines.append("This reference is generated from `docs/provider-field-catalog.yaml` and enriched with observed examples from `docs/examples/` when available.")
+    lines.append("This reference is generated from `docs/providers/provider-field-catalog.yaml` and enriched with observed examples from `docs/examples/` when available.")
     lines.append("")
     lines.append("Legend:")
     lines.append("- **Observed types/example**: derived from example JSON captures; may be empty if not present in current examples.")
@@ -293,9 +293,9 @@ def generate_markdown(catalog: dict[str, Any], examples_root: Path) -> str:
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
-    catalog_path = repo_root / "docs" / "provider-field-catalog.yaml"
+    catalog_path = repo_root / "docs" / "providers" / "provider-field-catalog.yaml"
     examples_root = repo_root / "docs" / "examples"
-    out_path = repo_root / "docs" / "provider-field-reference.md"
+    out_path = repo_root / "docs" / "providers" / "provider-field-reference.md"
 
     if not catalog_path.exists():
         raise SystemExit(f"catalog not found: {catalog_path}")

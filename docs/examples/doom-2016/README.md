@@ -9,7 +9,7 @@ python -m game_catalog_builder.fetch_provider_examples "Doom (2016)"
 Quick pointers:
 - RAWG uses a numeric game id (see `rawg.best.json`) and a separate `rawg.detail.json` document.
 - Steam uses an appid (see `steam.best.json` → `steam.appdetails.json`), and SteamSpy uses the same appid.
-- IGDB uses a numeric id (see `igdb.best.json`) and includes `first_release_date` to disambiguate 1993 vs 2016.
+- IGDB uses a numeric id (see `igdb.best.json`) and includes `first_release_date` to disambiguate 1993 vs 2016. See `igdb.games.expanded_single.json` for the single-call expanded fields shape used by the enrichment client.
 
 Selected identifiers (for joining the same row):
 - RAWG: id `2454` (released 2016)

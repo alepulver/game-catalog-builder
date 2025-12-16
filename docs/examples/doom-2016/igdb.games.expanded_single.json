@@ -1,0 +1,149 @@
+[
+  {
+    "id": 7351,
+    "external_games": [
+      {
+        "id": 1934827,
+        "uid": "B01CTWZEDE",
+        "external_game_source": 20
+      },
+      {
+        "id": 2452790,
+        "uid": "C3QH42WRGM3R",
+        "external_game_source": 54
+      },
+      {
+        "id": 138274,
+        "uid": "20654",
+        "external_game_source": 3
+      },
+      {
+        "id": 1930257,
+        "uid": "B00M3D8IYM",
+        "external_game_source": 20
+      },
+      {
+        "id": 1930098,
+        "uid": "B00M3D8IPQ",
+        "external_game_source": 20
+      },
+      {
+        "id": 1932010,
+        "uid": "B00M3D8ISS",
+        "external_game_source": 20
+      },
+      {
+        "id": 210461,
+        "uid": "C3QH42WRGM3R",
+        "external_game_source": 11
+      },
+      {
+        "id": 3002571,
+        "uid": "1390579243",
+        "external_game_source": 5
+      },
+      {
+        "id": 245203,
+        "uid": "6715",
+        "external_game_source": 14
+      },
+      {
+        "id": 1937369,
+        "uid": "B00ZF3255A",
+        "external_game_source": 20
+      },
+      {
+        "id": 189465,
+        "uid": "UCkEMDJYfbI3rW0cqQMUaoLQ",
+        "external_game_source": 10
+      },
+      {
+        "id": 2162825,
+        "uid": "66acd000-77fe-1000-9115-d80258410824",
+        "external_game_source": 31
+      },
+      {
+        "id": 2176160,
+        "uid": "201101",
+        "external_game_source": 36
+      },
+      {
+        "id": 8104,
+        "uid": "379720",
+        "external_game_source": 1
+      }
+    ],
+    "first_release_date": 1463011200,
+    "franchises": [
+      {
+        "id": 798,
+        "name": "Doom"
+      }
+    ],
+    "game_engines": [
+      {
+        "id": 172,
+        "name": "id Tech 6"
+      }
+    ],
+    "game_modes": [
+      {
+        "id": 1,
+        "name": "Single player"
+      },
+      {
+        "id": 2,
+        "name": "Multiplayer"
+      },
+      {
+        "id": 3,
+        "name": "Co-operative"
+      }
+    ],
+    "genres": [
+      {
+        "id": 5,
+        "name": "Shooter"
+      },
+      {
+        "id": 9,
+        "name": "Puzzle"
+      }
+    ],
+    "name": "Doom",
+    "platforms": [
+      {
+        "id": 48,
+        "name": "PlayStation 4"
+      },
+      {
+        "id": 6,
+        "name": "PC (Microsoft Windows)"
+      },
+      {
+        "id": 49,
+        "name": "Xbox One"
+      }
+    ],
+    "player_perspectives": [
+      {
+        "id": 1,
+        "name": "First person"
+      }
+    ],
+    "themes": [
+      {
+        "id": 1,
+        "name": "Action"
+      },
+      {
+        "id": 18,
+        "name": "Science fiction"
+      },
+      {
+        "id": 19,
+        "name": "Horror"
+      }
+    ]
+  }
+]

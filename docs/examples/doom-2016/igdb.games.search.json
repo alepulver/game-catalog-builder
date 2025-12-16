@@ -11,59 +11,73 @@
     "external_games": [
       {
         "id": 1934827,
-        "uid": "B01CTWZEDE"
-      },
-      {
-        "id": 138274,
-        "uid": "20654"
-      },
-      {
-        "id": 1930257,
-        "uid": "B00M3D8IYM"
-      },
-      {
-        "id": 1930098,
-        "uid": "B00M3D8IPQ"
-      },
-      {
-        "id": 1932010,
-        "uid": "B00M3D8ISS"
-      },
-      {
-        "id": 210461,
-        "uid": "C3QH42WRGM3R"
-      },
-      {
-        "id": 3002571,
-        "uid": "1390579243"
-      },
-      {
-        "id": 245203,
-        "uid": "6715"
-      },
-      {
-        "id": 1937369,
-        "uid": "B00ZF3255A"
-      },
-      {
-        "id": 189465,
-        "uid": "UCkEMDJYfbI3rW0cqQMUaoLQ"
-      },
-      {
-        "id": 2162825,
-        "uid": "66acd000-77fe-1000-9115-d80258410824"
+        "uid": "B01CTWZEDE",
+        "external_game_source": 20
       },
       {
         "id": 2452790,
-        "uid": "C3QH42WRGM3R"
+        "uid": "C3QH42WRGM3R",
+        "external_game_source": 54
+      },
+      {
+        "id": 138274,
+        "uid": "20654",
+        "external_game_source": 3
+      },
+      {
+        "id": 1930257,
+        "uid": "B00M3D8IYM",
+        "external_game_source": 20
+      },
+      {
+        "id": 1930098,
+        "uid": "B00M3D8IPQ",
+        "external_game_source": 20
+      },
+      {
+        "id": 1932010,
+        "uid": "B00M3D8ISS",
+        "external_game_source": 20
+      },
+      {
+        "id": 210461,
+        "uid": "C3QH42WRGM3R",
+        "external_game_source": 11
+      },
+      {
+        "id": 3002571,
+        "uid": "1390579243",
+        "external_game_source": 5
+      },
+      {
+        "id": 245203,
+        "uid": "6715",
+        "external_game_source": 14
+      },
+      {
+        "id": 1937369,
+        "uid": "B00ZF3255A",
+        "external_game_source": 20
+      },
+      {
+        "id": 189465,
+        "uid": "UCkEMDJYfbI3rW0cqQMUaoLQ",
+        "external_game_source": 10
+      },
+      {
+        "id": 2162825,
+        "uid": "66acd000-77fe-1000-9115-d80258410824",
+        "external_game_source": 31
       },
       {
         "id": 2176160,
-        "uid": "201101"
+        "uid": "201101",
+        "external_game_source": 36
       },
       {
         "id": 8104,
-        "uid": "379720"
+        "uid": "379720",
+        "external_game_source": 1
       }
     ],
     "first_release_date": 1463011200,
@@ -205,7 +219,7 @@
       1
     ],
     "rating": 85.30925725648731,
-    "rating_count": 1794,
+    "rating_count": 1795,
     "similar_games": [
       1006,
       19531,
@@ -227,7 +241,7 @@
       19
     ],
     "total_rating": 86.13900362824366,
-    "total_rating_count": 1822,
+    "total_rating_count": 1823,
     "websites": [
       61572,
       799146,

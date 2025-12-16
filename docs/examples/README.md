@@ -2,6 +2,10 @@
 
 This folder contains captured provider responses used to understand what each API/library returns.
 
+Related docs:
+- `docs/providers/provider-json-schema.md`: naming conventions and notes per provider
+- `docs/providers/provider-field-reference.md`: curated catalog + observed examples (generated)
+
 Generate (or refresh) examples for a game name:
 
 ```bash

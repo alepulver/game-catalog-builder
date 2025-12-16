@@ -246,18 +246,19 @@ def fetch_igdb(game_name: str, credentials: Dict[str, Any], out_dir: Path, *, la
             client_secret=credentials.get("igdb", {}).get("client_secret", ""),
             cache_path=out_dir / "_igdb_cache_unused.json",
             language=language,
-            min_interval_s=0.0,
+            min_interval_s=0.3,
         )
 
         # Example: expanded single-call query (no secondary endpoint lookups).
         expanded_query = f'''
         search "{game_name}";
         fields
-          id,name,
+          id,name,first_release_date,
           genres.name,
           themes.name,
           game_modes.name,
           player_perspectives.name,
+          platforms.name,
           franchises.name,
           game_engines.name,
           external_games.external_game_source,external_games.uid;
@@ -308,27 +309,38 @@ def fetch_igdb(game_name: str, credentials: Dict[str, Any], out_dir: Path, *, la
             write_json(out_dir / "igdb.resolved.error.json", {"error": "No IGDB match selected"})
             return
 
-        def _resolve(endpoint: str, ids: Any, field: str = "name") -> list[str]:
-            if not ids:
+        expanded_best = None
+        for candidate in (expanded_raw or []):
+            if isinstance(candidate, dict) and candidate.get("id") == best.get("id"):
+                expanded_best = candidate
+                break
+
+        def _expanded_names(obj: Any) -> list[str]:
+            if not isinstance(obj, list):
                 return []
-            if not isinstance(ids, list):
-                return []
-            return igdb._resolve_ids(endpoint, ids, field=field)
+            names: list[str] = []
+            for item in obj:
+                if isinstance(item, dict):
+                    name = str(item.get("name") or "").strip()
+                    if name:
+                        names.append(name)
+            return names
+
+        source = expanded_best if isinstance(expanded_best, dict) else best
 
         resolved = {
-            "id": best.get("id"),
-            "name": best.get("name"),
-            "genres": _resolve("genres", best.get("genres")),
-            "themes": _resolve("themes", best.get("themes")),
-            "game_modes": _resolve("game_modes", best.get("game_modes")),
-            "player_perspectives": _resolve("player_perspectives", best.get("player_perspectives")),
-            "platforms": _resolve("platforms", best.get("platforms")),
-            "franchises": _resolve("franchises", best.get("franchises")),
-            "game_engines": _resolve("game_engines", best.get("game_engines")),
-            "keywords": _resolve("keywords", best.get("keywords")),
+            "id": source.get("id"),
+            "name": source.get("name"),
+            "genres": _expanded_names(source.get("genres")),
+            "themes": _expanded_names(source.get("themes")),
+            "game_modes": _expanded_names(source.get("game_modes")),
+            "player_perspectives": _expanded_names(source.get("player_perspectives")),
+            "platforms": _expanded_names(source.get("platforms")),
+            "franchises": _expanded_names(source.get("franchises")),
+            "game_engines": _expanded_names(source.get("game_engines")),
         }
         steam_appid = ""
-        external_games = best.get("external_games", []) or []
+        external_games = (source.get("external_games") or []) if isinstance(source, dict) else []
 
         # Record Steam appid only if it is directly present in the IGDB payload.
         # Do not perform additional IGDB calls to resolve external_game ids; Steam selection should

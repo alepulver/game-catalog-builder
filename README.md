@@ -84,7 +84,7 @@ To capture full provider responses (useful for deciding what additional fields t
 python -m game_catalog_builder.fetch_provider_examples "Doom (2016)"
 ```
 
-This writes example files under `docs/examples/doom/`.
+This writes example files under `docs/examples/doom-2016/` (slugified from the input name).
 
 ## Usage
 
@@ -93,9 +93,10 @@ This writes example files under `docs/examples/doom/`.
 ## Docs
 
 - `docs/how-it-works.md`: pipeline, caching, validation
-- `docs/provider-fields.md`: provider field/column reference (practical)
-- `docs/provider-field-reference.md`: field reference (catalog + examples)
-- `docs/provider-json-schema.md`: example capture file conventions
+- `docs/providers/README.md`: provider schemas/fields index
+- `docs/providers/provider-fields.md`: provider field/column reference (practical)
+- `docs/providers/provider-field-reference.md`: field reference (catalog + examples)
+- `docs/providers/provider-json-schema.md`: example capture file conventions
 
 ### Basic Usage
 

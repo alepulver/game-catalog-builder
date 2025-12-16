@@ -118,14 +118,9 @@
         },
         {
           "type": "app",
-          "name": "DOOM 3",
-          "id": 208200,
-          "price": {
-            "currency": "USD",
-            "initial": 999,
-            "final": 999
-          },
-          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/208200/capsule_231x87.jpg?t=1664292843",
+          "name": "Doomsday: Last Survivors",
+          "id": 2439510,
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2439510/capsule_231x87.jpg?t=1760020574",
           "metascore": "",
           "platforms": {
             "windows": true,
@@ -136,9 +131,14 @@
         },
         {
           "type": "app",
-          "name": "Doomsday: Last Survivors",
-          "id": 2439510,
-          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2439510/capsule_231x87.jpg?t=1760020574",
+          "name": "DOOM 3",
+          "id": 208200,
+          "price": {
+            "currency": "USD",
+            "initial": 999,
+            "final": 999
+          },
+          "tiny_image": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/208200/capsule_231x87.jpg?t=1664292843",
           "metascore": "",
           "platforms": {
             "windows": true,

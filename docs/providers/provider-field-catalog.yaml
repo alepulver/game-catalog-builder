@@ -162,6 +162,7 @@ providers:
             description: Website ids (use websites.url/websites.category to expand in-query)
           - path: $[].involved_companies[]
             description: Involved company ids (use involved_companies.* to expand in-query)
+
           - path: $[].genres[].name
             description: Expanded genre names (when requested as genres.name)
           - path: $[].themes[].name
@@ -318,3 +319,4 @@ providers:
             description: Platform string (sometimes present)
           - path: release_world
             description: Release year (sometimes present)
+
