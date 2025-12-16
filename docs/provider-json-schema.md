@@ -30,12 +30,12 @@ Notes:
 Files:
 - `igdb.games.search.json`: Raw list response from `POST /v4/games` using a broad `fields ...; search "...";` query
 - `igdb.best.json`: Best-match game object from the search list
-- `igdb.resolved.json`: Convenience object with common ID lists resolved to names (e.g., genre IDs → genre names)
+- `igdb.resolved.json`: Legacy helper view (only present in older captures)
 
 Notes:
-- IGDB returns numeric IDs for many relationships; resolving them requires additional `POST /v4/<endpoint>` calls.
+- The current enrichment client uses IGDB field expansion (e.g. `genres.name`, `platforms.name`) so it can fetch the required metadata in a single `POST /v4/games` request per game (excluding OAuth).
 - If requested via `external_games.external_game_source,external_games.uid`, IGDB can include a Steam appid mapping (where `external_game_source == 1`).
-- The example `igdb.resolved.json` is not authoritative; it's a helper view to make analysis easier.
+- If you see `igdb.resolved.json` in an older example set, it is not authoritative; it was a convenience document created by an older fetcher.
 
 ## Steam (Store API)
 

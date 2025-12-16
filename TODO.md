@@ -1,3 +1,5 @@
-- Separate the process of obtaining and confirming provider IDs for each game, from data fetching process (store the ID only next to user data, then join); show matching score to spot games not found
+- Separate the process of obtaining and confirming provider IDs for each game, from data fetching process (store the ID only next to user data, then join)
+  - Show matching score to spot games not found
+  - Allow specifying per-provider overrides in case the same name doesn't exactly match all
 - Make user data (input) and output columns configurable; for the latter, keep a schema or flat list of available data per provider with description (so they can be mapped to the output)
 - Keep working on derived metrics with ChatGPT (tags, estimated popularity, users, production level, replayability, mods, "must play classic", etc)

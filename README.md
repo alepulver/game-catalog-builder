@@ -90,6 +90,12 @@ This writes example files under `docs/examples/doom/`.
 
 **Important**: Make sure your virtual environment is activated (see Setup step 2) before running commands.
 
+## Docs
+
+- `docs/how-it-works.md`: pipeline, caching, validation
+- `docs/provider-fields.md`: provider field/column reference (practical)
+- `docs/provider-json-schema.md`: example capture file conventions
+
 ### Basic Usage
 
 Process all sources with a single command:
