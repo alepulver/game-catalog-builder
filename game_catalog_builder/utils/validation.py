@@ -110,9 +110,9 @@ def _year_diff(a: Optional[int], b: Optional[int]) -> str:
     return str(a - b)
 
 
-def _suggest_canonical_title(row: dict[str, str]) -> tuple[str, str, str, str]:
+def _suggest_canonical_title(row: dict[str, str]) -> tuple[str, str, str, str, int, str]:
     """
-    Returns (canonical_title, canonical_source, suggested_personal_name, reason).
+    Returns (canonical_title, canonical_source, suggested_personal_name, reason, consensus_count, consensus_sources).
     """
     name = str(row.get("Name", "") or "").strip()
 
@@ -123,7 +123,7 @@ def _suggest_canonical_title(row: dict[str, str]) -> tuple[str, str, str, str]:
             candidates.append((src, t))
 
     if not candidates:
-        return "", "", "", "no provider titles available"
+        return "", "", "", "no provider titles available", 0, ""
 
     # Group by normalized title to find consensus.
     groups: dict[str, list[tuple[str, str]]] = {}
@@ -156,18 +156,18 @@ def _suggest_canonical_title(row: dict[str, str]) -> tuple[str, str, str, str]:
     if not rep_title:
         rep_source, rep_title = best_items[0]
 
-    # Suggested personal name: usually the canonical title; keep user's name if already close.
+    # Suggested personal name: the canonical title.
     suggested_personal = rep_title
-    if name and fuzzy_score(name, rep_title) >= 95:
-        suggested_personal = name
 
     reason = ""
     if len(best_items) >= 2:
-        reason = "provider consensus: " + "+".join(sorted({s for s, _ in best_items}))
+        sources = sorted({s for s, _ in best_items})
+        reason = "provider consensus: " + "+".join(sources)
     else:
         reason = f"single provider title ({rep_source})"
 
-    return rep_title, rep_source, suggested_personal, reason
+    consensus_sources = "+".join(sorted({s for s, _ in best_items})) if len(best_items) >= 2 else ""
+    return rep_title, rep_source, suggested_personal, reason, len(best_items), consensus_sources
 
 
 def generate_validation_report(
@@ -307,18 +307,23 @@ def generate_validation_report(
                 threshold=thresholds.title_score_warn,
             )
 
-        canonical_title, canonical_source, suggested_personal, suggestion_reason = _suggest_canonical_title(
+        canonical_title, canonical_source, suggested_personal, suggestion_reason, consensus_count, consensus_sources = _suggest_canonical_title(
             {k: str(v or "") for k, v in r.to_dict().items()}
         )
         suggested_rename = ""
         if canonical_title and name and normalize_game_name(name) != normalize_game_name(canonical_title):
-            # Suggest rename when we have consensus, or strong cross-check mismatch evidence.
-            has_consensus = suggestion_reason.startswith("provider consensus:")
-            if has_consensus:
-                suggested_rename = "YES"
-            elif steam_appid_mismatch == "YES" or title_mismatch == "YES":
-                suggested_rename = "YES"
-            elif canonical_source == "Steam" and steam_appid and score_steam.isdigit() and int(score_steam) >= 90:
+            high_signal = any(
+                x == "YES"
+                for x in (
+                    title_mismatch,
+                    year_disagree_rawg_igdb,
+                    platform_disagree,
+                    steam_appid_mismatch,
+                )
+            )
+            strong_crosscheck = bool(steam_appid and igdb_steam_appid and steam_appid == igdb_steam_appid)
+            has_consensus = consensus_count >= 2
+            if high_signal and (has_consensus or strong_crosscheck):
                 suggested_rename = "YES"
 
         rows.append(
@@ -353,6 +358,8 @@ def generate_validation_report(
                 "SuggestedPersonalName": suggested_personal,
                 "SuggestedRenamePersonalName": suggested_rename,
                 "SuggestionReason": suggestion_reason,
+                "CanonicalConsensusCount": str(consensus_count) if consensus_count else "",
+                "CanonicalConsensusSources": consensus_sources,
             }
         )
 
