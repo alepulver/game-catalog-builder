@@ -3,6 +3,7 @@
 from .identity import generate_identity_map, merge_identity_user_fields
 from .merger import merge_all
 from .utilities import (
+    IDENTITY_NOT_FOUND,
     PUBLIC_DEFAULT_COLS,
     ProjectPaths,
     ensure_columns,
@@ -21,6 +22,7 @@ from .validation import ValidationThresholds, generate_validation_report
 
 __all__ = [
     "ProjectPaths",
+    "IDENTITY_NOT_FOUND",
     "ensure_columns",
     "ensure_row_ids_in_input",
     "ensure_row_ids",

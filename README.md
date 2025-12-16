@@ -171,6 +171,11 @@ Generate a row-by-row identity mapping table with provider IDs, matched names, a
 python run.py data/input/Games_User.csv --merge --validate --identity-map
 ```
 
+If a provider does not have a game (or you want to stop retrying searches for that provider), set
+the corresponding ID field in `Games_Identity.csv` to `__NOT_FOUND__` (or set `HLTB_Query` to
+`__NOT_FOUND__`). The pipeline will skip that provider for the row and clear any stale provider
+output fields.
+
 ### Command-Line Options
 
 ```

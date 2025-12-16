@@ -46,3 +46,29 @@ def test_generate_identity_map_includes_scores_and_review_flag():
     assert identity.iloc[0]["RAWG_MatchScore"] == "100"
     assert identity.iloc[1]["NeedsReview"] == "YES"
     assert "title_mismatch" in identity.iloc[1]["ReviewTags"]
+
+
+def test_identity_not_found_sentinel_clears_missing_flags():
+    from game_catalog_builder.utils import IDENTITY_NOT_FOUND
+    from game_catalog_builder.utils.identity import generate_identity_map
+
+    merged = pd.DataFrame(
+        [
+            {
+                "RowId": "rid:1",
+                "Name": "Some Game",
+                "RAWG_ID": "1",
+                "RAWG_Name": "Some Game",
+                "IGDB_ID": IDENTITY_NOT_FOUND,
+                "IGDB_Name": "",
+                "Steam_AppID": "3",
+                "Steam_Name": "Some Game",
+                "HLTB_Name": "Some Game",
+            },
+        ]
+    )
+
+    identity = generate_identity_map(merged, validation=None)
+    assert identity.iloc[0]["NeedsReview"] == ""
+    assert "missing_igdb" not in identity.iloc[0]["ReviewTags"]
+    assert "igdb_not_found" in identity.iloc[0]["ReviewTags"]

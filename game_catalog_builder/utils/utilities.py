@@ -13,6 +13,8 @@ import pandas as pd
 import yaml
 from rapidfuzz import fuzz
 
+IDENTITY_NOT_FOUND = "__NOT_FOUND__"
+
 # ----------------------------
 # Paths / Folder structure
 # ----------------------------

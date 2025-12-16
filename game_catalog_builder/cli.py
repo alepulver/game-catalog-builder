@@ -20,6 +20,7 @@ from .clients import (
     SteamSpyClient,
 )
 from .utils import (
+    IDENTITY_NOT_FOUND,
     PUBLIC_DEFAULT_COLS,
     ProjectPaths,
     ensure_columns,
@@ -35,6 +36,11 @@ from .utils import (
     read_csv,
     write_csv,
 )
+
+
+def clear_prefixed_columns(df: pd.DataFrame, idx: int, prefix: str) -> None:
+    for c in [col for col in df.columns if col.startswith(prefix)]:
+        df.at[idx, c] = ""
 
 
 def load_or_merge_dataframe(input_csv: Path, output_csv: Path) -> pd.DataFrame:
@@ -119,6 +125,10 @@ def process_steam_and_steamspy_streaming(
                 override_appid = str(
                     identity_overrides.get(rowid, {}).get("Steam_AppID", "") or ""
                 ).strip()
+
+            if override_appid == IDENTITY_NOT_FOUND:
+                clear_prefixed_columns(df_steam, int(idx), "Steam_")
+                continue
 
             if is_row_processed(df_steam, int(idx), ["Steam_AppID"]):
                 current_appid = str(df_steam.at[idx, "Steam_AppID"] or "").strip()
@@ -237,6 +247,10 @@ def process_igdb(
         if identity_overrides and rowid:
             override_id = str(identity_overrides.get(rowid, {}).get("IGDB_ID", "") or "").strip()
 
+        if override_id == IDENTITY_NOT_FOUND:
+            clear_prefixed_columns(df, int(idx), "IGDB_")
+            continue
+
         if is_row_processed(df, idx, required_cols):
             if override_id and str(df.at[idx, "IGDB_ID"] or "").strip() != override_id:
                 pass
@@ -301,6 +315,10 @@ def process_rawg(
         if identity_overrides and rowid:
             override_id = str(identity_overrides.get(rowid, {}).get("RAWG_ID", "") or "").strip()
 
+        if override_id == IDENTITY_NOT_FOUND:
+            clear_prefixed_columns(df, int(idx), "RAWG_")
+            continue
+
         if is_row_processed(df, idx, required_cols):
             if override_id and str(df.at[idx, "RAWG_ID"] or "").strip() != override_id:
                 pass
@@ -363,6 +381,10 @@ def process_steam(
             override_appid = str(
                 identity_overrides.get(rowid, {}).get("Steam_AppID", "") or ""
             ).strip()
+
+        if override_appid == IDENTITY_NOT_FOUND:
+            clear_prefixed_columns(df, int(idx), "Steam_")
+            continue
 
         if is_row_processed(df, idx, required_cols):
             if override_appid and str(df.at[idx, "Steam_AppID"] or "").strip() != override_appid:
@@ -479,6 +501,9 @@ def process_hltb(
         query = ""
         if identity_overrides and rowid:
             query = str(identity_overrides.get(rowid, {}).get("HLTB_Query", "") or "").strip()
+        if query == IDENTITY_NOT_FOUND:
+            clear_prefixed_columns(df, int(idx), "HLTB_")
+            continue
         query = query or name
 
         if is_row_processed(df, idx, required_cols):

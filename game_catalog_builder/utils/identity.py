@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .utilities import fuzzy_score
+from .utilities import IDENTITY_NOT_FOUND, fuzzy_score
 
 
 def merge_identity_user_fields(new: pd.DataFrame, prev: pd.DataFrame) -> pd.DataFrame:
@@ -104,16 +104,23 @@ def generate_identity_map(
     # Validation_Report.csv).
     v = validation.copy() if isinstance(validation, pd.DataFrame) and not validation.empty else None
 
+    def _is_not_found(v: object) -> bool:
+        return str(v or "").strip() == IDENTITY_NOT_FOUND
+
     def needs_review_row(r: pd.Series) -> bool:
         # Missing IDs are review-worthy.
-        if not str(r.get("RAWG_ID", "")).strip():
+        if not str(r.get("RAWG_ID", "")).strip() and not _is_not_found(r.get("RAWG_ID", "")):
             return True
-        if not str(r.get("IGDB_ID", "")).strip():
+        if not str(r.get("IGDB_ID", "")).strip() and not _is_not_found(r.get("IGDB_ID", "")):
             return True
         # Steam/HLTB are optional but still useful to review when missing.
-        if not str(r.get("Steam_AppID", "")).strip():
+        if not str(r.get("Steam_AppID", "")).strip() and not _is_not_found(
+            r.get("Steam_AppID", "")
+        ):
             return True
-        if not str(r.get("HLTB_MatchedName", "")).strip():
+        if not str(r.get("HLTB_MatchedName", "")).strip() and not _is_not_found(
+            r.get("HLTB_Query", "")
+        ):
             return True
         # Low match scores.
         for k in ("RAWG_MatchScore", "IGDB_MatchScore", "Steam_MatchScore", "HLTB_MatchScore"):
@@ -139,13 +146,26 @@ def generate_identity_map(
     tags_all: list[str] = []
     for i, r in out.iterrows():
         tags: list[str] = []
-        if not str(r.get("RAWG_ID", "")).strip():
+        rawg_id = str(r.get("RAWG_ID", "")).strip()
+        igdb_id = str(r.get("IGDB_ID", "")).strip()
+        steam_id = str(r.get("Steam_AppID", "")).strip()
+        hltb_query = str(r.get("HLTB_Query", "")).strip()
+
+        if rawg_id == IDENTITY_NOT_FOUND:
+            tags.append("rawg_not_found")
+        elif not rawg_id:
             tags.append("missing_rawg")
-        if not str(r.get("IGDB_ID", "")).strip():
+        if igdb_id == IDENTITY_NOT_FOUND:
+            tags.append("igdb_not_found")
+        elif not igdb_id:
             tags.append("missing_igdb")
-        if not str(r.get("Steam_AppID", "")).strip():
+        if steam_id == IDENTITY_NOT_FOUND:
+            tags.append("steam_not_found")
+        elif not steam_id:
             tags.append("missing_steam")
-        if not str(r.get("HLTB_MatchedName", "")).strip():
+        if hltb_query == IDENTITY_NOT_FOUND:
+            tags.append("hltb_not_found")
+        elif not str(r.get("HLTB_MatchedName", "")).strip():
             tags.append("missing_hltb")
 
         for k, tag in (
