@@ -1,0 +1,320 @@
+version: 1
+
+# Curated field catalog for provider responses.
+# - This is the authoritative list (with descriptions).
+# - The generator enriches it with observed types + example values from docs/examples/** JSON files.
+
+providers:
+  rawg:
+    name: RAWG
+    docs:
+      - title: RAWG API docs
+        url: https://rawg.io/apidocs
+    endpoints:
+      games_search:
+        title: GET /api/games (search)
+        example_file_hints:
+          - rawg.search.json
+          - rawg.best.json
+          - rawg.detail.json
+        fields:
+          - path: results[].id
+            description: Game id (in search results)
+          - path: results[].name
+            description: Game title
+          - path: results[].released
+            description: Release date (YYYY-MM-DD, may be empty)
+          - path: results[].metacritic
+            description: Metacritic score (may be null)
+          - path: results[].rating
+            description: Average RAWG rating
+          - path: results[].ratings_count
+            description: Ratings count
+          - path: results[].genres[].name
+            description: Genre names
+          - path: results[].platforms[].platform.name
+            description: Platform names
+          - path: results[].tags[].name
+            description: Tag names
+          - path: results[].esrb_rating.name
+            description: ESRB rating name (if present)
+
+      games_detail:
+        title: GET /api/games/{id} (detail)
+        example_file_hints:
+          - rawg.detail.json
+        fields:
+          - path: id
+            description: Game id
+          - path: slug
+            description: RAWG slug
+          - path: name
+            description: Game title
+          - path: released
+            description: Release date
+          - path: tba
+            description: “To be announced” flag
+          - path: updated
+            description: Last updated timestamp
+          - path: website
+            description: Official website
+          - path: description_raw
+            description: Plain-text description
+          - path: description
+            description: HTML description
+          - path: metacritic
+            description: Metacritic score
+          - path: metacritic_url
+            description: Metacritic URL
+          - path: rating
+            description: RAWG rating
+          - path: ratings_count
+            description: RAWG ratings count
+          - path: reddit_url
+            description: Reddit URL
+          - path: reddit_name
+            description: Subreddit name
+          - path: achievements_count
+            description: Achievement count (if known)
+          - path: parent_platforms[].platform.name
+            description: High-level platform groups
+          - path: platforms[].platform.name
+            description: Platforms
+          - path: genres[].name
+            description: Genres
+          - path: tags[].name
+            description: Tags
+          - path: developers[].name
+            description: Developer names
+          - path: publishers[].name
+            description: Publisher names
+          - path: stores[].store.name
+            description: Store names
+          - path: stores[].url
+            description: Store URL
+
+  igdb:
+    name: IGDB
+    docs:
+      - title: IGDB API docs
+        url: https://api-docs.igdb.com/
+      - title: Twitch OAuth (client credentials)
+        url: https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/
+    endpoints:
+      games:
+        title: POST /v4/games
+        example_file_hints:
+          - igdb.games.search.json
+          - igdb.best.json
+        fields:
+          - path: $[]
+            description: IGDB returns a list of game objects for a query
+          - path: $[].id
+            description: Game id
+          - path: $[].name
+            description: Game title
+          - path: $[].slug
+            description: URL slug
+          - path: $[].summary
+            description: Summary text
+          - path: $[].storyline
+            description: Storyline text
+          - path: $[].rating
+            description: User rating (0-100) when present
+          - path: $[].rating_count
+            description: Rating count when present
+          - path: $[].aggregated_rating
+            description: Aggregated critic rating (0-100) when present
+          - path: $[].aggregated_rating_count
+            description: Aggregated rating count when present
+          - path: $[].total_rating
+            description: Combined rating (0-100) when present
+          - path: $[].total_rating_count
+            description: Combined rating count when present
+          - path: $[].first_release_date
+            description: First release date as unix timestamp (seconds)
+
+          # Relationships: ids (default) vs expanded objects (when requested).
+          # For expansions, request `fields <rel>.name;` (or `<rel>.*` where applicable).
+          - path: $[].genres[]
+            description: Genre ids (use genres.name to expand in-query)
+          - path: $[].themes[]
+            description: Theme ids (use themes.name to expand in-query)
+          - path: $[].game_modes[]
+            description: Game mode ids (use game_modes.name to expand in-query)
+          - path: $[].player_perspectives[]
+            description: Player perspective ids (use player_perspectives.name to expand in-query)
+          - path: $[].franchises[]
+            description: Franchise ids (use franchises.name to expand in-query)
+          - path: $[].game_engines[]
+            description: Game engine ids (use game_engines.name to expand in-query)
+          - path: $[].platforms[]
+            description: Platform ids (use platforms.name to expand in-query)
+          - path: $[].keywords[]
+            description: Keyword ids (use keywords.name to expand in-query)
+          - path: $[].dlcs[]
+            description: DLC ids (use dlcs.name to expand in-query)
+          - path: $[].ports[]
+            description: Port ids (use ports.name to expand in-query)
+          - path: $[].similar_games[]
+            description: Similar game ids (use similar_games.name to expand in-query)
+          - path: $[].websites[]
+            description: Website ids (use websites.url/websites.category to expand in-query)
+          - path: $[].involved_companies[]
+            description: Involved company ids (use involved_companies.* to expand in-query)
+          - path: $[].genres[].name
+            description: Expanded genre names (when requested as genres.name)
+          - path: $[].themes[].name
+            description: Expanded theme names (when requested as themes.name)
+          - path: $[].game_modes[].name
+            description: Expanded game mode names (when requested as game_modes.name)
+          - path: $[].player_perspectives[].name
+            description: Expanded player perspective names (when requested as player_perspectives.name)
+          - path: $[].franchises[].name
+            description: Expanded franchise names (when requested as franchises.name)
+          - path: $[].game_engines[].name
+            description: Expanded game engine names (when requested as game_engines.name)
+          - path: $[].platforms[].name
+            description: Expanded platform names (when requested as platforms.name)
+          - path: $[].keywords[].name
+            description: Expanded keyword names (when requested as keywords.name)
+          - path: $[].dlcs[].name
+            description: Expanded DLC names (when requested as dlcs.name)
+          - path: $[].ports[].name
+            description: Expanded port names (when requested as ports.name)
+          - path: $[].similar_games[].name
+            description: Expanded similar game names (when requested as similar_games.name)
+          - path: $[].websites[].url
+            description: Expanded website URL (when requested as websites.url)
+          - path: $[].websites[].category
+            description: Expanded website category code (when requested as websites.category)
+          - path: $[].involved_companies[].developer
+            description: Expanded involved company developer flag (when requested)
+          - path: $[].involved_companies[].publisher
+            description: Expanded involved company publisher flag (when requested)
+          - path: $[].involved_companies[].company.name
+            description: Expanded company name (when requested as involved_companies.company.name)
+          - path: $[].external_games[].external_game_source
+            description: External mapping source id (1 == Steam)
+          - path: $[].external_games[].id
+            description: External mapping row id
+          - path: $[].external_games[].uid
+            description: External mapping uid (Steam appid as string when source == 1)
+
+  steam:
+    name: Steam Store API
+    docs:
+      - title: Steam Web/Store API reference (unofficial)
+        url: https://steamcommunity.com/dev
+    endpoints:
+      storesearch:
+        title: GET /api/storesearch
+        example_file_hints:
+          - steam.storesearch.json
+        fields:
+          - path: items[].id
+            description: AppID
+          - path: items[].name
+            description: Store title
+          - path: items[].type
+            description: Item type (app/sub/etc)
+          - path: total
+            description: Total results (may be present)
+      appdetails:
+        title: GET /api/appdetails
+        example_file_hints:
+          - steam.appdetails.json
+        fields:
+          - path: $.<appid>.success
+            description: Whether the request for this appid succeeded (wrapper)
+          - path: $.<appid>.data.name
+            description: Store title
+          - path: $.<appid>.data.type
+            description: Item type (game/dlc/etc)
+          - path: $.<appid>.data.is_free
+            description: Is free-to-play flag
+          - path: $.<appid>.data.release_date.date
+            description: Release date string
+          - path: $.<appid>.data.platforms.windows
+            description: Windows support flag
+          - path: $.<appid>.data.platforms.mac
+            description: macOS support flag
+          - path: $.<appid>.data.platforms.linux
+            description: Linux support flag
+          - path: $.<appid>.data.categories[].description
+            description: Category descriptions
+          - path: $.<appid>.data.genres[].description
+            description: Genre descriptions
+          - path: $.<appid>.data.metacritic.score
+            description: Metacritic score (if present)
+          - path: $.<appid>.data.developers[]
+            description: Developer names
+          - path: $.<appid>.data.publishers[]
+            description: Publisher names
+          - path: $.<appid>.data.recommendations.total
+            description: Recommendation/review count
+          - path: $.<appid>.data.price_overview.final_formatted
+            description: Price string (if not free)
+
+  steamspy:
+    name: SteamSpy
+    docs:
+      - title: SteamSpy API
+        url: https://steamspy.com/api.php
+    endpoints:
+      appdetails:
+        title: GET /api.php?request=appdetails
+        example_file_hints:
+          - steamspy.appdetails.json
+        fields:
+          - path: owners
+            description: Owner range string
+          - path: players_forever
+            description: Lifetime players
+          - path: ccu
+            description: Current concurrent users
+          - path: average_forever
+            description: Average playtime (minutes)
+          - path: average_2weeks
+            description: Average playtime last 2 weeks (minutes)
+          - path: median_2weeks
+            description: Median playtime last 2 weeks (minutes)
+          - path: positive
+            description: Positive ratings count
+          - path: negative
+            description: Negative ratings count
+          - path: price
+            description: Price in cents (when present)
+          - path: initialprice
+            description: Initial price in cents (when present)
+          - path: languages
+            description: Languages (free-form string)
+          - path: genre
+            description: Genre (free-form string)
+
+  hltb:
+    name: HowLongToBeat
+    docs:
+      - title: howlongtobeatpy (library)
+        url: https://pypi.org/project/howlongtobeatpy/
+    endpoints:
+      search_result_object_dump:
+        title: howlongtobeatpy object dump (derived)
+        example_file_hints:
+          - hltb.best.json
+          - hltb.search.json
+        fields:
+          - path: game_id
+            description: Game id (when provided by the library)
+          - path: game_name
+            description: Matched title
+          - path: main_story
+            description: Main story time (hours)
+          - path: main_extra
+            description: Main + extras time (hours)
+          - path: completionist
+            description: Completionist time (hours)
+          - path: profile_platform
+            description: Platform string (sometimes present)
+          - path: release_world
+            description: Release year (sometimes present)

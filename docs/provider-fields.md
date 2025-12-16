@@ -4,6 +4,8 @@ This document lists the main fields obtainable from each provider endpoint used 
 
 It is intentionally “practical” rather than an exhaustive copy of each provider’s full API schema. For complete schemas, refer to provider documentation.
 
+For a generated “catalog + observed examples” reference, see `docs/provider-field-reference.md` (generated from `docs/provider-field-catalog.yaml`).
+
 ## Conventions
 
 - **ID**: stable identifier used for caching and joining.

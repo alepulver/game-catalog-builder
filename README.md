@@ -94,6 +94,7 @@ This writes example files under `docs/examples/doom/`.
 
 - `docs/how-it-works.md`: pipeline, caching, validation
 - `docs/provider-fields.md`: provider field/column reference (practical)
+- `docs/provider-field-reference.md`: field reference (catalog + examples)
 - `docs/provider-json-schema.md`: example capture file conventions
 
 ### Basic Usage
