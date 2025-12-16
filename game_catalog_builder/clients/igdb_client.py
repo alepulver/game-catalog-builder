@@ -38,7 +38,8 @@ class IGDBClient:
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
 
         self._token: Optional[str] = None
-        self._ensure_token()
+        # Token is acquired lazily on first API request. This allows cached-only re-runs to work
+        # even without network access and avoids unnecessary OAuth calls.
 
     # -------------------------------------------------
     # OAuth
@@ -74,6 +75,7 @@ class IGDBClient:
     # -------------------------------------------------
     def _post(self, endpoint: str, query: str):
         def _request():
+            self._ensure_token()
             self.ratelimiter.wait()
             r = requests.post(
                 f"{IGDB_API_URL}/{endpoint}",

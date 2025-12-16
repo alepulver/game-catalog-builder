@@ -30,6 +30,7 @@ from .utils import (
     write_csv,
     PUBLIC_DEFAULT_COLS,
     generate_validation_report,
+    generate_identity_map,
 )
 
 
@@ -514,6 +515,16 @@ def main() -> None:
         type=Path,
         help="Output file for validation report (default: data/output/Validation_Report.csv)",
     )
+    parser.add_argument(
+        "--identity-map",
+        action="store_true",
+        help="Generate an identity mapping CSV (IDs, matched names, match scores) (default: off)",
+    )
+    parser.add_argument(
+        "--identity-map-output",
+        type=Path,
+        help="Output file for identity mapping (default: data/output/Identity_Map.csv)",
+    )
 
     args = parser.parse_args()
 
@@ -667,11 +678,13 @@ def main() -> None:
         )
         logging.info(f"✔ Games_Final.csv generated successfully: {merge_output}")
 
+        validation_df = None
         if args.validate:
             validate_out = args.validate_output or (output_dir / "Validation_Report.csv")
             merged = read_csv(merge_output)
             report = generate_validation_report(merged)
             write_csv(report, validate_out)
+            validation_df = report
 
             issues = report[
                 (report.get("YearDisagree_RAWG_IGDB", "") == "YES")
@@ -691,6 +704,24 @@ def main() -> None:
                     f"SteamAppIDMismatch={row.get('SteamAppIDMismatch','') or 'NO'}, "
                     f"Culprit={row.get('SuggestedCulprit','') or ''}, "
                     f"Canonical={row.get('SuggestedCanonicalTitle','') or ''} ({row.get('SuggestedCanonicalSource','') or ''})"
+                )
+
+        if args.identity_map:
+            identity_out = args.identity_map_output or (output_dir / "Identity_Map.csv")
+            merged = read_csv(merge_output)
+            identity = generate_identity_map(merged, validation_df)
+            write_csv(identity, identity_out)
+            needs_review = (identity.get("NeedsReview", "").astype(str).str.strip() == "YES").sum()
+            logging.info(
+                f"✔ Identity map generated: {identity_out} (needs review: {needs_review}/{len(identity)})"
+            )
+            for _, row in identity[identity["NeedsReview"] == "YES"].iterrows():
+                logging.warning(
+                    f"[IDENTITY] {row.get('InputRowKey','')}: '{row.get('OriginalName','')}' "
+                    f"RAWG={row.get('RAWG_MatchedName','')}({row.get('RAWG_MatchScore','') or '-'}) "
+                    f"IGDB={row.get('IGDB_MatchedName','')}({row.get('IGDB_MatchScore','') or '-'}) "
+                    f"Steam={row.get('Steam_MatchedName','')}({row.get('Steam_MatchScore','') or '-'}) "
+                    f"HLTB={row.get('HLTB_MatchedName','')}({row.get('HLTB_MatchScore','') or '-'})"
                 )
 
 

@@ -162,6 +162,14 @@ python run.py data/input/Games_Personal.csv --merge --validate
 
 The report includes `ReviewTitle` (a broader “needs review” flag) and `SuggestedRenamePersonalName` (a stricter/high-confidence rename suggestion).
 
+### Identity Map (Stage-1 style review)
+
+Generate a row-by-row identity mapping table with provider IDs, matched names, and fuzzy match scores:
+
+```bash
+python run.py data/input/Games_Personal.csv --merge --validate --identity-map
+```
+
 ### Command-Line Options
 
 ```

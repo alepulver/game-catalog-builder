@@ -1,6 +1,7 @@
 """Utility functions and helpers."""
 
 from .merger import merge_all
+from .identity import generate_identity_map
 from .validation import generate_validation_report, ValidationThresholds
 from .utilities import (
     ProjectPaths,
@@ -22,6 +23,7 @@ __all__ = [
     "is_row_processed",
     "load_credentials",
     "merge_all",
+    "generate_identity_map",
     "generate_validation_report",
     "ValidationThresholds",
     "normalize_game_name",
