@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import requests
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -54,6 +55,7 @@ class SteamSpyClient:
 
         # SteamSpy sometimes returns {"error": "..."}
         if "error" in data:
+            logging.warning(f"Not found in SteamSpy: AppID {appid}. {data.get('error')}")
             self.cache[key] = None
             save_json_cache(self.cache, self.cache_path)
             return None

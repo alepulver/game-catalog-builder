@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import requests
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -116,12 +117,15 @@ class RAWGClient:
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
-        if top_matches and score < 100:
-            top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
-            logging.warning(
-                f"Close match for '{game_name}': Selected '{best.get('name', '')}' (score: {score}%), "
-                f"alternatives: {', '.join(top_names)}"
+        if score < 100:
+            msg = (
+                f"Close match for '{game_name}': Selected '{best.get('name', '')}' "
+                f"(score: {score}%)"
             )
+            if top_matches:
+                top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
+                msg += f", alternatives: {', '.join(top_names)}"
+            logging.warning(msg)
 
         rawg_id = best.get("id")
         if rawg_id is not None:
@@ -145,11 +149,15 @@ class RAWGClient:
             for p in rawg_obj.get("platforms", [])
         ]
         tags = [t.get("name", "") for t in rawg_obj.get("tags", [])]
+        # RAWG tags can contain mixed-language duplicates; default to English-ish by dropping Cyrillic tags.
+        tags = [t for t in tags if t and not re.search(r"[А-Яа-яЁё]", t)]
 
         released = rawg_obj.get("released") or ""
 
         return {
             "RAWG_ID": str(rawg_obj.get("id", "")),
+            "RAWG_Name": str(rawg_obj.get("name", "") or ""),
+            "RAWG_Released": str(released or ""),
             "RAWG_Year": released[:4] if released else "",
             "RAWG_Genre": genres[0] if len(genres) > 0 else "",
             "RAWG_Genre2": genres[1] if len(genres) > 1 else "",

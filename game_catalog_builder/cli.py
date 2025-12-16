@@ -29,6 +29,7 @@ from .utils import (
     read_csv,
     write_csv,
     PUBLIC_DEFAULT_COLS,
+    generate_validation_report,
 )
 
 
@@ -502,6 +503,16 @@ def main() -> None:
         action="store_true",
         help="Enable DEBUG logging (default: INFO)",
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Generate a cross-provider validation report (default: off)",
+    )
+    parser.add_argument(
+        "--validate-output",
+        type=Path,
+        help="Output file for validation report (default: data/output/Validation_Report.csv)",
+    )
 
     args = parser.parse_args()
 
@@ -654,6 +665,32 @@ def main() -> None:
             igdb_csv=output_dir / "Games_IGDB.csv",
         )
         logging.info(f"✔ Games_Final.csv generated successfully: {merge_output}")
+
+        if args.validate:
+            validate_out = args.validate_output or (output_dir / "Validation_Report.csv")
+            merged = read_csv(merge_output)
+            report = generate_validation_report(merged)
+            write_csv(report, validate_out)
+
+            issues = report[
+                (report.get("YearDisagree_RAWG_IGDB", "") == "YES")
+                | (report.get("PlatformDisagree", "") == "YES")
+                | (report.get("SteamAppIDMismatch", "") == "YES")
+                | (report.get("TitleMismatch", "") == "YES")
+            ]
+            logging.info(
+                f"✔ Validation report generated: {validate_out} (rows with issues: {len(issues)}/{len(report)})"
+            )
+            for _, row in issues.head(20).iterrows():
+                logging.warning(
+                    f"[VALIDATE] {row.get('Name','')}: "
+                    f"TitleMismatch={row.get('TitleMismatch','') or 'NO'}, "
+                    f"YearDisagree_RAWG_IGDB={row.get('YearDisagree_RAWG_IGDB','') or 'NO'}, "
+                    f"PlatformDisagree={row.get('PlatformDisagree','') or 'NO'}, "
+                    f"SteamAppIDMismatch={row.get('SteamAppIDMismatch','') or 'NO'}, "
+                    f"Culprit={row.get('SuggestedCulprit','') or ''}, "
+                    f"Canonical={row.get('SuggestedCanonicalTitle','') or ''} ({row.get('SuggestedCanonicalSource','') or ''})"
+                )
 
 
 if __name__ == "__main__":

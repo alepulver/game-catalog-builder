@@ -110,8 +110,29 @@ def normalize_game_name(name: str) -> str:
 # ----------------------------
 
 def fuzzy_score(a: str, b: str) -> int:
-    """Calculate fuzzy matching score between two strings."""
-    return int(fuzz.partial_ratio(normalize_game_name(a), normalize_game_name(b)))
+    """
+    Calculate fuzzy matching score between two strings.
+
+    Uses a conservative default (token_sort_ratio) to avoid false 100% substring matches, while
+    still allowing common year/edition cases (e.g. "Doom" vs "Doom 2016") via partial_ratio.
+    """
+    na = normalize_game_name(a)
+    nb = normalize_game_name(b)
+    score_sort = float(fuzz.token_sort_ratio(na, nb))
+    score_partial = float(fuzz.partial_ratio(na, nb))
+
+    tokens_a = set(na.split())
+    tokens_b = set(nb.split())
+
+    allow_partial = True
+    if len(nb.split()) > len(na.split()):
+        extra = tokens_b - tokens_a
+        # Allow partial when the only additions are a 4-digit year token.
+        allow_partial = bool(extra) and all(t.isdigit() and len(t) == 4 for t in extra)
+
+    if not allow_partial:
+        return int(score_sort)
+    return int(max(score_sort, score_partial))
 
 
 def pick_best_match(query: str, candidates: list[Dict[str, Any]], name_key: str = "name") -> Tuple[Optional[Dict[str, Any]], int, list[Tuple[str, int]]]:
@@ -264,6 +285,8 @@ def load_credentials(credentials_path: str | Path | None = None) -> Dict[str, An
 PUBLIC_DEFAULT_COLS: Dict[str, Any] = {
     # RAWG
     "RAWG_ID": "",
+    "RAWG_Name": "",
+    "RAWG_Released": "",
     "RAWG_Year": "",
     "RAWG_Genre": "",
     "RAWG_Genre2": "",
@@ -275,6 +298,9 @@ PUBLIC_DEFAULT_COLS: Dict[str, Any] = {
 
     # IGDB
     "IGDB_ID": "",
+    "IGDB_Name": "",
+    "IGDB_Year": "",
+    "IGDB_Platforms": "",
     "IGDB_Genres": "",
     "IGDB_Themes": "",
     "IGDB_GameModes": "",
@@ -286,6 +312,9 @@ PUBLIC_DEFAULT_COLS: Dict[str, Any] = {
 
     # Steam
     "Steam_AppID": "",
+    "Steam_Name": "",
+    "Steam_ReleaseYear": "",
+    "Steam_Platforms": "",
     "Steam_Tags": "",
     "Steam_ReviewCount": "",
     "Steam_ReviewPercent": "",
@@ -299,6 +328,7 @@ PUBLIC_DEFAULT_COLS: Dict[str, Any] = {
     "SteamSpy_PlaytimeAvg": "",
 
     # HLTB
+    "HLTB_Name": "",
     "HLTB_Main": "",
     "HLTB_Extra": "",
     "HLTB_Completionist": "",

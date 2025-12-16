@@ -20,6 +20,8 @@ def test_rawg_extract_fields_fixture():
 
     fields = RAWGClient.extract_fields(rawg_obj)
     assert fields["RAWG_ID"] == "2454"
+    assert fields["RAWG_Name"] == "DOOM (2016)"
+    assert fields["RAWG_Released"] == "2016-05-13"
     assert fields["RAWG_Year"] == "2016"
     assert fields["RAWG_Genre"] == "Action"
     assert fields["RAWG_Genre2"] == "Shooter"
@@ -65,6 +67,8 @@ def test_steam_extract_fields_fixture():
     details = {
         "name": "Example Game",
         "is_free": True,
+        "release_date": {"coming_soon": False, "date": "10 May, 2016"},
+        "platforms": {"windows": True, "mac": False, "linux": True},
         "categories": [{"description": "Single-player"}, {"description": "Steam Achievements"}],
         "genres": [{"description": "Action"}, {"description": "Shooter"}],
         "recommendations": {"total": 999},
@@ -72,6 +76,9 @@ def test_steam_extract_fields_fixture():
 
     fields = SteamClient.extract_fields(123, details)
     assert fields["Steam_AppID"] == "123"
+    assert fields["Steam_Name"] == "Example Game"
+    assert fields["Steam_ReleaseYear"] == "2016"
+    assert fields["Steam_Platforms"] == "Windows, Linux"
     assert fields["Steam_Tags"] == "Action, Shooter"
     assert fields["Steam_ReviewCount"] == "999"
     assert fields["Steam_Price"] == "Free"
@@ -152,6 +159,8 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
             {
                 "id": 7351,
                 "name": "Doom",
+                "first_release_date": 1463097600,
+                "platforms": [{"name": "PC (Microsoft Windows)"}],
                 "genres": [{"name": "Shooter"}],
                 "themes": [{"name": "Action"}],
                 "game_modes": [{"name": "Single player"}],
@@ -175,6 +184,9 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
     enriched = client.search("Doom (2016)")
     assert calls == ["games"]
     assert enriched["IGDB_ID"] == "7351"
+    assert enriched["IGDB_Name"] == "Doom"
+    assert enriched["IGDB_Year"] == "2016"
+    assert enriched["IGDB_Platforms"] == "PC (Microsoft Windows)"
     assert enriched["IGDB_Genres"] == "Shooter"
     assert enriched["IGDB_Themes"] == "Action"
     assert enriched["IGDB_GameModes"] == "Single player"
@@ -237,6 +249,7 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
     data1 = client.search("Example Game")
     data2 = client.search("Example Game")
     assert data1 == data2
+    assert data1["HLTB_Name"] == "Example Game"
     assert fake.calls == 1
 
     raw = json.loads(cache_path.read_text(encoding="utf-8"))

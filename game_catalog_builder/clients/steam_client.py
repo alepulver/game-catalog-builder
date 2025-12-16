@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import requests
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -115,12 +116,15 @@ class SteamClient:
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
-        if top_matches and score < 100:
-            top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
-            logging.warning(
-                f"Close match for '{game_name}': Selected '{best.get('name', '')}' (score: {score}%), "
-                f"alternatives: {', '.join(top_names)}"
+        if score < 100:
+            msg = (
+                f"Close match for '{game_name}': Selected '{best.get('name', '')}' "
+                f"(score: {score}%)"
             )
+            if top_matches:
+                top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
+                msg += f", alternatives: {', '.join(top_names)}"
+            logging.warning(msg)
 
         appid = best.get("id")
         if appid is not None:
@@ -170,6 +174,10 @@ class SteamClient:
         if not details:
             return {}
 
+        def extract_year(text: str) -> str:
+            m = re.search(r"\b(19\d{2}|20\d{2})\b", text or "")
+            return m.group(1) if m else ""
+
         price = ""
         if details.get("is_free"):
             price = "Free"
@@ -187,8 +195,23 @@ class SteamClient:
         recommendations = details.get("recommendations", {})
         review_count = recommendations.get("total", "")
 
+        release = details.get("release_date", {}) or {}
+        release_year = extract_year(str(release.get("date", "") or ""))
+
+        platforms = details.get("platforms", {}) or {}
+        platform_names: list[str] = []
+        if platforms.get("windows"):
+            platform_names.append("Windows")
+        if platforms.get("mac"):
+            platform_names.append("macOS")
+        if platforms.get("linux"):
+            platform_names.append("Linux")
+
         return {
             "Steam_AppID": str(appid),
+            "Steam_Name": str(details.get("name", "") or ""),
+            "Steam_ReleaseYear": release_year,
+            "Steam_Platforms": ", ".join(platform_names),
             "Steam_Tags": ", ".join(genres),
             "Steam_ReviewCount": str(review_count),
             "Steam_ReviewPercent": "",  # Steam doesn't expose this directly without extra scraping

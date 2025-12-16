@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import requests
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -46,9 +47,10 @@ class IGDBClient:
         if self._token:
             return
 
+        # Use form-encoded body (not URL params) to avoid leaking secrets in tracebacks/logs.
         r = requests.post(
             TWITCH_TOKEN_URL,
-            params={
+            data={
                 "client_id": self.client_id,
                 "client_secret": self.client_secret,
                 "grant_type": "client_credentials",
@@ -100,7 +102,8 @@ class IGDBClient:
 
         query = f'''
         search "{game_name}";
-        fields id,name,
+        fields id,name,first_release_date,
+               platforms.name,
                genres.name,
                themes.name,
                game_modes.name,
@@ -134,12 +137,15 @@ class IGDBClient:
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
-        if top_matches and score < 100:
-            top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
-            logging.warning(
-                f"Close match for '{game_name}': Selected '{best.get('name', '')}' (score: {score}%), "
-                f"alternatives: {', '.join(top_names)}"
+        if score < 100:
+            msg = (
+                f"Close match for '{game_name}': Selected '{best.get('name', '')}' "
+                f"(score: {score}%)"
             )
+            if top_matches:
+                top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
+                msg += f", alternatives: {', '.join(top_names)}"
+            logging.warning(msg)
 
         enriched = self._extract_fields(best)
         igdb_id = enriched.get("IGDB_ID", "").strip()
@@ -170,9 +176,19 @@ class IGDBClient:
             return ", ".join(names)
 
         steam_appid = self._steam_appid_from_external_games(game.get("external_games", []) or [])
+        year = ""
+        ts = game.get("first_release_date")
+        if isinstance(ts, (int, float)) and ts > 0:
+            try:
+                year = str(datetime.fromtimestamp(ts).year)
+            except Exception:
+                year = ""
 
         return {
             "IGDB_ID": str(game.get("id", "") or ""),
+            "IGDB_Name": str(game.get("name", "") or ""),
+            "IGDB_Year": year,
+            "IGDB_Platforms": join_names(game.get("platforms")),
             "IGDB_Genres": join_names(game.get("genres")),
             "IGDB_Themes": join_names(game.get("themes")),
             "IGDB_GameModes": join_names(game.get("game_modes")),

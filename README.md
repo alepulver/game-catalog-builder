@@ -145,6 +145,14 @@ If you've already processed files and just want to merge:
 python run.py data/input/Games_Personal.csv --source all --merge
 ```
 
+### Validation Report
+
+Generate a cross-provider consistency report (title/year/platform + Steam AppID cross-check), including a suggested canonical title when providers disagree:
+
+```bash
+python run.py data/input/Games_Personal.csv --merge --validate
+```
+
 ### Command-Line Options
 
 ```
@@ -162,6 +170,9 @@ optional arguments:
   --merge-output MERGE_OUTPUT
                        Output file for merged results (default: data/output/Games_Final.csv)
   --log-file LOG_FILE  Log file path (default: data/output/enrichment.log)
+  --validate           Generate a cross-provider validation report (default: off)
+  --validate-output VALIDATE_OUTPUT
+                       Output file for validation report (default: data/output/Validation_Report.csv)
   --debug              Enable DEBUG logging (default: INFO)
 ```
 

@@ -11,6 +11,7 @@ from ..utils.utilities import (
     save_json_cache,
     fuzzy_score,
 )
+import logging
 
 
 class HLTBClient:
@@ -45,15 +46,23 @@ class HLTBClient:
         try:
             results = self.client.search(game_name)
             if not results:
+                logging.warning(f"Not found in HLTB: '{game_name}'. No results from API.")
                 self._by_name[key] = None
                 self._save_cache()
                 return None
 
             # Choose the best match by similarity
-            best = max(results, key=lambda r: fuzzy_score(game_name, r.game_name))
+            scored = [(fuzzy_score(game_name, r.game_name), r) for r in results]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            best_score, best = scored[0]
+            if best_score < 100:
+                logging.warning(
+                    f"Close match for '{game_name}': Selected '{best.game_name}' (score: {best_score}%)"
+                )
 
             best_id = getattr(best, "game_id", None)
             data = {
+                "HLTB_Name": str(getattr(best, "game_name", "") or ""),
                 "HLTB_Main": best.main_story or "",
                 "HLTB_Extra": best.main_extra or "",
                 "HLTB_Completionist": best.completionist or "",
@@ -72,6 +81,7 @@ class HLTBClient:
             return data
 
         except Exception:
+            logging.warning(f"Not found in HLTB: '{game_name}'. Error during lookup.")
             self._by_name[key] = None
             self._save_cache()
             return None
