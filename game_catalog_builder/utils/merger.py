@@ -7,10 +7,28 @@ import pandas as pd
 from .utilities import read_csv, write_csv
 
 
+def _merge_on_name_with_occurrence(base: pd.DataFrame, other: pd.DataFrame, on: str) -> pd.DataFrame:
+    """
+    Merge on name + per-name occurrence index to avoid cartesian growth when names repeat.
+
+    Assumes both dataframes preserve the same row order per repeated name, which holds for our
+    provider outputs because they originate from the same base input ordering.
+    """
+    base2 = base.copy()
+    other2 = other.copy()
+    base2["__occ"] = base2.groupby(on).cumcount()
+    other2["__occ"] = other2.groupby(on).cumcount()
+    merged = base2.merge(other2, on=[on, "__occ"], how="left", suffixes=("", "_dup"))
+    return merged.drop(columns=["__occ"])
+
+
 def merge_left(base: pd.DataFrame, other: pd.DataFrame, on: str = "Name") -> pd.DataFrame:
     """
     Safe left-join: preserves all rows from base.
     """
+    if on in base.columns and on in other.columns:
+        if base[on].duplicated().any() or other[on].duplicated().any():
+            return _merge_on_name_with_occurrence(base, other, on=on)
     return base.merge(other, on=on, how="left", suffixes=("", "_dup"))
 
 
