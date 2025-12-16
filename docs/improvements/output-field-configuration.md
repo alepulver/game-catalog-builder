@@ -1,6 +1,6 @@
 # Output field configuration (pros/cons)
 
-This project currently has a fixed set of output columns per provider and a fixed `Games_Final.csv` merge. We discussed multiple approaches to make the final output configurable.
+This project currently has a fixed set of output columns per provider and a fixed `Games_Enriched.csv` merge. We discussed multiple approaches to make the final output configurable.
 
 The intent is to support:
 - selecting which provider columns appear in the final CSV (and ordering them),
@@ -11,7 +11,7 @@ The intent is to support:
 
 **Idea**
 - Keep provider clients as-is (they produce a set of extracted columns).
-- A YAML profile selects which columns from those existing outputs go to `Games_Final.csv`.
+- A YAML profile selects which columns from those existing outputs go to `Games_Enriched.csv`.
 
 **Pros**
 - Smallest change set; low risk.
@@ -106,4 +106,3 @@ The intent is to support:
 For this project’s scale and iteration style:
 - Start with **Approach 3 (registry)** for a maintainable “select fields” mechanism.
 - Optionally add a limited **Approach 2 escape hatch** later if you find yourself frequently needing fields that are “obviously direct” but not worth coding yet.
-

@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import logging
 import re
-import requests
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
+import requests
 
 from ..utils.utilities import (
+    RateLimiter,
+    load_json_cache,
     normalize_game_name,
     pick_best_match,
-    load_json_cache,
     save_json_cache,
-    RateLimiter,
     with_retries,
 )
 
@@ -29,8 +30,8 @@ class RAWGClient:
         self.api_key = api_key
         self.language = (language or "en").strip() or "en"
         self.cache_path = Path(cache_path)
-        self._by_id: Dict[str, Any] = {}
-        self._by_name: Dict[str, Optional[str]] = {}
+        self._by_id: dict[str, Any] = {}
+        self._by_name: dict[str, str | None] = {}
         self._load_cache(load_json_cache(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
 
@@ -43,32 +44,51 @@ class RAWGClient:
 
         by_id = raw.get("by_id")
         by_name = raw.get("by_name")
-        if isinstance(by_id, dict) and isinstance(by_name, dict):
-            self._by_id = {str(k): v for k, v in by_id.items()}
-            self._by_name = {str(k): (str(v) if v else None) for k, v in by_name.items()}
+        if not (isinstance(by_id, dict) and isinstance(by_name, dict)):
+            logging.warning(
+                "RAWG cache file is in an incompatible format; ignoring it (delete it to rebuild)."
+            )
             return
-
-        # Backward compatibility: old caches stored name_key -> raw object / None.
-        for name_key, value in raw.items():
-            if value is None:
-                self._by_name[str(name_key)] = None
-                continue
-            if not isinstance(value, dict):
-                continue
-            rawg_id = value.get("id")
-            if rawg_id is None:
-                continue
-            id_key = self._id_key(rawg_id)
-            self._by_id[id_key] = value
-            self._by_name[str(name_key)] = id_key
+        self._by_id = {str(k): v for k, v in by_id.items()}
+        self._by_name = {str(k): (str(v) if v else None) for k, v in by_name.items()}
 
     def _save_cache(self) -> None:
         save_json_cache({"by_id": self._by_id, "by_name": self._by_name}, self.cache_path)
 
+    def get_by_id(self, rawg_id: int | str) -> dict[str, Any] | None:
+        """
+        Fetch a RAWG game by id (preferring cache).
+        """
+        rawg_id_str = str(rawg_id).strip()
+        if not rawg_id_str:
+            return None
+
+        id_key = self._id_key(rawg_id_str)
+        cached = self._by_id.get(id_key)
+        if isinstance(cached, dict):
+            return cached
+
+        def _request():
+            self.ratelimiter.wait()
+            r = requests.get(
+                f"{RAWG_API_URL}/{rawg_id_str}",
+                params={"key": self.api_key, "lang": self.language},
+                timeout=10,
+            )
+            r.raise_for_status()
+            return r.json()
+
+        data = with_retries(_request, retries=3, on_fail_return=None)
+        if isinstance(data, dict) and data.get("id") is not None:
+            self._by_id[id_key] = data
+            self._save_cache()
+            return data
+        return None
+
     # ----------------------------
     # Main search
     # ----------------------------
-    def search(self, game_name: str) -> Optional[Dict[str, Any]]:
+    def search(self, game_name: str) -> dict[str, Any] | None:
         name_key = f"{self.language}:{normalize_game_name(game_name)}"
 
         if name_key in self._by_name:
@@ -139,17 +159,14 @@ class RAWGClient:
     # Metadata extraction
     # ----------------------------
     @staticmethod
-    def extract_fields(rawg_obj: Dict[str, Any]) -> Dict[str, str]:
+    def extract_fields(rawg_obj: dict[str, Any]) -> dict[str, str]:
         if not rawg_obj:
             return {}
 
         genres = [g.get("name", "") for g in rawg_obj.get("genres", [])]
-        platforms = [
-            p.get("platform", {}).get("name", "")
-            for p in rawg_obj.get("platforms", [])
-        ]
+        platforms = [p.get("platform", {}).get("name", "") for p in rawg_obj.get("platforms", [])]
         tags = [t.get("name", "") for t in rawg_obj.get("tags", [])]
-        # RAWG tags can contain mixed-language duplicates; default to English-ish by dropping Cyrillic tags.
+        # RAWG tags can contain mixed-language duplicates; drop Cyrillic tags by default.
         tags = [t for t in tags if t and not re.search(r"[А-Яа-яЁё]", t)]
 
         released = rawg_obj.get("released") or ""

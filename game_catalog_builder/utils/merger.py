@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+
 import pandas as pd
 
 from .utilities import read_csv, write_csv
 
 
-def _merge_on_name_with_occurrence(base: pd.DataFrame, other: pd.DataFrame, on: str) -> pd.DataFrame:
+def _merge_on_name_with_occurrence(
+    base: pd.DataFrame, other: pd.DataFrame, on: str
+) -> pd.DataFrame:
     """
     Merge on name + per-name occurrence index to avoid cartesian growth when names repeat.
 
@@ -29,7 +31,16 @@ def merge_left(base: pd.DataFrame, other: pd.DataFrame, on: str = "Name") -> pd.
     if on in base.columns and on in other.columns:
         if base[on].duplicated().any() or other[on].duplicated().any():
             return _merge_on_name_with_occurrence(base, other, on=on)
-    return base.merge(other, on=on, how="left", suffixes=("", "_dup"))
+        return base.merge(other, on=on, how="left", suffixes=("", "_dup"))
+
+    # Transitional fallback: if provider outputs don't yet have RowId, fall back to Name join.
+    if on == "RowId" and "Name" in base.columns and "Name" in other.columns:
+        if base["Name"].duplicated().any() or other["Name"].duplicated().any():
+            return _merge_on_name_with_occurrence(base, other, on="Name")
+        return base.merge(other, on="Name", how="left", suffixes=("", "_dup"))
+
+    # Last resort: no compatible join key; return base unchanged.
+    return base.copy()
 
 
 def drop_duplicate_suffixes(df: pd.DataFrame) -> pd.DataFrame:
@@ -45,6 +56,7 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
     Logical order: Personal → RAWG → IGDB → Steam → SteamSpy → HLTB
     """
     personal_cols = [
+        "RowId",
         "Name",
         "Status",
         "Rating",
@@ -60,14 +72,7 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
     steamspy_cols = [c for c in df.columns if c.startswith("SteamSpy_")]
     hltb_cols = [c for c in df.columns if c.startswith("HLTB_")]
 
-    ordered = (
-        personal_cols
-        + rawg_cols
-        + igdb_cols
-        + steam_cols
-        + steamspy_cols
-        + hltb_cols
-    )
+    ordered = personal_cols + rawg_cols + igdb_cols + steam_cols + steamspy_cols + hltb_cols
 
     existing = [c for c in ordered if c in df.columns]
     remaining = [c for c in df.columns if c not in existing]
@@ -86,26 +91,27 @@ def merge_all(
 ):
     # Personal base (NEVER overwritten)
     df = read_csv(personal_csv)
+    on = "RowId" if "RowId" in df.columns else "Name"
 
     # Incremental merges
     if rawg_csv.exists():
-        df = merge_left(df, read_csv(rawg_csv))
+        df = merge_left(df, read_csv(rawg_csv), on=on)
         df = drop_duplicate_suffixes(df)
 
     if hltb_csv.exists():
-        df = merge_left(df, read_csv(hltb_csv))
+        df = merge_left(df, read_csv(hltb_csv), on=on)
         df = drop_duplicate_suffixes(df)
 
     if steam_csv.exists():
-        df = merge_left(df, read_csv(steam_csv))
+        df = merge_left(df, read_csv(steam_csv), on=on)
         df = drop_duplicate_suffixes(df)
 
     if steamspy_csv.exists():
-        df = merge_left(df, read_csv(steamspy_csv))
+        df = merge_left(df, read_csv(steamspy_csv), on=on)
         df = drop_duplicate_suffixes(df)
 
     if igdb_csv.exists():
-        df = merge_left(df, read_csv(igdb_csv))
+        df = merge_left(df, read_csv(igdb_csv), on=on)
         df = drop_duplicate_suffixes(df)
 
     # Final order

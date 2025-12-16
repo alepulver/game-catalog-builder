@@ -5,11 +5,10 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
-from typing import Optional
 
 import pandas as pd
 
@@ -21,16 +20,20 @@ from .clients import (
     SteamSpyClient,
 )
 from .utils import (
+    PUBLIC_DEFAULT_COLS,
     ProjectPaths,
     ensure_columns,
+    ensure_row_ids,
+    generate_identity_map,
+    generate_validation_report,
     is_row_processed,
     load_credentials,
+    load_identity_overrides,
     merge_all,
+    merge_identity_user_fields,
+    normalize_game_name,
     read_csv,
     write_csv,
-    PUBLIC_DEFAULT_COLS,
-    generate_validation_report,
-    generate_identity_map,
 )
 
 
@@ -47,18 +50,24 @@ def load_or_merge_dataframe(input_csv: Path, output_csv: Path) -> pd.DataFrame:
     # If output_csv exists, merge its data to preserve already-processed games
     if output_csv.exists():
         df_output = read_csv(output_csv)
-        # Merge on Name, keeping data from output_csv where it exists.
-        # If names repeat, merge using (Name, per-name occurrence) to avoid cartesian growth.
-        if "Name" in df.columns and "Name" in df_output.columns:
-            if df["Name"].duplicated().any() or df_output["Name"].duplicated().any():
-                df["__occ"] = df.groupby("Name").cumcount()
-                df_output["__occ"] = df_output.groupby("Name").cumcount()
-                df = df.merge(df_output, on=["Name", "__occ"], how="left", suffixes=("", "_existing"))
-                df = df.drop(columns=["__occ"])
+        # Prefer stable RowId merges when available; fall back to Name.
+        if "RowId" in df.columns and "RowId" in df_output.columns:
+            df = df.merge(df_output, on="RowId", how="left", suffixes=("", "_existing"))
+        else:
+            # Merge on Name, keeping data from output_csv where it exists.
+            # If names repeat, merge using (Name, per-name occurrence) to avoid cartesian growth.
+            if "Name" in df.columns and "Name" in df_output.columns:
+                if df["Name"].duplicated().any() or df_output["Name"].duplicated().any():
+                    df["__occ"] = df.groupby("Name").cumcount()
+                    df_output["__occ"] = df_output.groupby("Name").cumcount()
+                    df = df.merge(
+                        df_output, on=["Name", "__occ"], how="left", suffixes=("", "_existing")
+                    )
+                    df = df.drop(columns=["__occ"])
+                else:
+                    df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
             else:
                 df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
-        else:
-            df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
         # Drop duplicate columns from merge
         for col in df.columns:
             if col.endswith("_existing"):
@@ -80,6 +89,7 @@ def process_steam_and_steamspy_streaming(
     steamspy_output_csv: Path,
     steam_cache_path: Path,
     steamspy_cache_path: Path,
+    identity_overrides: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """
     Run Steam + SteamSpy in a streaming pipeline.
@@ -103,18 +113,36 @@ def process_steam_and_steamspy_streaming(
             if not name:
                 continue
 
+            rowid = str(row.get("RowId", "") or "").strip()
+            override_appid = ""
+            if identity_overrides and rowid:
+                override_appid = str(
+                    identity_overrides.get(rowid, {}).get("Steam_AppID", "") or ""
+                ).strip()
+
             if is_row_processed(df_steam, int(idx), ["Steam_AppID"]):
-                continue
+                current_appid = str(df_steam.at[idx, "Steam_AppID"] or "").strip()
+                # If Steam is already processed, still enqueue for SteamSpy when SteamSpy is
+                # missing.
+                if current_appid and not is_row_processed(
+                    df_steamspy, int(idx), ["SteamSpy_Owners"]
+                ):
+                    q.put((int(idx), name, current_appid))
+                if override_appid and current_appid != override_appid:
+                    pass
+                else:
+                    continue
 
-            logging.info(f"[STEAM] Processing: {name}")
-
-            search = steam_client.search_appid(name)
-            if not search:
-                continue
-
-            appid = str(search.get("id") or "").strip()
-            if not appid:
-                continue
+            if override_appid:
+                appid = override_appid
+            else:
+                logging.info(f"[STEAM] Processing: {name}")
+                search = steam_client.search_appid(name)
+                if not search:
+                    continue
+                appid = str(search.get("id") or "").strip()
+                if not appid:
+                    continue
 
             # Persist appid early so SteamSpy can start immediately.
             df_steam.at[idx, "Steam_AppID"] = appid
@@ -130,10 +158,12 @@ def process_steam_and_steamspy_streaming(
 
             processed += 1
             if processed % 10 == 0:
-                steam_cols = ["Name"] + [c for c in df_steam.columns if c.startswith("Steam_")]
+                base_cols = [c for c in ("RowId", "Name") if c in df_steam.columns]
+                steam_cols = base_cols + [c for c in df_steam.columns if c.startswith("Steam_")]
                 write_csv(df_steam[steam_cols], steam_output_csv)
 
-        steam_cols = ["Name"] + [c for c in df_steam.columns if c.startswith("Steam_")]
+        base_cols = [c for c in ("RowId", "Name") if c in df_steam.columns]
+        steam_cols = base_cols + [c for c in df_steam.columns if c.startswith("Steam_")]
         write_csv(df_steam[steam_cols], steam_output_csv)
         q.put(None)
 
@@ -159,10 +189,14 @@ def process_steam_and_steamspy_streaming(
 
             processed += 1
             if processed % 10 == 0:
-                steamspy_cols = ["Name"] + [c for c in df_steamspy.columns if c.startswith("SteamSpy_")]
+                base_cols = [c for c in ("RowId", "Name") if c in df_steamspy.columns]
+                steamspy_cols = base_cols + [
+                    c for c in df_steamspy.columns if c.startswith("SteamSpy_")
+                ]
                 write_csv(df_steamspy[steamspy_cols], steamspy_output_csv)
 
-        steamspy_cols = ["Name"] + [c for c in df_steamspy.columns if c.startswith("SteamSpy_")]
+        base_cols = [c for c in ("RowId", "Name") if c in df_steamspy.columns]
+        steamspy_cols = base_cols + [c for c in df_steamspy.columns if c.startswith("SteamSpy_")]
         write_csv(df_steamspy[steamspy_cols], steamspy_output_csv)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -179,6 +213,7 @@ def process_igdb(
     credentials: dict,
     required_cols: list[str],
     language: str = "en",
+    identity_overrides: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Process games with IGDB data."""
     client = IGDBClient(
@@ -197,14 +232,27 @@ def process_igdb(
         if not name:
             continue
 
+        rowid = str(row.get("RowId", "") or "").strip()
+        override_id = ""
+        if identity_overrides and rowid:
+            override_id = str(identity_overrides.get(rowid, {}).get("IGDB_ID", "") or "").strip()
+
         if is_row_processed(df, idx, required_cols):
-            continue
+            if override_id and str(df.at[idx, "IGDB_ID"] or "").strip() != override_id:
+                pass
+            else:
+                continue
 
-        logging.info(f"[IGDB] Processing: {name}")
-
-        data = client.search(name)
-        if not data:
-            continue
+        if override_id:
+            data = client.get_by_id(override_id)
+            if not data:
+                logging.warning(f"[IGDB] Override id not found: {name} (IGDB_ID {override_id})")
+                continue
+        else:
+            logging.info(f"[IGDB] Processing: {name}")
+            data = client.search(name)
+            if not data:
+                continue
 
         for k, v in data.items():
             df.at[idx, k] = v
@@ -212,11 +260,13 @@ def process_igdb(
         processed += 1
         if processed % 10 == 0:
             # Save only Name + IGDB columns
-            igdb_cols = ["Name"] + [c for c in df.columns if c.startswith("IGDB_")]
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
             write_csv(df[igdb_cols], output_csv)
 
     # Save only Name + IGDB columns
-    igdb_cols = ["Name"] + [c for c in df.columns if c.startswith("IGDB_")]
+    base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+    igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
     write_csv(df[igdb_cols], output_csv)
     logging.info(f"✔ IGDB completed: {output_csv}")
 
@@ -228,6 +278,7 @@ def process_rawg(
     credentials: dict,
     required_cols: list[str],
     language: str = "en",
+    identity_overrides: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Process games with RAWG data."""
     client = RAWGClient(
@@ -245,14 +296,27 @@ def process_rawg(
         if not name:
             continue
 
+        rowid = str(row.get("RowId", "") or "").strip()
+        override_id = ""
+        if identity_overrides and rowid:
+            override_id = str(identity_overrides.get(rowid, {}).get("RAWG_ID", "") or "").strip()
+
         if is_row_processed(df, idx, required_cols):
-            continue
+            if override_id and str(df.at[idx, "RAWG_ID"] or "").strip() != override_id:
+                pass
+            else:
+                continue
 
-        logging.info(f"[RAWG] Processing: {name}")
-
-        result = client.search(name)
-        if not result:
-            continue
+        if override_id:
+            result = client.get_by_id(override_id)
+            if not result:
+                logging.warning(f"[RAWG] Override id not found: {name} (RAWG_ID {override_id})")
+                continue
+        else:
+            logging.info(f"[RAWG] Processing: {name}")
+            result = client.search(name)
+            if not result:
+                continue
 
         fields = client.extract_fields(result)
         for k, v in fields.items():
@@ -261,11 +325,13 @@ def process_rawg(
         processed += 1
         if processed % 10 == 0:
             # Save only Name + RAWG columns
-            rawg_cols = ["Name"] + [c for c in df.columns if c.startswith("RAWG_")]
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            rawg_cols = base_cols + [c for c in df.columns if c.startswith("RAWG_")]
             write_csv(df[rawg_cols], output_csv)
 
     # Save only Name + RAWG columns
-    rawg_cols = ["Name"] + [c for c in df.columns if c.startswith("RAWG_")]
+    base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+    rawg_cols = base_cols + [c for c in df.columns if c.startswith("RAWG_")]
     write_csv(df[rawg_cols], output_csv)
     logging.info(f"✔ RAWG completed: {output_csv}")
 
@@ -275,6 +341,7 @@ def process_steam(
     output_csv: Path,
     cache_path: Path,
     required_cols: list[str],
+    identity_overrides: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Process games with Steam data."""
     client = SteamClient(
@@ -290,18 +357,29 @@ def process_steam(
         if not name:
             continue
 
+        rowid = str(row.get("RowId", "") or "").strip()
+        override_appid = ""
+        if identity_overrides and rowid:
+            override_appid = str(
+                identity_overrides.get(rowid, {}).get("Steam_AppID", "") or ""
+            ).strip()
+
         if is_row_processed(df, idx, required_cols):
-            continue
+            if override_appid and str(df.at[idx, "Steam_AppID"] or "").strip() != override_appid:
+                pass
+            else:
+                continue
 
-        logging.info(f"[STEAM] Processing: {name}")
-
-        search = client.search_appid(name)
-        if not search:
-            continue
-
-        appid = search.get("id")
-        if not appid:
-            continue
+        if override_appid:
+            appid = int(override_appid)
+        else:
+            logging.info(f"[STEAM] Processing: {name}")
+            search = client.search_appid(name)
+            if not search:
+                continue
+            appid = search.get("id")
+            if not appid:
+                continue
 
         details = client.get_app_details(appid)
         if not details:
@@ -314,11 +392,13 @@ def process_steam(
         processed += 1
         if processed % 10 == 0:
             # Save only Name + Steam columns
-            steam_cols = ["Name"] + [c for c in df.columns if c.startswith("Steam_")]
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            steam_cols = base_cols + [c for c in df.columns if c.startswith("Steam_")]
             write_csv(df[steam_cols], output_csv)
 
     # Save only Name + Steam columns
-    steam_cols = ["Name"] + [c for c in df.columns if c.startswith("Steam_")]
+    base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+    steam_cols = base_cols + [c for c in df.columns if c.startswith("Steam_")]
     write_csv(df[steam_cols], output_csv)
     logging.info(f"✔ Steam completed: {output_csv}")
 
@@ -366,11 +446,13 @@ def process_steamspy(
         processed += 1
         if processed % 10 == 0:
             # Save only Name + SteamSpy columns
-            steamspy_cols = ["Name"] + [c for c in df.columns if c.startswith("SteamSpy_")]
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            steamspy_cols = base_cols + [c for c in df.columns if c.startswith("SteamSpy_")]
             write_csv(df[steamspy_cols], output_csv)
 
     # Save only Name + SteamSpy columns
-    steamspy_cols = ["Name"] + [c for c in df.columns if c.startswith("SteamSpy_")]
+    base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+    steamspy_cols = base_cols + [c for c in df.columns if c.startswith("SteamSpy_")]
     write_csv(df[steamspy_cols], output_csv)
     logging.info(f"✔ SteamSpy completed: {output_csv}")
 
@@ -380,6 +462,7 @@ def process_hltb(
     output_csv: Path,
     cache_path: Path,
     required_cols: list[str],
+    identity_overrides: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Process games with HowLongToBeat data."""
     client = HLTBClient(cache_path=cache_path)
@@ -392,12 +475,19 @@ def process_hltb(
         if not name:
             continue
 
+        rowid = str(row.get("RowId", "") or "").strip()
+        query = ""
+        if identity_overrides and rowid:
+            query = str(identity_overrides.get(rowid, {}).get("HLTB_Query", "") or "").strip()
+        query = query or name
+
         if is_row_processed(df, idx, required_cols):
-            continue
+            prev_name = str(df.at[idx, "HLTB_Name"] or "").strip()
+            if prev_name and normalize_game_name(prev_name) == normalize_game_name(query):
+                continue
 
-        logging.info(f"[HLTB] Processing: {name}")
-
-        data = client.search(name)
+        logging.info(f"[HLTB] Processing: {query}")
+        data = client.search(query)
         if not data:
             continue
 
@@ -407,11 +497,13 @@ def process_hltb(
         processed += 1
         if processed % 10 == 0:
             # Save only Name + HLTB columns
-            hltb_cols = ["Name"] + [c for c in df.columns if c.startswith("HLTB_")]
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            hltb_cols = base_cols + [c for c in df.columns if c.startswith("HLTB_")]
             write_csv(df[hltb_cols], output_csv)
 
     # Save only Name + HLTB columns
-    hltb_cols = ["Name"] + [c for c in df.columns if c.startswith("HLTB_")]
+    base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+    hltb_cols = base_cols + [c for c in df.columns if c.startswith("HLTB_")]
     write_csv(df[hltb_cols], output_csv)
     logging.info(f"✔ HLTB completed: {output_csv}")
 
@@ -432,7 +524,7 @@ def setup_logging(log_file: Path) -> None:
     )
 
     # File handler
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(file_formatter)
 
@@ -493,7 +585,7 @@ def main() -> None:
     parser.add_argument(
         "--merge-output",
         type=Path,
-        help="Output file for merged results (default: data/output/Games_Final.csv)",
+        help="Output file for merged results (default: data/output/Games_Enriched.csv)",
     )
     parser.add_argument(
         "--log-file",
@@ -523,7 +615,12 @@ def main() -> None:
     parser.add_argument(
         "--identity-map-output",
         type=Path,
-        help="Output file for identity mapping (default: data/output/Identity_Map.csv)",
+        help="Output file for identity mapping (default: data/output/Games_Identity.csv)",
+    )
+    parser.add_argument(
+        "--identity-map-input",
+        type=Path,
+        help="Identity map to apply as overrides (default: <output>/Games_Identity.csv if present)",
     )
 
     args = parser.parse_args()
@@ -552,12 +649,33 @@ def main() -> None:
     input_csv = args.input
     if not input_csv.exists():
         parser.error(f"Input file not found: {input_csv}")
+    before = read_csv(input_csv)
+    with_ids, created = ensure_row_ids(before)
+    # If we had to create RowIds, avoid overwriting the user's original file: write a new input
+    # next to the identity map (under the output dir) and use it from now on.
+    if created > 0 or "RowId" not in before.columns:
+        safe_input = (
+            args.output or paths.data_output
+        ) / f"{input_csv.stem}_with_rowid{input_csv.suffix}"
+        write_csv(with_ids, safe_input)
+        logging.info(f"✔ RowId initialized: wrote new input CSV: {safe_input} (new ids: {created})")
+        logging.info(f"ℹ Use this input file going forward: {safe_input}")
+        input_csv = safe_input
 
     output_dir = args.output or paths.data_output
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cache_dir = args.cache or paths.data_cache
     cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load identity overrides (if present) for fixed-ID processing.
+    identity_map_in = args.identity_map_input or (output_dir / "Games_Identity.csv")
+    identity_overrides: dict[str, dict[str, str]] = {}
+    if identity_map_in and identity_map_in.exists():
+        identity_overrides = load_identity_overrides(identity_map_in)
+        logging.info(
+            f"✔ Using identity overrides: {identity_map_in} (rows: {len(identity_overrides)})"
+        )
 
     # Load credentials
     if args.credentials:
@@ -570,45 +688,46 @@ def main() -> None:
 
     # Process based on source
     sources_to_process = (
-        ["igdb", "rawg", "steam", "steamspy", "hltb"]
-        if args.source == "all"
-        else [args.source]
+        ["igdb", "rawg", "steam", "steamspy", "hltb"] if args.source == "all" else [args.source]
     )
 
     def run_source(source: str) -> None:
         if source == "igdb":
             process_igdb(
                 input_csv=input_csv,
-                output_csv=output_dir / "Games_IGDB.csv",
+                output_csv=output_dir / "Provider_IGDB.csv",
                 cache_path=cache_dir / "igdb_cache.json",
                 credentials=credentials,
                 required_cols=["IGDB_ID"],
+                identity_overrides=identity_overrides or None,
             )
             return
 
         if source == "rawg":
             process_rawg(
                 input_csv=input_csv,
-                output_csv=output_dir / "Games_RAWG.csv",
+                output_csv=output_dir / "Provider_RAWG.csv",
                 cache_path=cache_dir / "rawg_cache.json",
                 credentials=credentials,
                 required_cols=["RAWG_ID", "RAWG_Year", "RAWG_Genre"],
+                identity_overrides=identity_overrides or None,
             )
             return
 
         if source == "steam":
             process_steam(
                 input_csv=input_csv,
-                output_csv=output_dir / "Games_Steam.csv",
+                output_csv=output_dir / "Provider_Steam.csv",
                 cache_path=cache_dir / "steam_cache.json",
                 required_cols=["Steam_AppID"],
+                identity_overrides=identity_overrides or None,
             )
             return
 
         if source == "steamspy":
             process_steamspy(
-                input_csv=output_dir / "Games_Steam.csv",
-                output_csv=output_dir / "Games_SteamSpy.csv",
+                input_csv=output_dir / "Provider_Steam.csv",
+                output_csv=output_dir / "Provider_SteamSpy.csv",
                 cache_path=cache_dir / "steamspy_cache.json",
                 required_cols=["SteamSpy_Owners"],
             )
@@ -617,26 +736,29 @@ def main() -> None:
         if source == "steam+steamspy":
             process_steam_and_steamspy_streaming(
                 input_csv=input_csv,
-                steam_output_csv=output_dir / "Games_Steam.csv",
-                steamspy_output_csv=output_dir / "Games_SteamSpy.csv",
+                steam_output_csv=output_dir / "Provider_Steam.csv",
+                steamspy_output_csv=output_dir / "Provider_SteamSpy.csv",
                 steam_cache_path=cache_dir / "steam_cache.json",
                 steamspy_cache_path=cache_dir / "steamspy_cache.json",
+                identity_overrides=identity_overrides or None,
             )
             return
 
         if source == "hltb":
             process_hltb(
                 input_csv=input_csv,
-                output_csv=output_dir / "Games_HLTB.csv",
+                output_csv=output_dir / "Provider_HLTB.csv",
                 cache_path=cache_dir / "hltb_cache.json",
                 required_cols=["HLTB_Main"],
+                identity_overrides=identity_overrides or None,
             )
             return
 
         raise ValueError(f"Unknown source: {source}")
 
     # Run providers in parallel when we have multiple independent sources.
-    # SteamSpy can stream from discovered Steam appids; run via a combined pipeline when both are requested.
+    # SteamSpy can stream from discovered Steam appids; run via a combined pipeline when both are
+    # requested.
     if len(sources_to_process) <= 1:
         run_source(sources_to_process[0])
     else:
@@ -666,17 +788,17 @@ def main() -> None:
 
     # Merge if requested
     if args.merge or args.source == "all":
-        merge_output = args.merge_output or (output_dir / "Games_Final.csv")
+        merge_output = args.merge_output or (output_dir / "Games_Enriched.csv")
         merge_all(
             personal_csv=input_csv,
-            rawg_csv=output_dir / "Games_RAWG.csv",
-            hltb_csv=output_dir / "Games_HLTB.csv",
-            steam_csv=output_dir / "Games_Steam.csv",
-            steamspy_csv=output_dir / "Games_SteamSpy.csv",
+            rawg_csv=output_dir / "Provider_RAWG.csv",
+            hltb_csv=output_dir / "Provider_HLTB.csv",
+            steam_csv=output_dir / "Provider_Steam.csv",
+            steamspy_csv=output_dir / "Provider_SteamSpy.csv",
             output_csv=merge_output,
-            igdb_csv=output_dir / "Games_IGDB.csv",
+            igdb_csv=output_dir / "Provider_IGDB.csv",
         )
-        logging.info(f"✔ Games_Final.csv generated successfully: {merge_output}")
+        logging.info(f"✔ Games_Enriched.csv generated successfully: {merge_output}")
 
         validation_df = None
         if args.validate:
@@ -692,37 +814,158 @@ def main() -> None:
                 | (report.get("SteamAppIDMismatch", "") == "YES")
                 | (report.get("TitleMismatch", "") == "YES")
             ]
+
+            # Coverage stats from merged output (how many rows have data per provider).
+            def _count_non_empty(col: str) -> int:
+                if col not in merged.columns:
+                    return 0
+                return int(merged[col].astype(str).str.strip().ne("").sum())
+
+            def _count_any_prefix(prefix: str) -> int:
+                cols = [c for c in merged.columns if c.startswith(prefix)]
+                if not cols:
+                    return 0
+                any_non_empty = (
+                    merged[cols]
+                    .astype(str)
+                    .apply(lambda s: s.str.strip().ne(""), axis=0)
+                    .any(axis=1)
+                )
+                return int(any_non_empty.sum())
+
+            total_rows = len(merged)
             logging.info(
-                f"✔ Validation report generated: {validate_out} (rows with issues: {len(issues)}/{len(report)})"
+                "✔ Provider coverage: "
+                f"RAWG={_count_non_empty('RAWG_ID')}/{total_rows}, "
+                f"IGDB={_count_non_empty('IGDB_ID')}/{total_rows}, "
+                f"Steam={_count_non_empty('Steam_AppID')}/{total_rows}, "
+                f"SteamSpy={_count_any_prefix('SteamSpy_')}/{total_rows}, "
+                f"HLTB={_count_non_empty('HLTB_Main')}/{total_rows}"
+            )
+
+            # Validation stats summary.
+            def _count_yes(col: str) -> int:
+                if col not in report.columns:
+                    return 0
+                return int(report[col].astype(str).str.strip().eq("YES").sum())
+
+            logging.info(
+                f"✔ Validation report generated: {validate_out} "
+                f"(rows with issues: {len(issues)}/{len(report)})"
+            )
+            logging.info(
+                "✔ Validation stats: "
+                f"title_mismatch={_count_yes('TitleMismatch')}, "
+                f"year_disagree_rawg_igdb={_count_yes('YearDisagree_RAWG_IGDB')}, "
+                f"steam_year_disagree={_count_yes('SteamYearDisagree')}, "
+                f"platform_disagree={_count_yes('PlatformDisagree')}, "
+                f"steam_appid_mismatch={_count_yes('SteamAppIDMismatch')}"
             )
             for _, row in issues.head(20).iterrows():
                 logging.warning(
-                    f"[VALIDATE] {row.get('Name','')}: "
-                    f"TitleMismatch={row.get('TitleMismatch','') or 'NO'}, "
-                    f"YearDisagree_RAWG_IGDB={row.get('YearDisagree_RAWG_IGDB','') or 'NO'}, "
-                    f"PlatformDisagree={row.get('PlatformDisagree','') or 'NO'}, "
-                    f"SteamAppIDMismatch={row.get('SteamAppIDMismatch','') or 'NO'}, "
-                    f"Culprit={row.get('SuggestedCulprit','') or ''}, "
-                    f"Canonical={row.get('SuggestedCanonicalTitle','') or ''} ({row.get('SuggestedCanonicalSource','') or ''})"
+                    f"[VALIDATE] {row.get('Name', '')}: "
+                    f"TitleMismatch={row.get('TitleMismatch', '') or 'NO'}, "
+                    f"YearDisagree_RAWG_IGDB={row.get('YearDisagree_RAWG_IGDB', '') or 'NO'}, "
+                    f"PlatformDisagree={row.get('PlatformDisagree', '') or 'NO'}, "
+                    f"SteamAppIDMismatch={row.get('SteamAppIDMismatch', '') or 'NO'}, "
+                    f"Culprit={row.get('SuggestedCulprit', '') or ''}, "
+                    f"Canonical={row.get('SuggestedCanonicalTitle', '') or ''} "
+                    f"({row.get('SuggestedCanonicalSource', '') or ''})"
                 )
 
         if args.identity_map:
-            identity_out = args.identity_map_output or (output_dir / "Identity_Map.csv")
+            identity_out = args.identity_map_output or (output_dir / "Games_Identity.csv")
             merged = read_csv(merge_output)
             identity = generate_identity_map(merged, validation_df)
+            # Preserve AddedAt across regenerations by joining on RowId when available.
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if identity_out.exists():
+                prev = read_csv(identity_out)
+                identity = merge_identity_user_fields(identity, prev)
+                if (
+                    "RowId" in identity.columns
+                    and "RowId" in prev.columns
+                    and "AddedAt" in prev.columns
+                ):
+                    prev_map = dict(zip(prev["RowId"].astype(str), prev["AddedAt"].astype(str)))
+                    identity["AddedAt"] = identity["RowId"].astype(str).map(prev_map).fillna("")
+            if "AddedAt" not in identity.columns:
+                identity["AddedAt"] = ""
+            if "RowId" in identity.columns:
+                new_mask = identity["AddedAt"].astype(str).str.strip() == ""
+                identity.loc[new_mask, "AddedAt"] = now
+                identity["NewRow"] = new_mask.map(lambda x: "YES" if x else "")
+            else:
+                identity["NewRow"] = ""
             write_csv(identity, identity_out)
             needs_review = (identity.get("NeedsReview", "").astype(str).str.strip() == "YES").sum()
+            new_rows = (identity.get("NewRow", "").astype(str).str.strip() == "YES").sum()
             logging.info(
-                f"✔ Identity map generated: {identity_out} (needs review: {needs_review}/{len(identity)})"
+                f"✔ Identity map generated: {identity_out} "
+                f"(needs review: {needs_review}/{len(identity)})"
+            )
+            # Summary stats for identification review (keep detailed per-row output at DEBUG).
+            tags_counter: dict[str, int] = {}
+            for t in (
+                identity.get("ReviewTags", []).tolist() if "ReviewTags" in identity.columns else []
+            ):
+                for part in str(t or "").split(","):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    key = part.split(":", 1)[0].strip()
+                    tags_counter[key] = tags_counter.get(key, 0) + 1
+
+            def _count(tag: str) -> int:
+                return int(tags_counter.get(tag, 0))
+
+            logging.info(
+                "✔ Identity stats: needs_review=%s, new_rows=%s, missing_rawg=%s, missing_igdb=%s, "
+                "missing_steam=%s, missing_hltb=%s, title_mismatch=%s, year_mismatch=%s, "
+                "platform_mismatch=%s, steam_appid_mismatch=%s, rawg_score_lt_100=%s, "
+                "igdb_score_lt_100=%s, steam_score_lt_100=%s, hltb_score_lt_100=%s",
+                needs_review,
+                new_rows,
+                _count("missing_rawg"),
+                _count("missing_igdb"),
+                _count("missing_steam"),
+                _count("missing_hltb"),
+                _count("title_mismatch"),
+                _count("year_mismatch"),
+                _count("platform_mismatch"),
+                _count("steam_appid_mismatch"),
+                _count("rawg_score"),
+                _count("igdb_score"),
+                _count("steam_score"),
+                _count("hltb_score"),
             )
             for _, row in identity[identity["NeedsReview"] == "YES"].iterrows():
-                logging.warning(
-                    f"[IDENTITY] {row.get('InputRowKey','')}: '{row.get('OriginalName','')}' "
-                    f"RAWG={row.get('RAWG_MatchedName','')}({row.get('RAWG_MatchScore','') or '-'}) "
-                    f"IGDB={row.get('IGDB_MatchedName','')}({row.get('IGDB_MatchScore','') or '-'}) "
-                    f"Steam={row.get('Steam_MatchedName','')}({row.get('Steam_MatchScore','') or '-'}) "
-                    f"HLTB={row.get('HLTB_MatchedName','')}({row.get('HLTB_MatchScore','') or '-'})"
+                rawg_name = row.get("RAWG_MatchedName", "")
+                rawg_score = row.get("RAWG_MatchScore", "") or "-"
+                igdb_name = row.get("IGDB_MatchedName", "")
+                igdb_score = row.get("IGDB_MatchScore", "") or "-"
+                steam_name = row.get("Steam_MatchedName", "")
+                steam_score = row.get("Steam_MatchScore", "") or "-"
+                hltb_name = row.get("HLTB_MatchedName", "")
+                hltb_score = row.get("HLTB_MatchScore", "") or "-"
+
+                rawg_part = f"RAWG={rawg_name}({rawg_score})"
+                igdb_part = f"IGDB={igdb_name}({igdb_score})"
+                steam_part = f"Steam={steam_name}({steam_score})"
+                hltb_part = f"HLTB={hltb_name}({hltb_score})"
+                msg = " ".join(
+                    [
+                        f"[IDENTITY] {row.get('RowId', '')}: '{row.get('OriginalName', '')}'",
+                        f"NewRow={row.get('NewRow', '') or 'NO'}",
+                        f"AddedAt={row.get('AddedAt', '') or ''}",
+                        f"Tags={row.get('ReviewTags', '') or ''}",
+                        rawg_part,
+                        igdb_part,
+                        steam_part,
+                        hltb_part,
+                    ]
                 )
+                logging.debug(msg)
 
 
 if __name__ == "__main__":

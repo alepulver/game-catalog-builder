@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import logging
-import requests
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
+import requests
 
 from ..utils.utilities import (
+    RateLimiter,
     load_json_cache,
     save_json_cache,
-    RateLimiter,
     with_retries,
 )
 
@@ -22,13 +23,13 @@ class SteamSpyClient:
         min_interval_s: float = 1.0,
     ):
         self.cache_path = Path(cache_path)
-        self.cache: Dict[str, Any] = load_json_cache(self.cache_path)
+        self.cache: dict[str, Any] = load_json_cache(self.cache_path)
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
 
     # -------------------------------------------------
     # Main query
     # -------------------------------------------------
-    def fetch(self, appid: int) -> Optional[Dict[str, Any]]:
+    def fetch(self, appid: int) -> dict[str, Any] | None:
         key = str(appid)
 
         if key in self.cache:

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import logging
-import requests
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
+import requests
 
 from ..utils.utilities import (
+    RateLimiter,
+    load_json_cache,
     normalize_game_name,
     pick_best_match,
-    load_json_cache,
     save_json_cache,
-    RateLimiter,
     with_retries,
 )
 
@@ -32,12 +33,12 @@ class IGDBClient:
         self.client_secret = client_secret
         self.language = (language or "en").strip() or "en"
         self.cache_path = Path(cache_path)
-        self._by_id: Dict[str, Dict[str, str]] = {}
-        self._by_name: Dict[str, Optional[str]] = {}
+        self._by_id: dict[str, dict[str, str]] = {}
+        self._by_name: dict[str, str | None] = {}
         self._load_cache(load_json_cache(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
 
-        self._token: Optional[str] = None
+        self._token: str | None = None
         # Token is acquired lazily on first API request. This allows cached-only re-runs to work
         # even without network access and avoids unnecessary OAuth calls.
 
@@ -88,10 +89,53 @@ class IGDBClient:
 
         return with_retries(_request, retries=3, on_fail_return=None)
 
+    def get_by_id(self, igdb_id: int | str) -> dict[str, Any] | None:
+        """
+        Fetch an IGDB game by id (preferring cache).
+        """
+        igdb_id_str = str(igdb_id).strip()
+        if not igdb_id_str:
+            return None
+
+        id_key = f"{self.language}:{igdb_id_str}"
+        cached = self._by_id.get(id_key)
+        if isinstance(cached, dict):
+            return cached
+
+        query = f"""
+        fields id,name,first_release_date,
+               platforms.name,
+               genres.name,
+               themes.name,
+               game_modes.name,
+               player_perspectives.name,
+               franchises.name,
+               game_engines.name,
+               external_games.external_game_source,external_games.uid;
+        where id = {igdb_id_str};
+        limit 1;
+        """
+
+        data = self._post("games", query)
+        if not data or not isinstance(data, list) or len(data) == 0:
+            return None
+
+        best = data[0]
+        if not isinstance(best, dict):
+            return None
+
+        enriched = self._extract_fields(best)
+        out_id = enriched.get("IGDB_ID", "").strip()
+        if out_id:
+            out_key = f"{self.language}:{out_id}"
+            self._by_id[out_key] = enriched
+            self._save_cache()
+        return enriched
+
     # -------------------------------------------------
     # Main search
     # -------------------------------------------------
-    def search(self, game_name: str) -> Optional[Dict[str, Any]]:
+    def search(self, game_name: str) -> dict[str, Any] | None:
         name_key = f"{self.language}:{normalize_game_name(game_name)}"
         if name_key in self._by_name:
             id_key = self._by_name[name_key]
@@ -160,7 +204,7 @@ class IGDBClient:
         self._save_cache()
         return enriched
 
-    def _extract_fields(self, game: Dict[str, Any]) -> Dict[str, str]:
+    def _extract_fields(self, game: dict[str, Any]) -> dict[str, str]:
         def join_names(items: Any) -> str:
             if not items:
                 return ""

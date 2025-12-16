@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 
 def test_steam_cache_is_id_based(tmp_path, monkeypatch):
@@ -16,7 +15,9 @@ def test_steam_cache_is_id_based(tmp_path, monkeypatch):
                 if "storesearch" in url:
                     return {"items": [{"id": 123, "name": "Example Game", "type": "app"}]}
                 if "appdetails" in url:
-                    return {"123": {"success": True, "data": {"name": "Example Game", "is_free": True}}}
+                    return {
+                        "123": {"success": True, "data": {"name": "Example Game", "is_free": True}}
+                    }
                 raise AssertionError(f"unexpected url {url}")
 
         return Resp()
@@ -111,7 +112,9 @@ def test_igdb_cache_is_id_based(tmp_path, monkeypatch):
             }
         ]
 
-    monkeypatch.setattr("game_catalog_builder.clients.igdb_client.IGDBClient._ensure_token", lambda self: None)
+    monkeypatch.setattr(
+        "game_catalog_builder.clients.igdb_client.IGDBClient._ensure_token", lambda self: None
+    )
     client = IGDBClient(
         client_id="x",
         client_secret="y",
@@ -129,3 +132,20 @@ def test_igdb_cache_is_id_based(tmp_path, monkeypatch):
     raw = json.loads((tmp_path / "igdb_cache.json").read_text(encoding="utf-8"))
     assert raw["by_name"]["en:example game"] == "en:42"
     assert raw["by_id"]["en:42"]["IGDB_ID"] == "42"
+
+
+def test_hltb_cache_falls_back_to_name_id_when_missing_game_id(tmp_path, monkeypatch):
+    from game_catalog_builder.clients.hltb_client import HLTBClient
+
+    class FakeResult:
+        game_id = None
+        game_name = "Example Game"
+        main_story = "1"
+        main_extra = ""
+        completionist = ""
+
+    client = HLTBClient(cache_path=tmp_path / "hltb_cache.json")
+    monkeypatch.setattr(client.client, "search", lambda name: [FakeResult()])
+
+    data = client.search("Example Game")
+    assert data["HLTB_Name"] == "Example Game"

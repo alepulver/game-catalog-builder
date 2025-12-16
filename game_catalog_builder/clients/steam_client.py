@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import logging
 import re
-import requests
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any
+
+import requests
 
 from ..utils.utilities import (
+    RateLimiter,
+    load_json_cache,
     normalize_game_name,
     pick_best_match,
-    load_json_cache,
     save_json_cache,
-    RateLimiter,
     with_retries,
 )
 
@@ -26,9 +27,9 @@ class SteamClient:
         min_interval_s: float = 1.0,
     ):
         self.cache_path = Path(cache_path)
-        self._by_id: Dict[str, Any] = {}
-        self._by_name: Dict[str, Optional[str]] = {}
-        self._details_by_id: Dict[str, Any] = {}
+        self._by_id: dict[str, Any] = {}
+        self._by_name: dict[str, str | None] = {}
+        self._details_by_id: dict[str, Any] = {}
         self._load_cache(load_json_cache(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
 
@@ -39,26 +40,15 @@ class SteamClient:
         by_id = raw.get("by_id")
         by_name = raw.get("by_name")
         by_details = raw.get("by_details")
-        if isinstance(by_id, dict) and isinstance(by_name, dict):
-            self._by_id = {str(k): v for k, v in by_id.items()}
-            self._by_name = {str(k): (str(v) if v else None) for k, v in by_name.items()}
-            if isinstance(by_details, dict):
-                self._details_by_id = {str(k): v for k, v in by_details.items()}
+        if not (isinstance(by_id, dict) and isinstance(by_name, dict)):
+            logging.warning(
+                "Steam cache file is in an incompatible format; ignoring it (delete it to rebuild)."
+            )
             return
-
-        # Backward compatibility: old caches stored name_key -> best item / None.
-        for name_key, value in raw.items():
-            if value is None:
-                self._by_name[str(name_key)] = None
-                continue
-            if not isinstance(value, dict):
-                continue
-            appid = value.get("id")
-            if appid is None:
-                continue
-            appid_str = str(appid)
-            self._by_id[appid_str] = value
-            self._by_name[str(name_key)] = appid_str
+        self._by_id = {str(k): v for k, v in by_id.items()}
+        self._by_name = {str(k): (str(v) if v else None) for k, v in by_name.items()}
+        if isinstance(by_details, dict):
+            self._details_by_id = {str(k): v for k, v in by_details.items()}
 
     def _save_cache(self) -> None:
         save_json_cache(
@@ -69,7 +59,7 @@ class SteamClient:
     # -------------------------------------------------
     # Search AppID by name
     # -------------------------------------------------
-    def search_appid(self, game_name: str) -> Optional[Dict[str, Any]]:
+    def search_appid(self, game_name: str) -> dict[str, Any] | None:
         key = normalize_game_name(game_name)
 
         if key in self._by_name:
@@ -137,7 +127,7 @@ class SteamClient:
     # -------------------------------------------------
     # Game details
     # -------------------------------------------------
-    def get_app_details(self, appid: int) -> Optional[Dict[str, Any]]:
+    def get_app_details(self, appid: int) -> dict[str, Any] | None:
         cached = self._details_by_id.get(str(appid))
         if isinstance(cached, dict):
             return cached
@@ -170,7 +160,7 @@ class SteamClient:
     # Metadata extraction
     # -------------------------------------------------
     @staticmethod
-    def extract_fields(appid: int, details: Dict[str, Any]) -> Dict[str, str]:
+    def extract_fields(appid: int, details: dict[str, Any]) -> dict[str, str]:
         if not details:
             return {}
 
@@ -184,10 +174,7 @@ class SteamClient:
         elif "price_overview" in details:
             price = str(details["price_overview"].get("final_formatted", ""))
 
-        categories = [
-            c.get("description", "")
-            for c in details.get("categories", [])
-        ]
+        categories = [c.get("description", "") for c in details.get("categories", [])]
 
         # Real Steam tags come indirectly from genres + categories + metadata
         genres = [g.get("description", "") for g in details.get("genres", [])]

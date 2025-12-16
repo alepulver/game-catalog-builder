@@ -30,7 +30,7 @@ Docs:
 
 | Path | Observed types | Example | Example file |
 |---|---|---|---|
-| `$` | `object` | `{"count": 9709, "next": "https://api.rawg.io/api/games?key=7e2d873737374ee4a6044ced7272a146&page=2&page_size=10&search=Doom+%282016%29", "previous": null, "results": [{"slug": "...` | `doom-2016/rawg.search.json` |
+| `$` | `object` | `{"count": 9709, "next": "https://api.rawg.io/api/games?key=7e2d873737374ee4a6044ced7272a146&lang=en&page=2&page_size=10&search=Doom+%282016%29", "previous": null, "results": [{"...` | `doom-2016/rawg.search.json` |
 | `achievements_count` | `number` | `334` | `doom-2016/rawg.detail.json` |
 | `added` | `number` | `13956` | `doom-2016/rawg.detail.json` |
 | `added_by_status` | `object` | `{"yet": 602, "owned": 8758, "beaten": 2989, "toplay": 527, "dropped": 774, "playing": 306}` | `doom-2016/rawg.detail.json` |
@@ -96,7 +96,7 @@ Docs:
 | `best.reviews_count` | `number` | `3637` | `doom-2016/rawg.best.json` |
 | `best.reviews_text_count` | `number` | `29` | `doom-2016/rawg.best.json` |
 | `best.saturated_color` | `string` | `"0f0f0f"` | `doom-2016/rawg.best.json` |
-| `best.score` | `string` | `"77.28927"` | `doom-2016/rawg.best.json` |
+| `best.score` | `string` | `"77.26077"` | `doom-2016/rawg.best.json` |
 | `best.short_screenshots` | `array` | `[{"id": -1, "image": "https://media.rawg.io/media/games/587/587588c64afbff80e6f444eb2e46f9da.jpg"}, {"id": 22393, "image": "https://media.rawg.io/media/screenshots/353/353c1e834...` | `doom-2016/rawg.best.json` |
 | `best.short_screenshots[]` | `object` | `{"id": -1, "image": "https://media.rawg.io/media/games/587/587588c64afbff80e6f444eb2e46f9da.jpg"}` | `doom-2016/rawg.best.json` |
 | `best.short_screenshots[].id` | `number` | `-1` | `doom-2016/rawg.best.json` |
@@ -138,11 +138,11 @@ Docs:
 | `esrb_rating.name` | `string` | `"Mature"` | `doom-2016/rawg.detail.json` |
 | `esrb_rating.slug` | `string` | `"mature"` | `doom-2016/rawg.detail.json` |
 | `game_series_count` | `number` | `9` | `doom-2016/rawg.detail.json` |
-| `genres` | `array` | `[{"id": 4, "name": "Action", "slug": "action", "games_count": 191319, "image_background": "https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"}, {"id": 2...` | `doom-2016/rawg.detail.json` |
-| `genres[]` | `object` | `{"id": 4, "name": "Action", "slug": "action", "games_count": 191319, "image_background": "https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"}` | `doom-2016/rawg.detail.json` |
-| `genres[].games_count` | `number` | `191319` | `doom-2016/rawg.detail.json` |
+| `genres` | `array` | `[{"id": 4, "name": "Action", "slug": "action", "games_count": 191338, "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"}, {"id": 2...` | `doom-2016/rawg.detail.json` |
+| `genres[]` | `object` | `{"id": 4, "name": "Action", "slug": "action", "games_count": 191338, "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"}` | `doom-2016/rawg.detail.json` |
+| `genres[].games_count` | `number` | `191338` | `doom-2016/rawg.detail.json` |
 | `genres[].id` | `number` | `4` | `doom-2016/rawg.detail.json` |
-| `genres[].image_background` | `string` | `"https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"` | `doom-2016/rawg.detail.json` |
+| `genres[].image_background` | `string` | `"https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"` | `doom-2016/rawg.detail.json` |
 | `genres[].name` | `string` | `"Action"` | `doom-2016/rawg.detail.json` |
 | `genres[].slug` | `string` | `"action"` | `doom-2016/rawg.detail.json` |
 | `id` | `number` | `2454` | `doom-2016/rawg.detail.json` |
@@ -152,7 +152,7 @@ Docs:
 | `movies_count` | `number` | `1` | `doom-2016/rawg.detail.json` |
 | `name` | `string` | `"DOOM (2016)"` | `doom-2016/rawg.detail.json` |
 | `name_original` | `string` | `"DOOM (2016)"` | `doom-2016/rawg.detail.json` |
-| `next` | `string` | `"https://api.rawg.io/api/games?key=7e2d873737374ee4a6044ced7272a146&page=2&page_size=10&search=Doom+%282016%29"` | `doom-2016/rawg.search.json` |
+| `next` | `string` | `"https://api.rawg.io/api/games?key=7e2d873737374ee4a6044ced7272a146&lang=en&page=2&page_size=10&search=Doom+%282016%29"` | `doom-2016/rawg.search.json` |
 | `parent_achievements_count` | `number` | `71` | `doom-2016/rawg.detail.json` |
 | `parent_platforms` | `array` | `[{"platform": {"id": 1, "name": "PC", "slug": "pc"}}, {"platform": {"id": 2, "name": "PlayStation", "slug": "playstation"}}, {"platform": {"id": 3, "name": "Xbox", "slug": "xbox...` | `doom-2016/rawg.detail.json` |
 | `parent_platforms[]` | `object` | `{"platform": {"id": 1, "name": "PC", "slug": "pc"}}` | `doom-2016/rawg.detail.json` |
@@ -161,13 +161,13 @@ Docs:
 | `parent_platforms[].platform.name` | `string` | `"PC"` | `doom-2016/rawg.detail.json` |
 | `parent_platforms[].platform.slug` | `string` | `"pc"` | `doom-2016/rawg.detail.json` |
 | `parents_count` | `number` | `0` | `doom-2016/rawg.detail.json` |
-| `platforms` | `array` | `[{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560082, "image_background": "https://media.rawg.io/media/...` | `doom-2016/rawg.detail.json` |
-| `platforms[]` | `object` | `{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560082, "image_background": "https://media.rawg.io/media/g...` | `doom-2016/rawg.detail.json` |
-| `platforms[].platform` | `object` | `{"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560082, "image_background": "https://media.rawg.io/media/games/d82/d829...` | `doom-2016/rawg.detail.json` |
-| `platforms[].platform.games_count` | `number` | `560082` | `doom-2016/rawg.detail.json` |
+| `platforms` | `array` | `[{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560107, "image_background": "https://media.rawg.io/media/...` | `doom-2016/rawg.detail.json` |
+| `platforms[]` | `object` | `{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560107, "image_background": "https://media.rawg.io/media/g...` | `doom-2016/rawg.detail.json` |
+| `platforms[].platform` | `object` | `{"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560107, "image_background": "https://media.rawg.io/media/games/6fc/6fcf...` | `doom-2016/rawg.detail.json` |
+| `platforms[].platform.games_count` | `number` | `560107` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.id` | `number` | `4` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.image` | `null` | `null` | `doom-2016/rawg.detail.json` |
-| `platforms[].platform.image_background` | `string` | `"https://media.rawg.io/media/games/d82/d82990b9c67ba0d2d09d4e6fa88885a7.jpg"` | `doom-2016/rawg.detail.json` |
+| `platforms[].platform.image_background` | `string` | `"https://media.rawg.io/media/games/6fc/6fcf4cd3b17c288821388e6085bb0fc9.jpg"` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.name` | `string` | `"PC"` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.slug` | `string` | `"pc"` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.year_end` | `null` | `null` | `doom-2016/rawg.detail.json` |
@@ -216,7 +216,7 @@ Docs:
 | `results` | `array` | `[{"slug": "doom", "name": "DOOM (2016)", "playtime": 10, "platforms": [{"platform": {"id": 4, "name": "PC", "slug": "pc"}}, {"platform": {"id": 1, "name": "Xbox One", "slug": "x...` | `doom-2016/rawg.search.json` |
 | `results[]` | `object` | `{"slug": "doom", "name": "DOOM (2016)", "playtime": 10, "platforms": [{"platform": {"id": 4, "name": "PC", "slug": "pc"}}, {"platform": {"id": 1, "name": "Xbox One", "slug": "xb...` | `doom-2016/rawg.search.json` |
 | `results[].added` | `number` | `13956` | `doom-2016/rawg.search.json` |
-| `results[].added_by_status` | `object` | `{"yet": 602, "owned": 8758, "beaten": 2989, "toplay": 527, "dropped": 774, "playing": 306}` | `doom-2016/rawg.search.json` |
+| `results[].added_by_status` | `null, object` | `{"yet": 602, "owned": 8758, "beaten": 2989, "toplay": 527, "dropped": 774, "playing": 306}` | `doom-2016/rawg.search.json` |
 | `results[].added_by_status.beaten` | `number` | `2989` | `doom-2016/rawg.search.json` |
 | `results[].added_by_status.dropped` | `number` | `774` | `doom-2016/rawg.search.json` |
 | `results[].added_by_status.owned` | `number` | `8758` | `doom-2016/rawg.search.json` |
@@ -225,6 +225,7 @@ Docs:
 | `results[].added_by_status.yet` | `number` | `602` | `doom-2016/rawg.search.json` |
 | `results[].background_image` | `string` | `"https://media.rawg.io/media/games/587/587588c64afbff80e6f444eb2e46f9da.jpg"` | `doom-2016/rawg.search.json` |
 | `results[].clip` | `null` | `null` | `doom-2016/rawg.search.json` |
+| `results[].community_rating` | `number` | `0` | `doom-2016/rawg.search.json` |
 | `results[].dominant_color` | `string` | `"0f0f0f"` | `doom-2016/rawg.search.json` |
 | `results[].esrb_rating` | `null, object` | `{"id": 4, "name": "Mature", "slug": "mature", "name_en": "Mature", "name_ru": "С 17 лет"}` | `doom-2016/rawg.search.json` |
 | `results[].esrb_rating.id` | `number` | `4` | `doom-2016/rawg.search.json` |
@@ -257,7 +258,7 @@ Docs:
 | `results[].reviews_count` | `number` | `3637` | `doom-2016/rawg.search.json` |
 | `results[].reviews_text_count` | `number` | `29` | `doom-2016/rawg.search.json` |
 | `results[].saturated_color` | `string` | `"0f0f0f"` | `doom-2016/rawg.search.json` |
-| `results[].score` | `string` | `"77.28927"` | `doom-2016/rawg.search.json` |
+| `results[].score` | `string` | `"77.26077"` | `doom-2016/rawg.search.json` |
 | `results[].short_screenshots` | `array` | `[{"id": -1, "image": "https://media.rawg.io/media/games/587/587588c64afbff80e6f444eb2e46f9da.jpg"}, {"id": 22393, "image": "https://media.rawg.io/media/screenshots/353/353c1e834...` | `doom-2016/rawg.search.json` |
 | `results[].short_screenshots[]` | `object` | `{"id": -1, "image": "https://media.rawg.io/media/games/587/587588c64afbff80e6f444eb2e46f9da.jpg"}` | `doom-2016/rawg.search.json` |
 | `results[].short_screenshots[].id` | `number` | `-1` | `doom-2016/rawg.search.json` |
@@ -286,23 +287,23 @@ Docs:
 | `score` | `number` | `100` | `doom-2016/rawg.best.json` |
 | `screenshots_count` | `number` | `17` | `doom-2016/rawg.detail.json` |
 | `slug` | `string` | `"doom"` | `doom-2016/rawg.detail.json` |
-| `stores` | `array` | `[{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7098, "image_background": "https://media.rawg.io/media/games/c80...` | `doom-2016/rawg.detail.json` |
-| `stores[]` | `object` | `{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7098, "image_background": "https://media.rawg.io/media/games/c80/...` | `doom-2016/rawg.detail.json` |
+| `stores` | `array` | `[{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7113, "image_background": "https://media.rawg.io/media/games/f6b...` | `doom-2016/rawg.detail.json` |
+| `stores[]` | `object` | `{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7113, "image_background": "https://media.rawg.io/media/games/f6b/...` | `doom-2016/rawg.detail.json` |
 | `stores[].id` | `number` | `1003369` | `doom-2016/rawg.detail.json` |
-| `stores[].store` | `object` | `{"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7098, "image_background": "https://media.rawg.io/media/games/c80/c80bcf321da44d69b18a06c04d942662.jpg"}` | `doom-2016/rawg.detail.json` |
+| `stores[].store` | `object` | `{"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7113, "image_background": "https://media.rawg.io/media/games/f6b/f6bed028b02369d4cab548f4f9337e81.jpg"}` | `doom-2016/rawg.detail.json` |
 | `stores[].store.domain` | `string` | `"gog.com"` | `doom-2016/rawg.detail.json` |
-| `stores[].store.games_count` | `number` | `7098` | `doom-2016/rawg.detail.json` |
+| `stores[].store.games_count` | `number` | `7113` | `doom-2016/rawg.detail.json` |
 | `stores[].store.id` | `number` | `5` | `doom-2016/rawg.detail.json` |
-| `stores[].store.image_background` | `string` | `"https://media.rawg.io/media/games/c80/c80bcf321da44d69b18a06c04d942662.jpg"` | `doom-2016/rawg.detail.json` |
+| `stores[].store.image_background` | `string` | `"https://media.rawg.io/media/games/f6b/f6bed028b02369d4cab548f4f9337e81.jpg"` | `doom-2016/rawg.detail.json` |
 | `stores[].store.name` | `string` | `"GOG"` | `doom-2016/rawg.detail.json` |
 | `stores[].store.slug` | `string` | `"gog"` | `doom-2016/rawg.detail.json` |
 | `stores[].url` | `string` | `""` | `doom-2016/rawg.detail.json` |
 | `suggestions_count` | `number` | `672` | `doom-2016/rawg.detail.json` |
-| `tags` | `array` | `[{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250602, "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b...` | `doom-2016/rawg.detail.json` |
-| `tags[]` | `object` | `{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250602, "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b1...` | `doom-2016/rawg.detail.json` |
-| `tags[].games_count` | `number` | `250602` | `doom-2016/rawg.detail.json` |
+| `tags` | `array` | `[{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250603, "image_background": "https://media.rawg.io/media/games/b45/b45575f34285f2c4...` | `doom-2016/rawg.detail.json` |
+| `tags[]` | `object` | `{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250603, "image_background": "https://media.rawg.io/media/games/b45/b45575f34285f2c44...` | `doom-2016/rawg.detail.json` |
+| `tags[].games_count` | `number` | `250603` | `doom-2016/rawg.detail.json` |
 | `tags[].id` | `number` | `31` | `doom-2016/rawg.detail.json` |
-| `tags[].image_background` | `string` | `"https://media.rawg.io/media/games/120/1201a40e4364557b124392ee50317b99.jpg"` | `doom-2016/rawg.detail.json` |
+| `tags[].image_background` | `string` | `"https://media.rawg.io/media/games/b45/b45575f34285f2c4479c9a5f719d972e.jpg"` | `doom-2016/rawg.detail.json` |
 | `tags[].language` | `string` | `"eng"` | `doom-2016/rawg.detail.json` |
 | `tags[].name` | `string` | `"Singleplayer"` | `doom-2016/rawg.detail.json` |
 | `tags[].slug` | `string` | `"singleplayer"` | `doom-2016/rawg.detail.json` |
@@ -374,11 +375,11 @@ Docs:
 | `esrb_rating.name` | `string` | `"Mature"` | `doom-2016/rawg.detail.json` |
 | `esrb_rating.slug` | `string` | `"mature"` | `doom-2016/rawg.detail.json` |
 | `game_series_count` | `number` | `9` | `doom-2016/rawg.detail.json` |
-| `genres` | `array` | `[{"id": 4, "name": "Action", "slug": "action", "games_count": 191319, "image_background": "https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"}, {"id": 2...` | `doom-2016/rawg.detail.json` |
-| `genres[]` | `object` | `{"id": 4, "name": "Action", "slug": "action", "games_count": 191319, "image_background": "https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"}` | `doom-2016/rawg.detail.json` |
-| `genres[].games_count` | `number` | `191319` | `doom-2016/rawg.detail.json` |
+| `genres` | `array` | `[{"id": 4, "name": "Action", "slug": "action", "games_count": 191338, "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"}, {"id": 2...` | `doom-2016/rawg.detail.json` |
+| `genres[]` | `object` | `{"id": 4, "name": "Action", "slug": "action", "games_count": 191338, "image_background": "https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"}` | `doom-2016/rawg.detail.json` |
+| `genres[].games_count` | `number` | `191338` | `doom-2016/rawg.detail.json` |
 | `genres[].id` | `number` | `4` | `doom-2016/rawg.detail.json` |
-| `genres[].image_background` | `string` | `"https://media.rawg.io/media/games/4be/4be6a6ad0364751a96229c56bf69be59.jpg"` | `doom-2016/rawg.detail.json` |
+| `genres[].image_background` | `string` | `"https://media.rawg.io/media/games/310/3106b0e012271c5ffb16497b070be739.jpg"` | `doom-2016/rawg.detail.json` |
 | `genres[].slug` | `string` | `"action"` | `doom-2016/rawg.detail.json` |
 | `metacritic_platforms` | `array` | `[]` | `doom-2016/rawg.detail.json` |
 | `movies_count` | `number` | `1` | `doom-2016/rawg.detail.json` |
@@ -390,13 +391,13 @@ Docs:
 | `parent_platforms[].platform.id` | `number` | `1` | `doom-2016/rawg.detail.json` |
 | `parent_platforms[].platform.slug` | `string` | `"pc"` | `doom-2016/rawg.detail.json` |
 | `parents_count` | `number` | `0` | `doom-2016/rawg.detail.json` |
-| `platforms` | `array` | `[{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560082, "image_background": "https://media.rawg.io/media/...` | `doom-2016/rawg.detail.json` |
-| `platforms[]` | `object` | `{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560082, "image_background": "https://media.rawg.io/media/g...` | `doom-2016/rawg.detail.json` |
-| `platforms[].platform` | `object` | `{"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560082, "image_background": "https://media.rawg.io/media/games/d82/d829...` | `doom-2016/rawg.detail.json` |
-| `platforms[].platform.games_count` | `number` | `560082` | `doom-2016/rawg.detail.json` |
+| `platforms` | `array` | `[{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560107, "image_background": "https://media.rawg.io/media/...` | `doom-2016/rawg.detail.json` |
+| `platforms[]` | `object` | `{"platform": {"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560107, "image_background": "https://media.rawg.io/media/g...` | `doom-2016/rawg.detail.json` |
+| `platforms[].platform` | `object` | `{"id": 4, "name": "PC", "slug": "pc", "image": null, "year_end": null, "year_start": null, "games_count": 560107, "image_background": "https://media.rawg.io/media/games/6fc/6fcf...` | `doom-2016/rawg.detail.json` |
+| `platforms[].platform.games_count` | `number` | `560107` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.id` | `number` | `4` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.image` | `null` | `null` | `doom-2016/rawg.detail.json` |
-| `platforms[].platform.image_background` | `string` | `"https://media.rawg.io/media/games/d82/d82990b9c67ba0d2d09d4e6fa88885a7.jpg"` | `doom-2016/rawg.detail.json` |
+| `platforms[].platform.image_background` | `string` | `"https://media.rawg.io/media/games/6fc/6fcf4cd3b17c288821388e6085bb0fc9.jpg"` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.slug` | `string` | `"pc"` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.year_end` | `null` | `null` | `doom-2016/rawg.detail.json` |
 | `platforms[].platform.year_start` | `null` | `null` | `doom-2016/rawg.detail.json` |
@@ -438,21 +439,21 @@ Docs:
 | `reviews_text_count` | `number` | `40` | `doom-2016/rawg.detail.json` |
 | `saturated_color` | `string` | `"0f0f0f"` | `doom-2016/rawg.detail.json` |
 | `screenshots_count` | `number` | `17` | `doom-2016/rawg.detail.json` |
-| `stores` | `array` | `[{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7098, "image_background": "https://media.rawg.io/media/games/c80...` | `doom-2016/rawg.detail.json` |
-| `stores[]` | `object` | `{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7098, "image_background": "https://media.rawg.io/media/games/c80/...` | `doom-2016/rawg.detail.json` |
+| `stores` | `array` | `[{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7113, "image_background": "https://media.rawg.io/media/games/f6b...` | `doom-2016/rawg.detail.json` |
+| `stores[]` | `object` | `{"id": 1003369, "url": "", "store": {"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7113, "image_background": "https://media.rawg.io/media/games/f6b/...` | `doom-2016/rawg.detail.json` |
 | `stores[].id` | `number` | `1003369` | `doom-2016/rawg.detail.json` |
-| `stores[].store` | `object` | `{"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7098, "image_background": "https://media.rawg.io/media/games/c80/c80bcf321da44d69b18a06c04d942662.jpg"}` | `doom-2016/rawg.detail.json` |
+| `stores[].store` | `object` | `{"id": 5, "name": "GOG", "slug": "gog", "domain": "gog.com", "games_count": 7113, "image_background": "https://media.rawg.io/media/games/f6b/f6bed028b02369d4cab548f4f9337e81.jpg"}` | `doom-2016/rawg.detail.json` |
 | `stores[].store.domain` | `string` | `"gog.com"` | `doom-2016/rawg.detail.json` |
-| `stores[].store.games_count` | `number` | `7098` | `doom-2016/rawg.detail.json` |
+| `stores[].store.games_count` | `number` | `7113` | `doom-2016/rawg.detail.json` |
 | `stores[].store.id` | `number` | `5` | `doom-2016/rawg.detail.json` |
-| `stores[].store.image_background` | `string` | `"https://media.rawg.io/media/games/c80/c80bcf321da44d69b18a06c04d942662.jpg"` | `doom-2016/rawg.detail.json` |
+| `stores[].store.image_background` | `string` | `"https://media.rawg.io/media/games/f6b/f6bed028b02369d4cab548f4f9337e81.jpg"` | `doom-2016/rawg.detail.json` |
 | `stores[].store.slug` | `string` | `"gog"` | `doom-2016/rawg.detail.json` |
 | `suggestions_count` | `number` | `672` | `doom-2016/rawg.detail.json` |
-| `tags` | `array` | `[{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250602, "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b...` | `doom-2016/rawg.detail.json` |
-| `tags[]` | `object` | `{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250602, "image_background": "https://media.rawg.io/media/games/120/1201a40e4364557b1...` | `doom-2016/rawg.detail.json` |
-| `tags[].games_count` | `number` | `250602` | `doom-2016/rawg.detail.json` |
+| `tags` | `array` | `[{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250603, "image_background": "https://media.rawg.io/media/games/b45/b45575f34285f2c4...` | `doom-2016/rawg.detail.json` |
+| `tags[]` | `object` | `{"id": 31, "name": "Singleplayer", "slug": "singleplayer", "language": "eng", "games_count": 250603, "image_background": "https://media.rawg.io/media/games/b45/b45575f34285f2c44...` | `doom-2016/rawg.detail.json` |
+| `tags[].games_count` | `number` | `250603` | `doom-2016/rawg.detail.json` |
 | `tags[].id` | `number` | `31` | `doom-2016/rawg.detail.json` |
-| `tags[].image_background` | `string` | `"https://media.rawg.io/media/games/120/1201a40e4364557b124392ee50317b99.jpg"` | `doom-2016/rawg.detail.json` |
+| `tags[].image_background` | `string` | `"https://media.rawg.io/media/games/b45/b45575f34285f2c4479c9a5f719d972e.jpg"` | `doom-2016/rawg.detail.json` |
 | `tags[].language` | `string` | `"eng"` | `doom-2016/rawg.detail.json` |
 | `tags[].slug` | `string` | `"singleplayer"` | `doom-2016/rawg.detail.json` |
 | `twitch_count` | `number` | `0` | `doom-2016/rawg.detail.json` |
@@ -469,18 +470,18 @@ Docs:
 
 | Path | Description | Observed types | Example | Example file |
 |---|---|---|---|---|
-| `$[]` | IGDB returns a list of game objects for a query | `object` | `{"id": 7351, "aggregated_rating": 86.96875, "aggregated_rating_count": 28, "dlcs": [25571, 26558, 22431], "external_games": [{"id": 1934827, "uid": "B01CTWZEDE"}, {"id": 138274,...` | `doom-2016/igdb.games.search.json` |
+| `$[]` | IGDB returns a list of game objects for a query | `object` | `{"id": 7351, "aggregated_rating": 86.96875, "aggregated_rating_count": 28, "dlcs": [25571, 26558, 22431], "external_games": [{"id": 1934827, "uid": "B01CTWZEDE", "external_game_...` | `doom-2016/igdb.games.search.json` |
 | `$[].id` | Game id | `number` | `7351` | `doom-2016/igdb.games.search.json` |
 | `$[].name` | Game title | `string` | `"Doom"` | `doom-2016/igdb.games.search.json` |
 | `$[].slug` | URL slug | `string` | `"doom--2"` | `doom-2016/igdb.games.search.json` |
 | `$[].summary` | Summary text | `string` | `"Developed by id software, the studio that pioneered the first-person shooter genre and created multiplayer Deathmatch, Doom returns as a brutally fun and challenging modern-day...` | `doom-2016/igdb.games.search.json` |
 | `$[].storyline` | Storyline text | `string` | `"You’ve come here for a reason. The Union Aerospace Corporation’s massive research facility on Mars is overwhelmed by fierce and powerful demons, and only one person stands betw...` | `doom-2016/igdb.games.search.json` |
 | `$[].rating` | User rating (0-100) when present | `number` | `85.30925725648731` | `doom-2016/igdb.games.search.json` |
-| `$[].rating_count` | Rating count when present | `number` | `1794` | `doom-2016/igdb.games.search.json` |
+| `$[].rating_count` | Rating count when present | `number` | `1795` | `doom-2016/igdb.games.search.json` |
 | `$[].aggregated_rating` | Aggregated critic rating (0-100) when present | `number` | `86.96875` | `doom-2016/igdb.games.search.json` |
 | `$[].aggregated_rating_count` | Aggregated rating count when present | `number` | `28` | `doom-2016/igdb.games.search.json` |
 | `$[].total_rating` | Combined rating (0-100) when present | `number` | `86.13900362824366` | `doom-2016/igdb.games.search.json` |
-| `$[].total_rating_count` | Combined rating count when present | `number` | `1822` | `doom-2016/igdb.games.search.json` |
+| `$[].total_rating_count` | Combined rating count when present | `number` | `1823` | `doom-2016/igdb.games.search.json` |
 | `$[].first_release_date` | First release date as unix timestamp (seconds) | `number` | `1463011200` | `doom-2016/igdb.games.search.json` |
 | `$[].genres[]` | Genre ids (use genres.name to expand in-query) | `number` | `5` | `doom-2016/igdb.games.search.json` |
 | `$[].themes[]` | Theme ids (use themes.name to expand in-query) | `number` | `1` | `doom-2016/igdb.games.search.json` |
@@ -511,7 +512,7 @@ Docs:
 | `$[].involved_companies[].developer` | Expanded involved company developer flag (when requested) | `` | `` | `` |
 | `$[].involved_companies[].publisher` | Expanded involved company publisher flag (when requested) | `` | `` | `` |
 | `$[].involved_companies[].company.name` | Expanded company name (when requested as involved_companies.company.name) | `` | `` | `` |
-| `$[].external_games[].external_game_source` | External mapping source id (1 == Steam) | `` | `` | `` |
+| `$[].external_games[].external_game_source` | External mapping source id (1 == Steam) | `number` | `20` | `doom-2016/igdb.games.search.json` |
 | `$[].external_games[].id` | External mapping row id | `number` | `1934827` | `doom-2016/igdb.games.search.json` |
 | `$[].external_games[].uid` | External mapping uid (Steam appid as string when source == 1) | `string` | `"B01CTWZEDE"` | `doom-2016/igdb.games.search.json` |
 
@@ -519,10 +520,10 @@ Docs:
 
 | Path | Observed types | Example | Example file |
 |---|---|---|---|
-| `$` | `array, object` | `[{"id": 7351, "aggregated_rating": 86.96875, "aggregated_rating_count": 28, "dlcs": [25571, 26558, 22431], "external_games": [{"id": 1934827, "uid": "B01CTWZEDE"}, {"id": 138274...` | `doom-2016/igdb.games.search.json` |
+| `$` | `array, object` | `[{"id": 7351, "aggregated_rating": 86.96875, "aggregated_rating_count": 28, "dlcs": [25571, 26558, 22431], "external_games": [{"id": 1934827, "uid": "B01CTWZEDE", "external_game...` | `doom-2016/igdb.games.search.json` |
 | `$[].dlcs` | `array` | `[25571, 26558, 22431]` | `doom-2016/igdb.games.search.json` |
-| `$[].external_games` | `array` | `[{"id": 1934827, "uid": "B01CTWZEDE"}, {"id": 138274, "uid": "20654"}, {"id": 1930257, "uid": "B00M3D8IYM"}, {"id": 1930098, "uid": "B00M3D8IPQ"}, {"id": 1932010, "uid": "B00M3D...` | `doom-2016/igdb.games.search.json` |
-| `$[].external_games[]` | `object` | `{"id": 1934827, "uid": "B01CTWZEDE"}` | `doom-2016/igdb.games.search.json` |
+| `$[].external_games` | `array` | `[{"id": 1934827, "uid": "B01CTWZEDE", "external_game_source": 20}, {"id": 2452790, "uid": "C3QH42WRGM3R", "external_game_source": 54}, {"id": 138274, "uid": "20654", "external_g...` | `doom-2016/igdb.games.search.json` |
+| `$[].external_games[]` | `object` | `{"id": 1934827, "uid": "B01CTWZEDE", "external_game_source": 20}` | `doom-2016/igdb.games.search.json` |
 | `$[].franchises` | `array` | `[798]` | `doom-2016/igdb.games.search.json` |
 | `$[].game_engines` | `array` | `[172]` | `doom-2016/igdb.games.search.json` |
 | `$[].game_modes` | `array` | `[1, 2, 3]` | `doom-2016/igdb.games.search.json` |
@@ -535,13 +536,14 @@ Docs:
 | `$[].similar_games` | `array` | `[1006, 19531, 2031, 571, 533, 9498, 3188, 9727, 7342, 231]` | `doom-2016/igdb.games.search.json` |
 | `$[].themes` | `array` | `[1, 18, 19]` | `doom-2016/igdb.games.search.json` |
 | `$[].websites` | `array` | `[61572, 799146, 730848, 904973, 904974, 904975, 904976, 799147, 61571, 5601, 43279, 51206, 332473, 43278, 61570]` | `doom-2016/igdb.games.search.json` |
-| `best` | `object` | `{"id": 7351, "aggregated_rating": 86.96875, "aggregated_rating_count": 28, "dlcs": [25571, 26558, 22431], "external_games": [{"id": 1934827, "uid": "B01CTWZEDE"}, {"id": 138274,...` | `doom-2016/igdb.best.json` |
+| `best` | `object` | `{"id": 7351, "aggregated_rating": 86.96875, "aggregated_rating_count": 28, "dlcs": [25571, 26558, 22431], "external_games": [{"id": 1934827, "uid": "B01CTWZEDE", "external_game_...` | `doom-2016/igdb.best.json` |
 | `best.aggregated_rating` | `number` | `86.96875` | `doom-2016/igdb.best.json` |
 | `best.aggregated_rating_count` | `number` | `28` | `doom-2016/igdb.best.json` |
 | `best.dlcs` | `array` | `[25571, 26558, 22431]` | `doom-2016/igdb.best.json` |
 | `best.dlcs[]` | `number` | `25571` | `doom-2016/igdb.best.json` |
-| `best.external_games` | `array` | `[{"id": 1934827, "uid": "B01CTWZEDE"}, {"id": 138274, "uid": "20654"}, {"id": 1930257, "uid": "B00M3D8IYM"}, {"id": 1930098, "uid": "B00M3D8IPQ"}, {"id": 1932010, "uid": "B00M3D...` | `doom-2016/igdb.best.json` |
-| `best.external_games[]` | `object` | `{"id": 1934827, "uid": "B01CTWZEDE"}` | `doom-2016/igdb.best.json` |
+| `best.external_games` | `array` | `[{"id": 1934827, "uid": "B01CTWZEDE", "external_game_source": 20}, {"id": 2452790, "uid": "C3QH42WRGM3R", "external_game_source": 54}, {"id": 138274, "uid": "20654", "external_g...` | `doom-2016/igdb.best.json` |
+| `best.external_games[]` | `object` | `{"id": 1934827, "uid": "B01CTWZEDE", "external_game_source": 20}` | `doom-2016/igdb.best.json` |
+| `best.external_games[].external_game_source` | `number` | `20` | `doom-2016/igdb.best.json` |
 | `best.external_games[].id` | `number` | `1934827` | `doom-2016/igdb.best.json` |
 | `best.external_games[].uid` | `string` | `"B01CTWZEDE"` | `doom-2016/igdb.best.json` |
 | `best.first_release_date` | `number` | `1463011200` | `doom-2016/igdb.best.json` |
@@ -566,7 +568,7 @@ Docs:
 | `best.ports` | `array` | `[76217]` | `doom-2016/igdb.best.json` |
 | `best.ports[]` | `number` | `76217` | `doom-2016/igdb.best.json` |
 | `best.rating` | `number` | `85.30925725648731` | `doom-2016/igdb.best.json` |
-| `best.rating_count` | `number` | `1794` | `doom-2016/igdb.best.json` |
+| `best.rating_count` | `number` | `1795` | `doom-2016/igdb.best.json` |
 | `best.similar_games` | `array` | `[1006, 19531, 2031, 571, 533, 9498, 3188, 9727, 7342, 231]` | `doom-2016/igdb.best.json` |
 | `best.similar_games[]` | `number` | `1006` | `doom-2016/igdb.best.json` |
 | `best.slug` | `string` | `"doom--2"` | `doom-2016/igdb.best.json` |
@@ -575,7 +577,7 @@ Docs:
 | `best.themes` | `array` | `[1, 18, 19]` | `doom-2016/igdb.best.json` |
 | `best.themes[]` | `number` | `1` | `doom-2016/igdb.best.json` |
 | `best.total_rating` | `number` | `86.13900362824366` | `doom-2016/igdb.best.json` |
-| `best.total_rating_count` | `number` | `1822` | `doom-2016/igdb.best.json` |
+| `best.total_rating_count` | `number` | `1823` | `doom-2016/igdb.best.json` |
 | `best.websites` | `array` | `[61572, 799146, 730848, 904973, 904974, 904975, 904976, 799147, 61571, 5601, 43279, 51206, 332473, 43278, 61570]` | `doom-2016/igdb.best.json` |
 | `best.websites[]` | `number` | `61572` | `doom-2016/igdb.best.json` |
 | `score` | `number` | `100` | `doom-2016/igdb.best.json` |
@@ -631,7 +633,7 @@ Docs:
 | `$.<appid>.data.metacritic.score` | Metacritic score (if present) | `number` | `85` | `doom-2016/steam.appdetails.json` |
 | `$.<appid>.data.developers[]` | Developer names | `string` | `"id Software"` | `doom-2016/steam.appdetails.json` |
 | `$.<appid>.data.publishers[]` | Publisher names | `string` | `"Bethesda Softworks"` | `doom-2016/steam.appdetails.json` |
-| `$.<appid>.data.recommendations.total` | Recommendation/review count | `number` | `148323` | `doom-2016/steam.appdetails.json` |
+| `$.<appid>.data.recommendations.total` | Recommendation/review count | `number` | `148330` | `doom-2016/steam.appdetails.json` |
 | `$.<appid>.data.price_overview.final_formatted` | Price string (if not free) | `string` | `"$11.99 USD"` | `doom-2016/steam.appdetails.json` |
 
 #### Observed in examples (not yet described)
@@ -773,8 +775,8 @@ Docs:
 | `379720.data.ratings.usk` | `object` | `{"required_age": "18", "rating": "18"}` | `doom-2016/steam.appdetails.json` |
 | `379720.data.ratings.usk.rating` | `string` | `"18"` | `doom-2016/steam.appdetails.json` |
 | `379720.data.ratings.usk.required_age` | `string` | `"18"` | `doom-2016/steam.appdetails.json` |
-| `379720.data.recommendations` | `object` | `{"total": 148323}` | `doom-2016/steam.appdetails.json` |
-| `379720.data.recommendations.total` | `number` | `148323` | `doom-2016/steam.appdetails.json` |
+| `379720.data.recommendations` | `object` | `{"total": 148330}` | `doom-2016/steam.appdetails.json` |
+| `379720.data.recommendations.total` | `number` | `148330` | `doom-2016/steam.appdetails.json` |
 | `379720.data.release_date` | `object` | `{"coming_soon": false, "date": "12 May, 2016"}` | `doom-2016/steam.appdetails.json` |
 | `379720.data.release_date.coming_soon` | `boolean` | `false` | `doom-2016/steam.appdetails.json` |
 | `379720.data.release_date.date` | `string` | `"12 May, 2016"` | `doom-2016/steam.appdetails.json` |
@@ -807,9 +809,9 @@ Docs:
 | `owners` | Owner range string | `string` | `"5,000,000 .. 10,000,000"` | `doom-2016/steamspy.appdetails.json` |
 | `players_forever` | Lifetime players | `` | `` | `` |
 | `ccu` | Current concurrent users | `number` | `1590` | `doom-2016/steamspy.appdetails.json` |
-| `average_forever` | Average playtime (minutes) | `number` | `1074` | `doom-2016/steamspy.appdetails.json` |
-| `average_2weeks` | Average playtime last 2 weeks (minutes) | `number` | `80` | `doom-2016/steamspy.appdetails.json` |
-| `median_2weeks` | Median playtime last 2 weeks (minutes) | `number` | `101` | `doom-2016/steamspy.appdetails.json` |
+| `average_forever` | Average playtime (minutes) | `number` | `1251` | `doom-2016/steamspy.appdetails.json` |
+| `average_2weeks` | Average playtime last 2 weeks (minutes) | `number` | `77` | `doom-2016/steamspy.appdetails.json` |
+| `median_2weeks` | Median playtime last 2 weeks (minutes) | `number` | `90` | `doom-2016/steamspy.appdetails.json` |
 | `positive` | Positive ratings count | `number` | `198001` | `doom-2016/steamspy.appdetails.json` |
 | `negative` | Negative ratings count | `number` | `9278` | `doom-2016/steamspy.appdetails.json` |
 | `price` | Price in cents (when present) | `string` | `"1999"` | `doom-2016/steamspy.appdetails.json` |
@@ -825,7 +827,7 @@ Docs:
 | `appid` | `number` | `379720` | `doom-2016/steamspy.appdetails.json` |
 | `developer` | `string` | `"id Software"` | `doom-2016/steamspy.appdetails.json` |
 | `discount` | `string` | `"0"` | `doom-2016/steamspy.appdetails.json` |
-| `median_forever` | `number` | `516` | `doom-2016/steamspy.appdetails.json` |
+| `median_forever` | `number` | `503` | `doom-2016/steamspy.appdetails.json` |
 | `name` | `string` | `"DOOM"` | `doom-2016/steamspy.appdetails.json` |
 | `publisher` | `string` | `"Bethesda Softworks"` | `doom-2016/steamspy.appdetails.json` |
 | `score_rank` | `string` | `""` | `doom-2016/steamspy.appdetails.json` |
@@ -905,11 +907,11 @@ Docs:
 | `attempts[].results[].json_content.comp_main_count` | `number` | `3414` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.comp_plus` | `number` | `59199` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.comp_plus_count` | `number` | `2917` | `doom-2016/hltb.search.json` |
-| `attempts[].results[].json_content.count_backlog` | `number` | `17309` | `doom-2016/hltb.search.json` |
-| `attempts[].results[].json_content.count_comp` | `number` | `20055` | `doom-2016/hltb.search.json` |
-| `attempts[].results[].json_content.count_playing` | `number` | `260` | `doom-2016/hltb.search.json` |
-| `attempts[].results[].json_content.count_retired` | `number` | `1139` | `doom-2016/hltb.search.json` |
-| `attempts[].results[].json_content.count_review` | `number` | `5466` | `doom-2016/hltb.search.json` |
+| `attempts[].results[].json_content.count_backlog` | `number` | `17315` | `doom-2016/hltb.search.json` |
+| `attempts[].results[].json_content.count_comp` | `number` | `20054` | `doom-2016/hltb.search.json` |
+| `attempts[].results[].json_content.count_playing` | `number` | `261` | `doom-2016/hltb.search.json` |
+| `attempts[].results[].json_content.count_retired` | `number` | `1138` | `doom-2016/hltb.search.json` |
+| `attempts[].results[].json_content.count_review` | `number` | `5469` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.count_speedrun` | `number` | `6` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.game_alias` | `string` | `"Doom, Doom 4, Doom 2016"` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.game_id` | `number` | `2708` | `doom-2016/hltb.search.json` |
@@ -922,7 +924,7 @@ Docs:
 | `attempts[].results[].json_content.invested_mp` | `number` | `29404` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.invested_mp_count` | `number` | `86` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.profile_platform` | `string` | `"Google Stadia, Nintendo Switch, PC, PlayStation 4, Xbox One"` | `doom-2016/hltb.search.json` |
-| `attempts[].results[].json_content.profile_popular` | `number` | `1307` | `doom-2016/hltb.search.json` |
+| `attempts[].results[].json_content.profile_popular` | `number` | `1245` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.release_world` | `number` | `2016` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].json_content.review_score` | `number` | `84` | `doom-2016/hltb.search.json` |
 | `attempts[].results[].main_extra` | `number` | `16.44` | `doom-2016/hltb.search.json` |
@@ -957,11 +959,11 @@ Docs:
 | `json_content.comp_main_count` | `number` | `3414` | `doom-2016/hltb.best.json` |
 | `json_content.comp_plus` | `number` | `59199` | `doom-2016/hltb.best.json` |
 | `json_content.comp_plus_count` | `number` | `2917` | `doom-2016/hltb.best.json` |
-| `json_content.count_backlog` | `number` | `17309` | `doom-2016/hltb.best.json` |
-| `json_content.count_comp` | `number` | `20055` | `doom-2016/hltb.best.json` |
-| `json_content.count_playing` | `number` | `260` | `doom-2016/hltb.best.json` |
-| `json_content.count_retired` | `number` | `1139` | `doom-2016/hltb.best.json` |
-| `json_content.count_review` | `number` | `5466` | `doom-2016/hltb.best.json` |
+| `json_content.count_backlog` | `number` | `17315` | `doom-2016/hltb.best.json` |
+| `json_content.count_comp` | `number` | `20054` | `doom-2016/hltb.best.json` |
+| `json_content.count_playing` | `number` | `261` | `doom-2016/hltb.best.json` |
+| `json_content.count_retired` | `number` | `1138` | `doom-2016/hltb.best.json` |
+| `json_content.count_review` | `number` | `5469` | `doom-2016/hltb.best.json` |
 | `json_content.count_speedrun` | `number` | `6` | `doom-2016/hltb.best.json` |
 | `json_content.game_alias` | `string` | `"Doom, Doom 4, Doom 2016"` | `doom-2016/hltb.best.json` |
 | `json_content.game_id` | `number` | `2708` | `doom-2016/hltb.best.json` |
@@ -974,7 +976,7 @@ Docs:
 | `json_content.invested_mp` | `number` | `29404` | `doom-2016/hltb.best.json` |
 | `json_content.invested_mp_count` | `number` | `86` | `doom-2016/hltb.best.json` |
 | `json_content.profile_platform` | `string` | `"Google Stadia, Nintendo Switch, PC, PlayStation 4, Xbox One"` | `doom-2016/hltb.best.json` |
-| `json_content.profile_popular` | `number` | `1307` | `doom-2016/hltb.best.json` |
+| `json_content.profile_popular` | `number` | `1245` | `doom-2016/hltb.best.json` |
 | `json_content.release_world` | `number` | `2016` | `doom-2016/hltb.best.json` |
 | `json_content.review_score` | `number` | `84` | `doom-2016/hltb.best.json` |
 | `mp_time` | `number` | `8.17` | `doom-2016/hltb.best.json` |

@@ -9,6 +9,7 @@ def test_generate_identity_map_includes_scores_and_review_flag():
     merged = pd.DataFrame(
         [
             {
+                "RowId": "rid:1",
                 "Name": "Doom (2016)",
                 "RAWG_ID": "1",
                 "RAWG_Name": "DOOM (2016)",
@@ -19,6 +20,7 @@ def test_generate_identity_map_includes_scores_and_review_flag():
                 "HLTB_Name": "Doom",
             },
             {
+                "RowId": "rid:2",
                 "Name": "Air Conflicts",
                 "RAWG_ID": "10",
                 "RAWG_Name": "Air Conflicts: Vietnam",
@@ -33,14 +35,14 @@ def test_generate_identity_map_includes_scores_and_review_flag():
 
     validation = pd.DataFrame(
         [
-            {"ReviewTitle": "", "TitleMismatch": ""},
-            {"ReviewTitle": "YES", "TitleMismatch": "YES"},
+            {"TitleMismatch": ""},
+            {"TitleMismatch": "YES", "YearDisagree_RAWG_IGDB": "YES"},
         ]
     )
 
     identity = generate_identity_map(merged, validation)
-    assert identity.iloc[0]["InputRowKey"].startswith("row:")
+    assert identity.iloc[0]["RowId"] == "rid:1"
+    assert "InputRowKey" not in identity.columns
     assert identity.iloc[0]["RAWG_MatchScore"] == "100"
     assert identity.iloc[1]["NeedsReview"] == "YES"
-    assert identity.iloc[1]["ReviewTitle"] == "YES"
-
+    assert "title_mismatch" in identity.iloc[1]["ReviewTags"]

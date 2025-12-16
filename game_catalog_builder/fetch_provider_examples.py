@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 import requests
 
@@ -17,7 +18,8 @@ def slugify(value: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", s)
     return s.strip("-") or "game"
 
-def extract_year_from_query(game_name: str) -> Optional[int]:
+
+def extract_year_from_query(game_name: str) -> int | None:
     m = re.search(r"\((\d{4})\)\s*$", (game_name or "").strip())
     if not m:
         return None
@@ -32,8 +34,8 @@ def write_json(path: Path, obj: Any) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def dump_hltb_object(obj: Any) -> Dict[str, Any]:
-    data: Dict[str, Any] = {}
+def dump_hltb_object(obj: Any) -> dict[str, Any]:
+    data: dict[str, Any] = {}
     for k, v in vars(obj).items():
         try:
             json.dumps(v)
@@ -43,10 +45,12 @@ def dump_hltb_object(obj: Any) -> Dict[str, Any]:
     return data
 
 
-def pick_best_candidate(query: str, candidates: list[Dict[str, Any]], *, name_key: str = "name") -> tuple[Optional[Dict[str, Any]], int]:
+def pick_best_candidate(
+    query: str, candidates: list[dict[str, Any]], *, name_key: str = "name"
+) -> tuple[dict[str, Any] | None, int]:
     norm_query = normalize_game_name(query)
-    best: Optional[Dict[str, Any]] = None
-    best_rank: tuple[int, int, int] = (-1, -1, -10**9)
+    best: dict[str, Any] | None = None
+    best_rank: tuple[int, int, int] = (-1, -1, -(10**9))
 
     for candidate in candidates:
         name = str(candidate.get(name_key, "") or "")
@@ -60,17 +64,18 @@ def pick_best_candidate(query: str, candidates: list[Dict[str, Any]], *, name_ke
 
     return best, best_rank[0]
 
+
 def pick_best_candidate_with_year(
     query: str,
-    candidates: list[Dict[str, Any]],
+    candidates: list[dict[str, Any]],
     *,
     name_key: str = "name",
-    year: Optional[int] = None,
-    year_from_candidate: Optional[callable] = None,
-) -> tuple[Optional[Dict[str, Any]], int]:
+    year: int | None = None,
+    year_from_candidate: Callable[[dict[str, Any]], int | None] | None = None,
+) -> tuple[dict[str, Any] | None, int]:
     norm_query = normalize_game_name(query)
-    best: Optional[Dict[str, Any]] = None
-    best_rank: tuple[int, int, int, int] = (-1, -1, -1, -10**9)
+    best: dict[str, Any] | None = None
+    best_rank: tuple[int, int, int, int] = (-1, -1, -1, -(10**9))
 
     for candidate in candidates:
         name = str(candidate.get(name_key, "") or "")
@@ -95,7 +100,9 @@ def pick_best_candidate_with_year(
     return best, best_rank[0]
 
 
-def fetch_rawg(game_name: str, api_key: str, out_dir: Path, *, language: str = "en") -> Optional[Dict[str, Any]]:
+def fetch_rawg(
+    game_name: str, api_key: str, out_dir: Path, *, language: str = "en"
+) -> dict[str, Any] | None:
     try:
         search_url = "https://api.rawg.io/api/games"
         search_resp = requests.get(
@@ -108,9 +115,9 @@ def fetch_rawg(game_name: str, api_key: str, out_dir: Path, *, language: str = "
         write_json(out_dir / "rawg.search.json", search_json)
 
         year = extract_year_from_query(game_name)
-        results: list[Dict[str, Any]] = list(search_json.get("results") or [])
+        results: list[dict[str, Any]] = list(search_json.get("results") or [])
 
-        def _rawg_year(c: Dict[str, Any]) -> Optional[int]:
+        def _rawg_year(c: dict[str, Any]) -> int | None:
             released = str(c.get("released") or "")
             if len(released) >= 4 and released[:4].isdigit():
                 return int(released[:4])
@@ -130,7 +137,9 @@ def fetch_rawg(game_name: str, api_key: str, out_dir: Path, *, language: str = "
             return None
 
         detail_url = f"https://api.rawg.io/api/games/{best['id']}"
-        detail_resp = requests.get(detail_url, params={"key": api_key, "lang": language}, timeout=15)
+        detail_resp = requests.get(
+            detail_url, params={"key": api_key, "lang": language}, timeout=15
+        )
         detail_resp.raise_for_status()
         detail_json = detail_resp.json()
         write_json(out_dir / "rawg.detail.json", detail_json)
@@ -140,7 +149,7 @@ def fetch_rawg(game_name: str, api_key: str, out_dir: Path, *, language: str = "
         return None
 
 
-def fetch_steam(game_name: str, out_dir: Path) -> Optional[int]:
+def fetch_steam(game_name: str, out_dir: Path) -> int | None:
     try:
         search_url = "https://store.steampowered.com/api/storesearch"
         fallback_term = re.sub(r"\s*\(.*\)\s*$", "", game_name).strip()
@@ -148,11 +157,13 @@ def fetch_steam(game_name: str, out_dir: Path) -> Optional[int]:
         seen = set()
         terms = [t for t in terms if not (t in seen or seen.add(t))]
 
-        search_json: Dict[str, Any] = {}
+        search_json: dict[str, Any] = {}
         used_term = terms[0]
         all_attempts: list[dict[str, Any]] = []
         for term in terms:
-            resp = requests.get(search_url, params={"term": term, "l": "english", "cc": "US"}, timeout=15)
+            resp = requests.get(
+                search_url, params={"term": term, "l": "english", "cc": "US"}, timeout=15
+            )
             resp.raise_for_status()
             candidate_json = resp.json()
             all_attempts.append({"term": term, "response": candidate_json})
@@ -164,14 +175,16 @@ def fetch_steam(game_name: str, out_dir: Path) -> Optional[int]:
             used_term = term
 
         write_json(out_dir / "steam.storesearch.attempts.json", all_attempts)
-        write_json(out_dir / "steam.storesearch.meta.json", {"selected_term": used_term, "terms": terms})
+        write_json(
+            out_dir / "steam.storesearch.meta.json", {"selected_term": used_term, "terms": terms}
+        )
         write_json(out_dir / "steam.storesearch.json", search_json)
 
         year = extract_year_from_query(game_name)
-        items: list[Dict[str, Any]] = list(search_json.get("items") or [])
+        items: list[dict[str, Any]] = list(search_json.get("items") or [])
 
-        # Steam search results do not include release year; if a year is provided, inspect appdetails
-        # for the best few candidates and prefer the one matching the requested year.
+        # Steam search results do not include release year; if a year is provided, inspect
+        # appdetails for the best few candidates and prefer the one matching the requested year.
         scored = []
         for item in items:
             name = str(item.get("name") or "")
@@ -214,12 +227,16 @@ def fetch_steam(game_name: str, out_dir: Path) -> Optional[int]:
         write_json(out_dir / "steam.best.json", {"score": score, "best": best})
 
         if not best or not best.get("id"):
-            write_json(out_dir / "steam.appdetails.error.json", {"error": "No Steam appid selected"})
+            write_json(
+                out_dir / "steam.appdetails.error.json", {"error": "No Steam appid selected"}
+            )
             return None
 
         appid = int(best["id"])
         appdetails_url = "https://store.steampowered.com/api/appdetails"
-        details_resp = requests.get(appdetails_url, params={"appids": appid, "l": "english"}, timeout=15)
+        details_resp = requests.get(
+            appdetails_url, params={"appids": appid, "l": "english"}, timeout=15
+        )
         details_resp.raise_for_status()
         write_json(out_dir / "steam.appdetails.json", details_resp.json())
         return appid
@@ -239,7 +256,9 @@ def fetch_steamspy(appid: int, out_dir: Path) -> None:
         write_json(out_dir / "steamspy.error.json", {"error": str(e)})
 
 
-def fetch_igdb(game_name: str, credentials: Dict[str, Any], out_dir: Path, *, language: str = "en") -> None:
+def fetch_igdb(
+    game_name: str, credentials: dict[str, Any], out_dir: Path, *, language: str = "en"
+) -> None:
     try:
         igdb = IGDBClient(
             client_id=credentials.get("igdb", {}).get("client_id", ""),
@@ -283,15 +302,16 @@ def fetch_igdb(game_name: str, credentials: Dict[str, Any], out_dir: Path, *, la
         write_json(out_dir / "igdb.games.search.json", raw)
 
         year = extract_year_from_query(game_name)
-        candidates: list[Dict[str, Any]] = list(raw or [])
+        candidates: list[dict[str, Any]] = list(raw or [])
 
         # IGDB stores release date as epoch seconds; convert properly for year matching.
-        def _igdb_year_epoch(c: Dict[str, Any]) -> Optional[int]:
+        def _igdb_year_epoch(c: dict[str, Any]) -> int | None:
             ts = c.get("first_release_date")
             if not ts:
                 return None
             try:
                 import datetime
+
                 return datetime.datetime.fromtimestamp(int(ts), tz=datetime.timezone.utc).year
             except Exception:
                 return None
@@ -310,7 +330,7 @@ def fetch_igdb(game_name: str, credentials: Dict[str, Any], out_dir: Path, *, la
             return
 
         expanded_best = None
-        for candidate in (expanded_raw or []):
+        for candidate in expanded_raw or []:
             if isinstance(candidate, dict) and candidate.get("id") == best.get("id"):
                 expanded_best = candidate
                 break
@@ -385,7 +405,7 @@ def fetch_hltb(game_name: str, out_dir: Path) -> None:
             write_json(out_dir / "hltb.best.json", None)
             return
 
-        def _hltb_year(obj: Any) -> Optional[int]:
+        def _hltb_year(obj: Any) -> int | None:
             for attr in ("release_world", "release_na", "release_eu", "release_jp"):
                 v = getattr(obj, attr, None)
                 if not v:
@@ -420,7 +440,9 @@ def fetch_hltb(game_name: str, out_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch provider JSON examples into docs/examples/")
-    parser.add_argument("game", nargs="?", default="Doom", help="Game name to fetch (default: Doom)")
+    parser.add_argument(
+        "game", nargs="?", default="Doom", help="Game name to fetch (default: Doom)"
+    )
     parser.add_argument(
         "--out",
         type=Path,
@@ -464,7 +486,9 @@ def main() -> None:
         write_json(out_dir / "igdb.error.json", {"error": "Missing IGDB client_id/client_secret"})
         write_json(out_dir / "igdb.games.search.json", None)
         write_json(out_dir / "igdb.best.json", None)
-        write_json(out_dir / "igdb.resolved.error.json", {"error": "Missing IGDB client_id/client_secret"})
+        write_json(
+            out_dir / "igdb.resolved.error.json", {"error": "Missing IGDB client_id/client_secret"}
+        )
 
     fetch_hltb(args.game, out_dir)
 

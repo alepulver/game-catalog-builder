@@ -37,4 +37,3 @@ def test_validation_steam_year_is_downweighted_for_editions():
     # RAWG/IGDB agree; overall YearDisagree should remain empty.
     assert row["YearDisagree_RAWG_IGDB"] == ""
     assert row["YearDisagree"] == ""
-

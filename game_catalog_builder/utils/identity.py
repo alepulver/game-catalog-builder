@@ -5,6 +5,45 @@ import pandas as pd
 from .utilities import fuzzy_score
 
 
+def merge_identity_user_fields(new: pd.DataFrame, prev: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preserve user-editable identity fields when regenerating Games_Identity.csv.
+
+    Rule: for each preserved column, keep the previous value when it's non-empty; otherwise use
+    the newly generated value.
+    """
+    if new is None or new.empty:
+        return new
+    if prev is None or prev.empty:
+        return new
+    if "RowId" not in new.columns or "RowId" not in prev.columns:
+        return new
+
+    preserved_cols = ["RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_Query"]
+    prev2 = prev.copy()
+    prev2["RowId"] = prev2["RowId"].astype(str).str.strip()
+    new2 = new.copy()
+    new2["RowId"] = new2["RowId"].astype(str).str.strip()
+
+    merged = new2.merge(
+        prev2[["RowId"] + [c for c in preserved_cols if c in prev2.columns]],
+        on="RowId",
+        how="left",
+        suffixes=("", "__prev"),
+    )
+    for c in preserved_cols:
+        prev_col = f"{c}__prev"
+        if prev_col not in merged.columns:
+            continue
+        prev_vals = merged[prev_col].astype(str).str.strip()
+        use_prev = prev_vals != ""
+        if c not in merged.columns:
+            merged[c] = ""
+        merged.loc[use_prev, c] = prev_vals[use_prev]
+        merged = merged.drop(columns=[prev_col])
+    return merged
+
+
 def generate_identity_map(
     merged: pd.DataFrame,
     validation: pd.DataFrame | None = None,
@@ -18,7 +57,6 @@ def generate_identity_map(
     without a full two-stage refactor.
     """
     df = merged.copy()
-    df.insert(0, "InputRowKey", [f"{key_prefix}:{i+1:05d}" for i in range(len(df))])
 
     def col(name: str) -> pd.Series:
         return df[name] if name in df.columns else pd.Series([""] * len(df))
@@ -43,7 +81,7 @@ def generate_identity_map(
 
     out = pd.DataFrame(
         {
-            "InputRowKey": df["InputRowKey"].astype(str),
+            "RowId": col("RowId").astype(str).str.strip(),
             "OriginalName": original.str.strip(),
             "RAWG_ID": col("RAWG_ID").astype(str).str.strip(),
             "RAWG_MatchedName": rawg_name.str.strip(),
@@ -54,31 +92,17 @@ def generate_identity_map(
             "Steam_AppID": col("Steam_AppID").astype(str).str.strip(),
             "Steam_MatchedName": steam_name.str.strip(),
             "Steam_MatchScore": score_series(original, steam_name),
-            "HLTB_ID": "",  # placeholder (HLTB id may not be stable/available)
+            "HLTB_Query": "",
             "HLTB_MatchedName": hltb_name.str.strip(),
             "HLTB_MatchScore": score_series(original, hltb_name),
         }
     )
 
-    # Bring in canonical suggestions / validation flags if provided.
-    if isinstance(validation, pd.DataFrame) and not validation.empty:
-        v = validation.copy()
-        # Align by row order (same as merged report generation).
-        for c in [
-            "MissingProviders",
-            "TitleMismatch",
-            "YearDisagree_RAWG_IGDB",
-            "PlatformDisagree",
-            "SteamAppIDMismatch",
-            "ReviewTitle",
-            "ReviewTitleReason",
-            "SuggestedRenamePersonalName",
-            "SuggestedCanonicalTitle",
-            "SuggestedCanonicalSource",
-            "SuggestedCulprit",
-        ]:
-            if c in v.columns:
-                out[c] = v[c].astype(str)
+    out["ReviewTags"] = ""
+
+    # Bring in only enough validation to drive review tags (diagnostics stay in
+    # Validation_Report.csv).
+    v = validation.copy() if isinstance(validation, pd.DataFrame) and not validation.empty else None
 
     def needs_review_row(r: pd.Series) -> bool:
         # Missing IDs are review-worthy.
@@ -97,11 +121,54 @@ def generate_identity_map(
             if s.isdigit() and int(s) < 100:
                 return True
         # Validation flags.
-        for flag in ("TitleMismatch", "YearDisagree_RAWG_IGDB", "PlatformDisagree", "SteamAppIDMismatch", "ReviewTitle"):
-            if str(r.get(flag, "")).strip() == "YES":
-                return True
+        if v is not None:
+            i = int(r.name)
+            for flag in (
+                "TitleMismatch",
+                "YearDisagree_RAWG_IGDB",
+                "PlatformDisagree",
+                "SteamAppIDMismatch",
+            ):
+                if flag in v.columns and str(v.at[i, flag] or "").strip() == "YES":
+                    return True
         return False
 
     out["NeedsReview"] = out.apply(needs_review_row, axis=1).map(lambda x: "YES" if x else "")
-    return out
 
+    # Build compact review tags.
+    tags_all: list[str] = []
+    for i, r in out.iterrows():
+        tags: list[str] = []
+        if not str(r.get("RAWG_ID", "")).strip():
+            tags.append("missing_rawg")
+        if not str(r.get("IGDB_ID", "")).strip():
+            tags.append("missing_igdb")
+        if not str(r.get("Steam_AppID", "")).strip():
+            tags.append("missing_steam")
+        if not str(r.get("HLTB_MatchedName", "")).strip():
+            tags.append("missing_hltb")
+
+        for k, tag in (
+            ("RAWG_MatchScore", "rawg_score"),
+            ("IGDB_MatchScore", "igdb_score"),
+            ("Steam_MatchScore", "steam_score"),
+            ("HLTB_MatchScore", "hltb_score"),
+        ):
+            s = str(r.get(k, "")).strip()
+            if s.isdigit() and int(s) < 100:
+                tags.append(f"{tag}:{s}")
+
+        if v is not None:
+            for flag, tag in (
+                ("TitleMismatch", "title_mismatch"),
+                ("YearDisagree_RAWG_IGDB", "year_mismatch"),
+                ("PlatformDisagree", "platform_mismatch"),
+                ("SteamAppIDMismatch", "steam_appid_mismatch"),
+            ):
+                if flag in v.columns and str(v.at[i, flag] or "").strip() == "YES":
+                    tags.append(tag)
+
+        tags_all.append(", ".join(tags))
+
+    out["ReviewTags"] = pd.Series(tags_all)
+    return out

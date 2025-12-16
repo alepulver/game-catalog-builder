@@ -11,7 +11,7 @@ For a generated “catalog + observed examples” reference, see `docs/providers
 - **ID**: stable identifier used for caching and joining.
 - **Search**: the name-based query used to find the ID.
 - **Details**: the richer document used to extract metadata (if applicable).
-- **CSV column**: the column name in `Games_<Provider>.csv` / `Games_Final.csv`.
+- **CSV column**: the column name in `Provider_<Provider>.csv` / `Games_Enriched.csv`.
 - **Path**: a representative JSON path (or object attribute for HLTB).
 
 ## RAWG
@@ -153,4 +153,3 @@ Current output columns (from the best match object):
 Other useful attributes commonly present:
 
 - `profile_dev`, `profile_platform`, `release_world`, `rating` (varies by library version/data)
-

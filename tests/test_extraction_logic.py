@@ -98,7 +98,9 @@ def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
             def json(self):
                 if "appdetails" in url:
                     calls["appdetails"] += 1
-                    return {"123": {"success": True, "data": {"name": "Example Game", "is_free": True}}}
+                    return {
+                        "123": {"success": True, "data": {"name": "Example Game", "is_free": True}}
+                    }
                 raise AssertionError(f"unexpected url {url}")
 
         return Resp()
@@ -147,7 +149,9 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
 
 
 def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatch):
-    monkeypatch.setattr("game_catalog_builder.clients.igdb_client.IGDBClient._ensure_token", lambda self: None)
+    monkeypatch.setattr(
+        "game_catalog_builder.clients.igdb_client.IGDBClient._ensure_token", lambda self: None
+    )
     from game_catalog_builder.clients.igdb_client import IGDBClient
 
     calls = []
@@ -197,7 +201,9 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
 
 
 def test_igdb_similarity_threshold_negative_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr("game_catalog_builder.clients.igdb_client.IGDBClient._ensure_token", lambda self: None)
+    monkeypatch.setattr(
+        "game_catalog_builder.clients.igdb_client.IGDBClient._ensure_token", lambda self: None
+    )
     from game_catalog_builder.clients.igdb_client import IGDBClient
 
     calls = {"games": 0}
@@ -268,8 +274,8 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
         w.writeheader()
         w.writerows([{"Name": "Game A"}, {"Name": "Game B"}, {"Name": "Game C"}])
 
-    steam_out = tmp_path / "Games_Steam.csv"
-    steamspy_out = tmp_path / "Games_SteamSpy.csv"
+    steam_out = tmp_path / "Provider_Steam.csv"
+    steamspy_out = tmp_path / "Provider_SteamSpy.csv"
 
     def fake_get(url, params=None, timeout=None):
         class Resp:
@@ -286,9 +292,16 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
                     return {"items": []}
                 if "appdetails" in url:
                     appid = str((params or {}).get("appids"))
-                    return {appid: {"success": True, "data": {"name": f"Game {appid}", "is_free": True}}}
+                    return {
+                        appid: {"success": True, "data": {"name": f"Game {appid}", "is_free": True}}
+                    }
                 if "steamspy.com" in url:
-                    return {"owners": "1 .. 2", "players_forever": 1, "ccu": 1, "average_forever": 1}
+                    return {
+                        "owners": "1 .. 2",
+                        "players_forever": 1,
+                        "ccu": 1,
+                        "average_forever": 1,
+                    }
                 raise AssertionError(f"unexpected url {url}")
 
         return Resp()

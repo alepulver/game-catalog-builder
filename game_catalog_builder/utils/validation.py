@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional
 
 import pandas as pd
 
@@ -93,7 +92,12 @@ def _pick_title_culprit(
     threshold: int,
 ) -> str:
     scored: list[tuple[str, int]] = []
-    for k, s in (("RAWG", score_rawg), ("IGDB", score_igdb), ("Steam", score_steam), ("HLTB", score_hltb)):
+    for k, s in (
+        ("RAWG", score_rawg),
+        ("IGDB", score_igdb),
+        ("Steam", score_steam),
+        ("HLTB", score_hltb),
+    ):
         if s.strip().isdigit():
             scored.append((k, int(s)))
     if not scored:
@@ -104,7 +108,7 @@ def _pick_title_culprit(
     return ""
 
 
-def _year_diff(a: Optional[int], b: Optional[int]) -> str:
+def _year_diff(a: int | None, b: int | None) -> str:
     if a is None or b is None:
         return ""
     return str(a - b)
@@ -112,12 +116,17 @@ def _year_diff(a: Optional[int], b: Optional[int]) -> str:
 
 def _suggest_canonical_title(row: dict[str, str]) -> tuple[str, str, str, str, int, str]:
     """
-    Returns (canonical_title, canonical_source, suggested_personal_name, reason, consensus_count, consensus_sources).
+    Returns:
+        (canonical_title, canonical_source, suggested_personal_name, reason, consensus_count,
+         consensus_sources)
     """
-    name = str(row.get("Name", "") or "").strip()
-
     candidates: list[tuple[str, str]] = []
-    for src, col in (("Steam", "Steam_Name"), ("RAWG", "RAWG_Name"), ("IGDB", "IGDB_Name"), ("HLTB", "HLTB_Name")):
+    for src, col in (
+        ("Steam", "Steam_Name"),
+        ("RAWG", "RAWG_Name"),
+        ("IGDB", "IGDB_Name"),
+        ("HLTB", "HLTB_Name"),
+    ):
         t = str(row.get(col, "") or "").strip()
         if t:
             candidates.append((src, t))
@@ -137,7 +146,9 @@ def _suggest_canonical_title(row: dict[str, str]) -> tuple[str, str, str, str, i
     def group_rank(items: list[tuple[str, str]]) -> tuple[int, int]:
         count = len(items)
         # best (lowest) source index present in the group.
-        best_src = min((preferred_order.index(src) for src, _ in items if src in preferred_order), default=999)
+        best_src = min(
+            (preferred_order.index(src) for src, _ in items if src in preferred_order), default=999
+        )
         return (count, -best_src)
 
     best_key, best_items = sorted(groups.items(), key=lambda kv: group_rank(kv[1]), reverse=True)[0]
@@ -173,11 +184,13 @@ def _suggest_canonical_title(row: dict[str, str]) -> tuple[str, str, str, str, i
 def generate_validation_report(
     df: pd.DataFrame,
     *,
-    thresholds: ValidationThresholds = ValidationThresholds(),
+    thresholds: ValidationThresholds | None = None,
 ) -> pd.DataFrame:
     """
     Produce a per-row cross-provider consistency report for the merged CSV.
     """
+    if thresholds is None:
+        thresholds = ValidationThresholds()
     rows: list[dict[str, str]] = []
 
     for _, r in df.iterrows():
@@ -218,7 +231,8 @@ def generate_validation_report(
         if steam_year is not None:
             primary = igdb_year if igdb_year is not None else rawg_year
             if primary is not None and abs(steam_year - primary) > thresholds.year_max_diff:
-                # Steam years often represent ports/remasters/HD releases; lower severity if it looks like an edition.
+                # Steam years often represent ports/remasters/HD releases; lower severity if it
+                # looks like an edition.
                 if not steam_is_edition:
                     steam_year_disagree = "YES"
 
@@ -276,7 +290,11 @@ def generate_validation_report(
                 culprit = title_culprit
             else:
                 # Most often the IGDB match is wrong if Steam matched the input name well.
-                culprit = "IGDB" if (score_steam and int(score_steam) >= thresholds.title_score_warn) else "Steam"
+                culprit = (
+                    "IGDB"
+                    if (score_steam and int(score_steam) >= thresholds.title_score_warn)
+                    else "Steam"
+                )
         elif platform_disagree == "YES":
             # A single odd platform set (e.g. web-only) is often a bad match.
             if "web browser" in str(r.get("IGDB_Platforms", "") or "").lower():
@@ -292,9 +310,15 @@ def generate_validation_report(
         elif year_disagree_rawg_igdb == "YES":
             # If Steam exists and strongly agrees with one year, blame the other.
             if steam_year is not None:
-                if rawg_year is not None and abs(steam_year - rawg_year) <= thresholds.year_max_diff:
+                if (
+                    rawg_year is not None
+                    and abs(steam_year - rawg_year) <= thresholds.year_max_diff
+                ):
                     culprit = "IGDB"
-                elif igdb_year is not None and abs(steam_year - igdb_year) <= thresholds.year_max_diff:
+                elif (
+                    igdb_year is not None
+                    and abs(steam_year - igdb_year) <= thresholds.year_max_diff
+                ):
                     culprit = "RAWG"
             if not culprit:
                 culprit = "RAWG/IGDB"
@@ -307,13 +331,22 @@ def generate_validation_report(
                 threshold=thresholds.title_score_warn,
             )
 
-        canonical_title, canonical_source, suggested_personal, suggestion_reason, consensus_count, consensus_sources = _suggest_canonical_title(
-            {k: str(v or "") for k, v in r.to_dict().items()}
-        )
+        (
+            canonical_title,
+            canonical_source,
+            suggested_personal,
+            suggestion_reason,
+            consensus_count,
+            consensus_sources,
+        ) = _suggest_canonical_title({k: str(v or "") for k, v in r.to_dict().items()})
         suggested_rename = ""
         review_title = ""
         review_reason = ""
-        if canonical_title and name and normalize_game_name(name) != normalize_game_name(canonical_title):
+        if (
+            canonical_title
+            and name
+            and normalize_game_name(name) != normalize_game_name(canonical_title)
+        ):
             high_signal = any(
                 x == "YES"
                 for x in (
@@ -323,7 +356,9 @@ def generate_validation_report(
                     steam_appid_mismatch,
                 )
             )
-            strong_crosscheck = bool(steam_appid and igdb_steam_appid and steam_appid == igdb_steam_appid)
+            strong_crosscheck = bool(
+                steam_appid and igdb_steam_appid and steam_appid == igdb_steam_appid
+            )
             has_consensus = consensus_count >= 2
             if high_signal and (has_consensus or strong_crosscheck):
                 suggested_rename = "YES"

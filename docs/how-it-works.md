@@ -9,9 +9,9 @@ This project enriches a “personal catalog” CSV (from MyVideoGameList) with m
 3. Each provider:
    - searches by name (fuzzy match),
    - optionally fetches details by ID (provider-specific),
-   - extracts a stable subset of fields into `data/output/Games_<Provider>.csv`,
+   - extracts a stable subset of fields into `data/output/Provider_<Provider>.csv`,
    - caches results to avoid re-fetching on re-runs.
-4. Merge all provider CSVs into `data/output/Games_Final.csv`.
+4. Merge all provider CSVs into `data/output/Games_Enriched.csv`.
 5. Generate `data/output/Validation_Report.csv` to help spot mismatches and suggest canonical titles.
 
 Providers run in parallel at the CLI level, but each provider client itself is synchronous (no async in clients).
@@ -86,4 +86,3 @@ Key concepts:
 - `SuggestedRenamePersonalName`: strict/high-confidence rename suggestion (small list).
 - `ReviewTitle`: broader “review this title” list (larger list), with `ReviewTitleReason`.
 - `YearDisagree_RAWG_IGDB` is considered high-signal; Steam year drift is tracked separately because Steam often represents ports/remasters.
-

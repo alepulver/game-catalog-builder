@@ -25,18 +25,16 @@ This makes it harder to:
 
 **Output**
 - An “identity mapping” file (CSV/JSON), one row per input row, containing:
-  - `InputRowKey` (stable key; see below)
+  - `RowId` (stable key; see below)
   - `OriginalName` (as in user data)
-  - `CanonicalName` (suggested normalized title you’d like to use)
   - Per-provider IDs (where resolved):
-    - `RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_ID` (if available), etc.
-  - Match quality and evidence:
-    - `MatchScore_<provider>`
-    - `MatchedName_<provider>`
-    - optional: `MatchNotes`, `Alternatives` (top 3)
-  - Status fields:
-    - `ResolutionStatus` (`ok`, `needs_review`, `not_found`)
-    - `Pinned` (bool) to prevent re-searching if you’ve verified it
+    - `RAWG_ID`, `IGDB_ID`, `Steam_AppID`
+    - `HLTB_Query` (optional override string; HLTB has no stable public ID)
+  - Match evidence:
+    - `*_MatchedName` and `*_MatchScore` columns (per provider)
+  - Review workflow:
+    - `ReviewTags` (compact comma-separated tags like `missing_steam`, `year_mismatch`, `steam_appid_mismatch`, `steam_score:88`)
+    - `NeedsReview`, `AddedAt`, `NewRow`
 
 **Stable row identity (important)**
 - Do not rely on `Name` alone because names can repeat (editions/platforms).
@@ -46,7 +44,7 @@ This makes it harder to:
   - `(OriginalName, Platform, AddedDate, OccurrenceIndex)` as a composite key.
 
 **Manual overrides**
-- Allow a small overrides file (YAML/CSV) keyed by `InputRowKey` to pin IDs or canonical name.
+- In practice, manual edits are made directly in `data/output/Games_Identity.csv` (pinning IDs / `HLTB_Query`), and the pipeline should preserve those edits across regenerations.
 
 **Benefits**
 - You can rerun enrichment without redoing fuzzy searches.
@@ -124,11 +122,11 @@ We discussed 3 practical strategies:
 **Process**
 - Fetch provider payloads by ID (no name searching).
 - Extract configured fields (direct + derived).
-- Join results back to user rows by `InputRowKey`.
+- Join results back to user rows by `RowId`.
 
 **Output**
-- `Games_<Provider>.csv` keyed by `InputRowKey` (and optionally include `Name` for readability).
-- `Games_Final.csv` as a join of user data + selected provider fields.
+- `Games_<Provider>.csv` keyed by `RowId` (and optionally include `Name` for readability).
+- `Games_Enriched.csv` as a join of user data + selected provider fields.
 - Validation report remains useful, but most “wrong game” issues should be caught in Stage 1.
 
 ## Tradeoffs
@@ -140,13 +138,13 @@ We discussed 3 practical strategies:
 
 **Cons**
 - Introduces another artifact to manage (`identity_map.csv/json`).
-- Requires refactoring merge keys from `Name` to `InputRowKey`.
-- Needs decisions around how to generate and persist `InputRowKey`.
+- Requires refactoring merge keys from `Name` to `RowId`.
+- Needs decisions around how to generate and persist `RowId`.
 
 ## Suggested incremental path
 
-1. Add `InputRowKey` generation in the CLI when reading input.
-2. Write `data/output/Identity_Map.csv` with per-provider matched IDs + scores.
+1. Add `RowId` generation in the CLI when reading input.
+2. Write `data/output/Games_Identity.csv` with per-provider matched IDs + scores.
 3. Add a `--resolve-only` mode that only performs Stage 1.
-4. Update provider outputs + merger to join on `InputRowKey` (not `Name`).
+4. Update provider outputs + merger to join on `RowId` (not `Name`).
 5. Add `--enrich-only` mode that uses IDs and skips searching.

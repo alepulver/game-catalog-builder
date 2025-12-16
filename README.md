@@ -103,13 +103,13 @@ This writes example files under `docs/examples/doom-2016/` (slugified from the i
 Process all sources with a single command:
 
 ```bash
-python run.py data/input/Games_Personal.csv
+python run.py data/input/Games_User.csv
 ```
 
 This will:
 - Process all API sources (IGDB, RAWG, Steam, SteamSpy, HLTB)
 - Save individual results to `data/output/`
-- Automatically merge all results into `Games_Final.csv`
+- Automatically merge all results into `Games_Enriched.csv`
 
 ### Process Specific Sources
 
@@ -117,32 +117,32 @@ Process only specific API sources:
 
 ```bash
 # Process only IGDB
-python run.py data/input/Games_Personal.csv --source igdb
+python run.py data/input/Games_User.csv --source igdb
 
 # Process only RAWG
-python run.py data/input/Games_Personal.csv --source rawg
+python run.py data/input/Games_User.csv --source rawg
 
 # Process only Steam
-python run.py data/input/Games_Personal.csv --source steam
+python run.py data/input/Games_User.csv --source steam
 
 # Process SteamSpy (requires Steam data first)
-python run.py data/input/Games_Personal.csv --source steamspy
+python run.py data/input/Games_User.csv --source steamspy
 
 # Process only HowLongToBeat
-python run.py data/input/Games_Personal.csv --source hltb
+python run.py data/input/Games_User.csv --source hltb
 ```
 
 ### Custom Output and Cache Directories
 
 ```bash
 # Specify custom output directory
-python run.py data/input/Games_Personal.csv --output my_output/
+python run.py data/input/Games_User.csv --output my_output/
 
 # Specify custom cache directory
-python run.py data/input/Games_Personal.csv --cache my_cache/
+python run.py data/input/Games_User.csv --cache my_cache/
 
 # Use custom credentials file (default: data/credentials.yaml)
-python run.py data/input/Games_Personal.csv --credentials my_credentials.yaml
+python run.py data/input/Games_User.csv --credentials my_credentials.yaml
 ```
 
 ### Merge Only
@@ -150,7 +150,7 @@ python run.py data/input/Games_Personal.csv --credentials my_credentials.yaml
 If you've already processed files and just want to merge:
 
 ```bash
-python run.py data/input/Games_Personal.csv --source all --merge
+python run.py data/input/Games_User.csv --source all --merge
 ```
 
 ### Validation Report
@@ -158,17 +158,17 @@ python run.py data/input/Games_Personal.csv --source all --merge
 Generate a cross-provider consistency report (title/year/platform + Steam AppID cross-check), including a suggested canonical title when providers disagree:
 
 ```bash
-python run.py data/input/Games_Personal.csv --merge --validate
+python run.py data/input/Games_User.csv --merge --validate
 ```
 
 The report includes `ReviewTitle` (a broader “needs review” flag) and `SuggestedRenamePersonalName` (a stricter/high-confidence rename suggestion).
 
 ### Identity Map (Stage-1 style review)
 
-Generate a row-by-row identity mapping table with provider IDs, matched names, and fuzzy match scores:
+Generate a row-by-row identity mapping table with provider IDs, matched names, and fuzzy match scores (writes `data/output/Games_Identity.csv` by default):
 
 ```bash
-python run.py data/input/Games_Personal.csv --merge --validate --identity-map
+python run.py data/input/Games_User.csv --merge --validate --identity-map
 ```
 
 ### Command-Line Options
@@ -186,7 +186,7 @@ optional arguments:
                        Which API source to process (default: all)
   --merge              Merge all processed files into a final CSV
   --merge-output MERGE_OUTPUT
-                       Output file for merged results (default: data/output/Games_Final.csv)
+                       Output file for merged results (default: data/output/Games_Enriched.csv)
   --log-file LOG_FILE  Log file path (default: data/output/enrichment.log)
   --validate           Generate a cross-provider validation report (default: off)
   --validate-output VALIDATE_OUTPUT
@@ -198,12 +198,12 @@ optional arguments:
 
 - **Input**: Any CSV file with a "Name" column containing game names
 - **Output**: Generated files are saved in the output directory (default: `data/output/`):
-  - `Games_IGDB.csv`
-  - `Games_RAWG.csv`
-  - `Games_Steam.csv`
-  - `Games_SteamSpy.csv`
-  - `Games_HLTB.csv`
-  - `Games_Final.csv` (merged result)
+  - `Provider_IGDB.csv`
+  - `Provider_RAWG.csv`
+  - `Provider_Steam.csv`
+  - `Provider_SteamSpy.csv`
+  - `Provider_HLTB.csv`
+  - `Games_Enriched.csv` (merged result)
 
 The tool will:
 - Create output directories if they don't exist
@@ -213,6 +213,9 @@ The tool will:
 ### Caching
 
 Provider caches are stored under `data/cache/` and are keyed by provider IDs when available, with a separate name-to-id mapping to avoid repeated searches on reruns.
+
+If you change cache logic (or pull updates that do), old JSON cache files may become incompatible. In
+that case, delete the corresponding file under `data/cache/` and rerun to rebuild it.
 
 ## Project Structure
 
@@ -302,7 +305,12 @@ See `requirements.txt` for the complete list. Main dependencies include:
 ### Installing in Development Mode
 
 ```bash
-pip install -e .
+# Create and use a local venv (recommended)
+python -m venv .venv
+source .venv/bin/activate
+
+# Install in editable mode, including dev tools (ruff/pytest/mypy)
+python -m pip install -e ".[dev]"
 ```
 
 This installs the package in editable mode, allowing you to modify the code without reinstalling.
@@ -310,12 +318,22 @@ This installs the package in editable mode, allowing you to modify the code with
 ### Running Tests
 
 ```bash
-python -m unittest discover tests
+python -m pytest -q
+```
+
+### Formatting and Linting
+
+```bash
+# Format code
+python -m ruff format .
+
+# Lint (includes import sorting checks)
+python -m ruff check .
 ```
 
 ## License
 
-[Add your license here]
+See `LICENSE`.
 
 ## Contributing
 

@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 import yaml
 
@@ -131,7 +131,9 @@ def _compact_example(values: list[Any], max_items: int = 5, max_len: int = 180) 
     return s
 
 
-def _walk_all_paths(v: Any, prefix: str, acc: dict[str, set[str]], examples: dict[str, str]) -> None:
+def _walk_all_paths(
+    v: Any, prefix: str, acc: dict[str, set[str]], examples: dict[str, str]
+) -> None:
     """
     Record all JSON paths in a document (best-effort), using [] for arrays.
     """
@@ -181,7 +183,7 @@ def observe_from_examples(
     examples_root: Path,
     file_hints: list[str],
     path: str,
-) -> Optional[ObservedExample]:
+) -> ObservedExample | None:
     for hint in file_hints:
         for p in _find_example_files(examples_root, hint):
             try:
@@ -216,11 +218,20 @@ def generate_markdown(catalog: dict[str, Any], examples_root: Path) -> str:
     lines: list[str] = []
     lines.append("# Provider field reference")
     lines.append("")
-    lines.append("This reference is generated from `docs/providers/provider-field-catalog.yaml` and enriched with observed examples from `docs/examples/` when available.")
+    lines.append(
+        "This reference is generated from `docs/providers/provider-field-catalog.yaml` and "
+        "enriched with observed examples from `docs/examples/` when available."
+    )
     lines.append("")
     lines.append("Legend:")
-    lines.append("- **Observed types/example**: derived from example JSON captures; may be empty if not present in current examples.")
-    lines.append("- **Doc links**: point to provider documentation; some providers (Steam Store API) are not formally specified.")
+    lines.append(
+        "- **Observed types/example**: derived from example JSON captures; may be empty if not "
+        "present in current examples."
+    )
+    lines.append(
+        "- **Doc links**: point to provider documentation; some providers "
+        "(Steam Store API) are not formally specified."
+    )
     lines.append("")
 
     providers = catalog.get("providers") or {}
@@ -274,7 +285,7 @@ def generate_markdown(catalog: dict[str, Any], examples_root: Path) -> str:
             lines.append("")
 
             # Observed-but-not-cataloged fields (from examples), for discovery.
-            catalog_paths = {str(f.get('path') or '') for f in fields}
+            catalog_paths = {str(f.get("path") or "") for f in fields}
             extras = [p for p in observed_types.keys() if p not in catalog_paths]
             if extras:
                 lines.append("#### Observed in examples (not yet described)")

@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from typing import Dict, Any, Optional
+import logging
 from pathlib import Path
+from typing import Any
 
 from howlongtobeatpy import HowLongToBeat
 
 from ..utils.utilities import (
-    normalize_game_name,
-    load_json_cache,
-    save_json_cache,
     fuzzy_score,
+    load_json_cache,
+    normalize_game_name,
+    save_json_cache,
 )
-import logging
 
 
 class HLTBClient:
     def __init__(self, cache_path: str | Path):
         self.cache_path = Path(cache_path)
-        self._by_id: Dict[str, Any] = {}
-        self._by_name: Dict[str, Optional[str]] = {}
+        self._by_id: dict[str, Any] = {}
+        self._by_name: dict[str, str | None] = {}
         self._load_cache(load_json_cache(self.cache_path))
         self.client = HowLongToBeat()
 
@@ -35,7 +35,7 @@ class HLTBClient:
     def _save_cache(self) -> None:
         save_json_cache({"by_id": self._by_id, "by_name": self._by_name}, self.cache_path)
 
-    def search(self, game_name: str) -> Optional[Dict[str, Any]]:
+    def search(self, game_name: str) -> dict[str, Any] | None:
         key = normalize_game_name(game_name)
         if key in self._by_name:
             hltb_id = self._by_name[key]
@@ -57,7 +57,8 @@ class HLTBClient:
             best_score, best = scored[0]
             if best_score < 100:
                 logging.warning(
-                    f"Close match for '{game_name}': Selected '{best.game_name}' (score: {best_score}%)"
+                    f"Close match for '{game_name}': Selected '{best.game_name}' "
+                    f"(score: {best_score}%)"
                 )
 
             best_id = getattr(best, "game_id", None)
