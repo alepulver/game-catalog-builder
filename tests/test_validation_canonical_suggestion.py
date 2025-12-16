@@ -34,5 +34,6 @@ def test_validation_suggests_consensus_canonical_title():
     assert row["SuggestedCanonicalTitle"] == "Air Conflicts: Vietnam"
     assert row["SuggestedCanonicalSource"] in ("Steam", "RAWG")
     assert row["SuggestedRenamePersonalName"] == "YES"
+    assert row["ReviewTitle"] == "YES"
+    assert row["ReviewTitleReason"] != ""
     assert row["SuggestionReason"].startswith("provider consensus:")
-

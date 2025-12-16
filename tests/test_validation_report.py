@@ -71,3 +71,5 @@ def test_generate_validation_report_flags_mismatches():
     assert bad["SuggestedCanonicalTitle"] == "DOOM"
     assert bad["SuggestedCanonicalSource"] in ("Steam", "RAWG", "IGDB", "HLTB")
     assert bad["SuggestedRenamePersonalName"] == "YES"
+    assert bad["ReviewTitle"] == "YES"
+    assert bad["ReviewTitleReason"] != ""

@@ -153,6 +153,8 @@ Generate a cross-provider consistency report (title/year/platform + Steam AppID 
 python run.py data/input/Games_Personal.csv --merge --validate
 ```
 
+The report includes `ReviewTitle` (a broader “needs review” flag) and `SuggestedRenamePersonalName` (a stricter/high-confidence rename suggestion).
+
 ### Command-Line Options
 
 ```

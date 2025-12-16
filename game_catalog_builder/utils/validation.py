@@ -311,6 +311,8 @@ def generate_validation_report(
             {k: str(v or "") for k, v in r.to_dict().items()}
         )
         suggested_rename = ""
+        review_title = ""
+        review_reason = ""
         if canonical_title and name and normalize_game_name(name) != normalize_game_name(canonical_title):
             high_signal = any(
                 x == "YES"
@@ -325,6 +327,20 @@ def generate_validation_report(
             has_consensus = consensus_count >= 2
             if high_signal and (has_consensus or strong_crosscheck):
                 suggested_rename = "YES"
+
+            # Looser review list: consensus mismatches and Steam-ID-backed mismatches.
+            if has_consensus:
+                review_title = "YES"
+                review_reason = f"provider consensus ({consensus_sources})"
+            elif canonical_source == "Steam" and steam_appid:
+                review_title = "YES"
+                review_reason = "steam appid present"
+            elif steam_appid_mismatch == "YES":
+                review_title = "YES"
+                review_reason = "steam appid mismatch"
+            elif title_mismatch == "YES":
+                review_title = "YES"
+                review_reason = "title mismatch"
 
         rows.append(
             {
@@ -360,6 +376,8 @@ def generate_validation_report(
                 "SuggestionReason": suggestion_reason,
                 "CanonicalConsensusCount": str(consensus_count) if consensus_count else "",
                 "CanonicalConsensusSources": consensus_sources,
+                "ReviewTitle": review_title,
+                "ReviewTitleReason": review_reason,
             }
         )
 
