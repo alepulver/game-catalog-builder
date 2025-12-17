@@ -90,6 +90,39 @@ This writes example files under `docs/examples/doom-2016/` (slugified from the i
 
 **Important**: Make sure your virtual environment is activated (see Setup step 2) before running commands.
 
+### Recommended Workflow (Spreadsheet Round-Trip)
+
+This project supports a round-trip workflow where you edit the enriched CSV in a spreadsheet, then
+sync only user-editable fields back into the canonical catalog.
+
+```bash
+# 1) import: create/update a stable, RowId-based catalog (source of truth) and match provider IDs
+python run.py import path/to/exported_user_sheet.csv --out data/input/Games_Catalog.csv
+
+# 2) enrich: generate provider outputs + an editable enriched sheet (does not modify the catalog)
+python run.py enrich data/input/Games_Catalog.csv --source all --validate
+
+# 3) edit: open `data/output/Games_Enriched.csv` in Google Sheets / Excel and edit your user fields
+
+# 4) sync: copy user-editable columns (and pinned provider IDs) back into the catalog by RowId
+python run.py sync data/input/Games_Catalog.csv data/output/Games_Enriched.csv
+
+# 5) enrich again (optional): regenerate public data after edits / pinned ID fixes
+python run.py enrich data/input/Games_Catalog.csv --source all --validate
+```
+
+Your original export does not need a `RowId` column. If it’s missing, `import` will generate stable
+RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must be unique.
+
+`import` also adds provider ID columns (`RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_Query`) and a
+small set of evaluation columns (match scores/tags) so you can adjust IDs before enrichment. It
+refreshes match diagnostics by fetching the provider name for any pinned IDs. These evaluation
+columns are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without
+evaluation columns.
+
+Both `import` and `enrich` support “in place” runs (e.g. `import X.csv --out X.csv`, or
+`enrich X.csv --merge-output X.csv`). For `enrich`, provider/public columns are always regenerated.
+
 ## Docs
 
 - `docs/how-it-works.md`: pipeline, caching, validation
@@ -161,20 +194,10 @@ Generate a cross-provider consistency report (title/year/platform + Steam AppID 
 python run.py data/input/Games_User.csv --merge --validate
 ```
 
-The report includes `ReviewTitle` (a broader “needs review” flag) and `SuggestedRenamePersonalName` (a stricter/high-confidence rename suggestion).
+The report includes `ReviewTitle` (a broader “needs review” flag). High-confidence rename suggestions are surfaced via `ValidationTags` (for example `suggest_rename`).
 
-### Identity Map (Stage-1 style review)
-
-Generate a row-by-row identity mapping table with provider IDs, matched names, and fuzzy match scores (writes `data/output/Games_Identity.csv` by default):
-
-```bash
-python run.py data/input/Games_User.csv --merge --validate --identity-map
-```
-
-If a provider does not have a game (or you want to stop retrying searches for that provider), set
-the corresponding ID field in `Games_Identity.csv` to `__NOT_FOUND__` (or set `HLTB_Query` to
-`__NOT_FOUND__`). The pipeline will skip that provider for the row and clear any stale provider
-output fields.
+The report is intentionally compact; use `ValidationTags` for a summary of detected issues (for
+example `suggest_rename` and `needs_review`).
 
 ### Command-Line Options
 
@@ -192,12 +215,14 @@ optional arguments:
   --merge              Merge all processed files into a final CSV
   --merge-output MERGE_OUTPUT
                        Output file for merged results (default: data/output/Games_Enriched.csv)
-  --log-file LOG_FILE  Log file path (default: data/output/enrichment.log)
+  --log-file LOG_FILE  Log file path (default: data/logs/<command>-<timestamp>.log)
   --validate           Generate a cross-provider validation report (default: off)
   --validate-output VALIDATE_OUTPUT
                        Output file for validation report (default: data/output/Validation_Report.csv)
   --debug              Enable DEBUG logging (default: INFO)
 ```
+
+The CLI also supports explicit subcommands: `import`, `enrich`, `sync`, and `validate`.
 
 ### Input/Output
 
@@ -209,6 +234,7 @@ optional arguments:
   - `Provider_SteamSpy.csv`
   - `Provider_HLTB.csv`
   - `Games_Enriched.csv` (merged result)
+  - `Validation_Report.csv` (cross-provider diagnostics; see `ValidationTags` column for a compact summary)
 
 The tool will:
 - Create output directories if they don't exist

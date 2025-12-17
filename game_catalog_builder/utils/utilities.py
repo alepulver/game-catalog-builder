@@ -26,6 +26,8 @@ class ProjectPaths:
     data_input: Path
     data_cache: Path
     data_output: Path
+    data_logs: Path
+    data_test_logs: Path
 
     @staticmethod
     def from_root(root: str | Path) -> ProjectPaths:
@@ -35,12 +37,16 @@ class ProjectPaths:
             data_input=rootp / "data" / "input",
             data_cache=rootp / "data" / "cache",
             data_output=rootp / "data" / "output",
+            data_logs=rootp / "data" / "logs",
+            data_test_logs=rootp / "data" / "test_logs",
         )
 
     def ensure(self) -> None:
         self.data_input.mkdir(parents=True, exist_ok=True)
         self.data_cache.mkdir(parents=True, exist_ok=True)
         self.data_output.mkdir(parents=True, exist_ok=True)
+        self.data_logs.mkdir(parents=True, exist_ok=True)
+        self.data_test_logs.mkdir(parents=True, exist_ok=True)
 
 
 # ----------------------------
@@ -113,7 +119,7 @@ def ensure_row_ids_in_input(path: str | Path, *, col: str = "RowId") -> pd.DataF
 
 def load_identity_overrides(path: str | Path) -> dict[str, dict[str, str]]:
     """
-    Load per-row provider IDs from Games_Identity.csv.
+    Load per-row provider IDs (and HLTB query overrides) from a CSV.
 
     Returns:
         {RowId: {"RAWG_ID": "...", "IGDB_ID": "...", "Steam_AppID": "...", "HLTB_Query": "..."}}

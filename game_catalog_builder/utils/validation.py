@@ -57,6 +57,7 @@ class ValidationThresholds:
 
 
 _STEAM_EDITION_TOKENS = {
+    "remake",
     "hd",
     "classic",
     "definitive",
@@ -76,6 +77,79 @@ _STEAM_EDITION_TOKENS = {
     "gold",
     "platinum",
 }
+
+
+_DLC_TOKENS = {
+    "dlc",
+    "soundtrack",
+    "demo",
+    "beta",
+    "season",
+    "pass",
+    "expansion",
+    "pack",
+}
+
+
+def _edition_tokens(title: str) -> set[str]:
+    """
+    Extract a small set of edition/port/remaster tokens from a title for cross-provider comparison.
+    """
+    t = normalize_game_name(title)
+    tokens = set(t.split())
+    out = {tok for tok in tokens if tok in _STEAM_EDITION_TOKENS}
+    if "game of the year" in t:
+        out.add("goty")
+    if "director s cut" in t or "directors cut" in t:
+        out.add("directors")
+    return out
+
+
+def _steam_looks_like_dlc(steam_name: str, steam_categories: str) -> bool:
+    t = normalize_game_name(steam_name)
+    tokens = set(t.split())
+    if any(tok in tokens for tok in _DLC_TOKENS):
+        return True
+    cats = normalize_game_name(steam_categories)
+    if "downloadable content" in cats:
+        return True
+    return False
+
+
+def _contains_cyrillic(s: str) -> bool:
+    for ch in s or "":
+        o = ord(ch)
+        # Cyrillic + Cyrillic Supplement blocks
+        if 0x0400 <= o <= 0x052F:
+            return True
+    return False
+
+
+def _series_numbers(title: str) -> set[int]:
+    """
+    Extract sequel/series numbers from a title, excluding likely years (1900-2100).
+
+    Uses normalize_game_name() which already converts common roman numerals to digits.
+    """
+    tokens = normalize_game_name(title).split()
+    out: set[int] = set()
+    for i, t in enumerate(tokens):
+        if not t.isdigit():
+            continue
+        # Ignore thousands-group patterns like "40,000" which normalize to "40 000".
+        if i + 1 < len(tokens) and tokens[i + 1].isdigit() and tokens[i + 1] == "000":
+            continue
+        try:
+            n = int(t)
+        except ValueError:
+            continue
+        if n == 0:
+            continue
+        if 1900 <= n <= 2100:
+            continue
+        if 0 <= n <= 50:
+            out.add(n)
+    return out
 
 
 def _steam_is_edition_or_port(steam_name: str) -> bool:
@@ -219,6 +293,9 @@ def generate_validation_report(
             years.append(("Steam", steam_year))
 
         steam_is_edition = _steam_is_edition_or_port(steam_name)
+        steam_is_dlc = _steam_looks_like_dlc(
+            str(r.get("Steam_Name", "") or ""), str(r.get("Steam_Categories", "") or "")
+        )
 
         year_disagree_rawg_igdb = ""
         if rawg_year is not None and igdb_year is not None:
@@ -235,9 +312,6 @@ def generate_validation_report(
                 # looks like an edition.
                 if not steam_is_edition:
                     steam_year_disagree = "YES"
-
-        # Backwards-compatible aggregate flag (now edition-aware for Steam).
-        year_disagree = "YES" if (year_disagree_rawg_igdb or steam_year_disagree) else ""
 
         platforms = [
             ("RAWG", _normalize_platforms(str(r.get("RAWG_Platforms", "") or ""))),
@@ -265,6 +339,56 @@ def generate_validation_report(
                 title_mismatch = "YES"
                 break
 
+        # Edition token comparison across provider titles.
+        edition_by_src = {
+            "RAWG": _edition_tokens(rawg_name),
+            "IGDB": _edition_tokens(igdb_name),
+            "Steam": _edition_tokens(steam_name),
+            "HLTB": _edition_tokens(hltb_name),
+        }
+        # Compare token sets across providers that have a title, treating "no tokens" as a signal
+        # too (e.g. "Remastered" vs base game).
+        titled_providers = {
+            "RAWG": bool(rawg_name),
+            "IGDB": bool(igdb_name),
+            "Steam": bool(steam_name),
+            "HLTB": bool(hltb_name),
+        }
+        compared = {k: v for k, v in edition_by_src.items() if titled_providers.get(k)}
+        edition_disagree = ""
+        if len({frozenset(v) for v in compared.values()}) >= 2:
+            edition_disagree = "YES"
+        edition_summary = "; ".join(
+            f"{k}:{','.join(sorted(v))}" for k, v in edition_by_src.items() if v
+        )
+
+        # Non-English-ish signals: Cyrillic titles.
+        cyrillic_prov: list[str] = []
+        for prov, title in (
+            ("RAWG", rawg_name),
+            ("IGDB", igdb_name),
+            ("Steam", steam_name),
+            ("HLTB", hltb_name),
+        ):
+            if title and _contains_cyrillic(title):
+                cyrillic_prov.append(prov)
+        title_non_english = "YES" if cyrillic_prov else ""
+
+        # Series number mismatch (e.g. "Assassin's Creed 2" vs "Assassin's Creed 3").
+        series_by_src = {
+            "RAWG": _series_numbers(rawg_name) if rawg_name else set(),
+            "IGDB": _series_numbers(igdb_name) if igdb_name else set(),
+            "Steam": _series_numbers(steam_name) if steam_name else set(),
+            "HLTB": _series_numbers(hltb_name) if hltb_name else set(),
+        }
+        series_compared = {k: v for k, v in series_by_src.items() if v}
+        series_disagree = ""
+        if len(series_compared) >= 2 and len({frozenset(v) for v in series_compared.values()}) >= 2:
+            series_disagree = "YES"
+        series_summary = "; ".join(
+            f"{k}:{','.join(str(x) for x in sorted(v))}" for k, v in series_by_src.items() if v
+        )
+
         not_found: list[str] = []
         for prov, col in (
             ("RAWG", "RAWG_ID"),
@@ -275,6 +399,10 @@ def generate_validation_report(
         ):
             if not str(r.get(col, "") or "").strip():
                 not_found.append(prov)
+
+        validation_tags: list[str] = []
+        for prov in not_found:
+            validation_tags.append(f"missing:{prov}")
 
         culprit = ""
         if steam_appid_mismatch == "YES":
@@ -331,6 +459,11 @@ def generate_validation_report(
                 threshold=thresholds.title_score_warn,
             )
 
+        if steam_is_dlc:
+            culprit = "Steam"
+        if not culprit and series_disagree == "YES":
+            culprit = "RAWG/IGDB/Steam/HLTB"
+
         (
             canonical_title,
             canonical_source,
@@ -340,8 +473,8 @@ def generate_validation_report(
             consensus_sources,
         ) = _suggest_canonical_title({k: str(v or "") for k, v in r.to_dict().items()})
         suggested_rename = ""
-        review_title = ""
-        review_reason = ""
+        review_title = "YES" if steam_is_dlc else ""
+        review_reason = "steam looks like dlc/demo" if steam_is_dlc else ""
         if (
             canonical_title
             and name
@@ -377,40 +510,56 @@ def generate_validation_report(
                 review_title = "YES"
                 review_reason = "title mismatch"
 
+        if title_mismatch == "YES":
+            validation_tags.append("title_mismatch")
+        if year_disagree_rawg_igdb == "YES":
+            validation_tags.append("year_disagree_rawg_igdb")
+        if steam_year_disagree == "YES":
+            validation_tags.append("steam_year_disagree")
+        if platform_disagree == "YES":
+            validation_tags.append("platform_disagree")
+        if steam_appid_mismatch == "YES":
+            validation_tags.append("steam_appid_mismatch")
+        if edition_disagree == "YES":
+            validation_tags.append("edition_disagree")
+        if steam_is_dlc:
+            validation_tags.append("steam_dlc_like")
+        if series_disagree == "YES":
+            validation_tags.append("series_disagree")
+        if title_non_english == "YES":
+            validation_tags.append("title_non_english")
+        if suggested_rename == "YES":
+            validation_tags.append("suggest_rename")
+        if review_title == "YES":
+            validation_tags.append("needs_review")
+
+        steam_year_diff_vs_primary = ""
+        if steam_year is not None:
+            if igdb_year is not None:
+                steam_year_diff_vs_primary = steam_year_diff_vs_igdb
+            elif rawg_year is not None:
+                steam_year_diff_vs_primary = steam_year_diff_vs_rawg
+
         rows.append(
             {
                 "Name": name,
+                "ValidationTags": ", ".join(validation_tags),
                 "MissingProviders": ", ".join(not_found),
                 "RAWG_Name": rawg_name,
                 "IGDB_Name": igdb_name,
                 "Steam_Name": steam_name,
                 "HLTB_Name": hltb_name,
-                "Score_RAWG_vs_Personal": score_rawg,
-                "Score_IGDB_vs_Personal": score_igdb,
-                "Score_Steam_vs_Personal": score_steam,
-                "Score_HLTB_vs_Personal": score_hltb,
                 "Years": "; ".join(f"{k}:{y}" for k, y in years),
-                "YearDisagree": year_disagree,
-                "YearDisagree_RAWG_IGDB": year_disagree_rawg_igdb,
-                "SteamYearDisagree": steam_year_disagree,
-                "SteamYearDiff_vs_RAWG": steam_year_diff_vs_rawg,
-                "SteamYearDiff_vs_IGDB": steam_year_diff_vs_igdb,
-                "SteamEditionOrPort": "YES" if steam_is_edition else "",
+                "SteamYearDiffVsPrimary": steam_year_diff_vs_primary,
+                "EditionTokens": edition_summary,
+                "SeriesNumbers": series_summary,
                 "Platforms": "; ".join(f"{k}:{','.join(sorted(s))}" for k, s in non_empty),
                 "PlatformIntersection": platform_intersection,
-                "PlatformDisagree": platform_disagree,
                 "SteamAppID": steam_appid,
                 "IGDB_SteamAppID": igdb_steam_appid,
-                "SteamAppIDMismatch": steam_appid_mismatch,
-                "TitleMismatch": title_mismatch,
                 "SuggestedCulprit": culprit,
                 "SuggestedCanonicalTitle": canonical_title,
                 "SuggestedCanonicalSource": canonical_source,
-                "SuggestedPersonalName": suggested_personal,
-                "SuggestedRenamePersonalName": suggested_rename,
-                "SuggestionReason": suggestion_reason,
-                "CanonicalConsensusCount": str(consensus_count) if consensus_count else "",
-                "CanonicalConsensusSources": consensus_sources,
                 "ReviewTitle": review_title,
                 "ReviewTitleReason": review_reason,
             }

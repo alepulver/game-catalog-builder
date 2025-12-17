@@ -21,7 +21,17 @@ def test_steamspy_streaming_enqueues_existing_appids(tmp_path: Path, monkeypatch
 
     write_csv(pd.DataFrame([{"RowId": "rid:1", "Name": "Example Game"}]), input_csv)
     write_csv(
-        pd.DataFrame([{"RowId": "rid:1", "Name": "Example Game", "Steam_AppID": "123"}]), steam_out
+        pd.DataFrame(
+            [
+                {
+                    "RowId": "rid:1",
+                    "Name": "Example Game",
+                    "Steam_AppID": "123",
+                    "Steam_Name": "Example Game",
+                }
+            ]
+        ),
+        steam_out,
     )
 
     def fake_get(url, params=None, timeout=None):

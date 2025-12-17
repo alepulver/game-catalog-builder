@@ -26,10 +26,10 @@ def test_ensure_row_ids_in_input_adds_and_persists(tmp_path: Path):
     assert df2["RowId"].tolist() == df1["RowId"].tolist()
     assert created2 == 0
 
-    # Basic smoke: identity overrides loader reads IDs directly.
-    identity = tmp_path / "Games_Identity.csv"
-    write_csv(pd.DataFrame([{"RowId": df1.iloc[0]["RowId"], "RAWG_ID": "123"}]), identity)
-    overrides = load_identity_overrides(identity)
+    # Basic smoke: override loader reads pinned IDs from any CSV with RowId.
+    overrides_csv = tmp_path / "catalog.csv"
+    write_csv(pd.DataFrame([{"RowId": df1.iloc[0]["RowId"], "RAWG_ID": "123"}]), overrides_csv)
+    overrides = load_identity_overrides(overrides_csv)
     assert overrides[df1.iloc[0]["RowId"]]["RAWG_ID"] == "123"
 
 

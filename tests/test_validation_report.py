@@ -51,25 +51,23 @@ def test_generate_validation_report_flags_mismatches():
 
     report = generate_validation_report(df)
     assert list(report.columns)[0] == "Name"
+    assert "ValidationTags" in report.columns
 
     ok = report.iloc[0].to_dict()
-    assert ok["TitleMismatch"] == ""
-    assert ok["YearDisagree"] == ""
-    assert ok["YearDisagree_RAWG_IGDB"] == ""
-    assert ok["SteamYearDisagree"] == ""
-    assert ok["PlatformDisagree"] == ""
-    assert ok["SteamAppIDMismatch"] == ""
+    # Even when providers agree, we may still ask for review if the personal title differs from a
+    # strong canonical suggestion (e.g. extra year tokens in the personal title).
+    assert ok["ValidationTags"] in ("", "needs_review", "suggest_rename, needs_review")
     assert ok["SuggestedCulprit"] == ""
 
     bad = report.iloc[1].to_dict()
-    assert bad["TitleMismatch"] == "YES"
-    assert bad["YearDisagree"] == "YES"
-    assert bad["YearDisagree_RAWG_IGDB"] == "YES"
-    assert bad["PlatformDisagree"] == "YES"
-    assert bad["SteamAppIDMismatch"] == "YES"
+    assert "title_mismatch" in bad["ValidationTags"]
+    assert "year_disagree_rawg_igdb" in bad["ValidationTags"]
+    assert "platform_disagree" in bad["ValidationTags"]
+    assert "steam_appid_mismatch" in bad["ValidationTags"]
+    assert "missing:HLTB" in bad["ValidationTags"]
+    assert "missing:SteamSpy" in bad["ValidationTags"]
     assert bad["SuggestedCulprit"] in ("IGDB", "RAWG", "Steam", "HLTB", "RAWG/IGDB")
     assert bad["SuggestedCanonicalTitle"] == "DOOM"
     assert bad["SuggestedCanonicalSource"] in ("Steam", "RAWG", "IGDB", "HLTB")
-    assert bad["SuggestedRenamePersonalName"] == "YES"
     assert bad["ReviewTitle"] == "YES"
     assert bad["ReviewTitleReason"] != ""

@@ -32,8 +32,7 @@ def test_validation_steam_year_is_downweighted_for_editions():
     report = generate_validation_report(df)
     row = report.iloc[0].to_dict()
     # Steam year drift should not trigger SteamYearDisagree due to "HD" token.
-    assert row["SteamEditionOrPort"] == "YES"
-    assert row["SteamYearDisagree"] == ""
-    # RAWG/IGDB agree; overall YearDisagree should remain empty.
-    assert row["YearDisagree_RAWG_IGDB"] == ""
-    assert row["YearDisagree"] == ""
+    assert "steam_year_disagree" not in row["ValidationTags"]
+    assert row["SteamYearDiffVsPrimary"] == "19"
+    # RAWG/IGDB agree; year mismatch tag should be absent.
+    assert "year_disagree_rawg_igdb" not in row["ValidationTags"]

@@ -33,7 +33,6 @@ def test_validation_suggests_consensus_canonical_title():
     row = report.iloc[0].to_dict()
     assert row["SuggestedCanonicalTitle"] == "Air Conflicts: Vietnam"
     assert row["SuggestedCanonicalSource"] in ("Steam", "RAWG")
-    assert row["SuggestedRenamePersonalName"] == "YES"
+    assert "suggest_rename" in row["ValidationTags"]
     assert row["ReviewTitle"] == "YES"
     assert row["ReviewTitleReason"] != ""
-    assert row["SuggestionReason"].startswith("provider consensus:")

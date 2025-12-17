@@ -1,6 +1,5 @@
 """Utility functions and helpers."""
 
-from .identity import generate_identity_map, merge_identity_user_fields
 from .merger import merge_all
 from .utilities import (
     IDENTITY_NOT_FOUND,
@@ -31,8 +30,6 @@ __all__ = [
     "is_row_processed",
     "load_credentials",
     "merge_all",
-    "generate_identity_map",
-    "merge_identity_user_fields",
     "generate_validation_report",
     "ValidationThresholds",
     "normalize_game_name",
