@@ -100,7 +100,7 @@ sync only user-editable fields back into the canonical catalog.
 python run.py import path/to/exported_user_sheet.csv --out data/input/Games_Catalog.csv
 
 # 2) enrich: generate provider outputs + an editable enriched sheet (does not modify the catalog)
-python run.py enrich data/input/Games_Catalog.csv --source all --validate
+python run.py enrich data/input/Games_Catalog.csv --source all
 
 # 3) edit: open `data/output/Games_Enriched.csv` in Google Sheets / Excel and edit your user fields
 
@@ -108,7 +108,7 @@ python run.py enrich data/input/Games_Catalog.csv --source all --validate
 python run.py sync data/input/Games_Catalog.csv data/output/Games_Enriched.csv
 
 # 5) enrich again (optional): regenerate public data after edits / pinned ID fixes
-python run.py enrich data/input/Games_Catalog.csv --source all --validate
+python run.py enrich data/input/Games_Catalog.csv --source all
 ```
 
 Your original export does not need a `RowId` column. If it’s missing, `import` will generate stable
@@ -118,7 +118,10 @@ RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must 
 - Provider ID columns (`RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_ID`) so you can pin matches.
 - An optional `HLTB_Query` override (used only when `HLTB_ID` is empty) for tricky HLTB searches.
 - A `YearHint` column you can fill (e.g. `1999`) to disambiguate titles like reboots/remakes.
-- A small set of evaluation columns (match scores/tags) so you can adjust IDs before enrichment.
+- A small set of diagnostic columns so you can adjust IDs before enrichment:
+  - `RAWG_MatchedName`, `RAWG_MatchScore`, etc
+  - `ReviewTags` (compact reasons to review)
+  - `MatchConfidence` (`HIGH` / `MEDIUM` / `LOW`)
 
 It refreshes match diagnostics by fetching the provider name for any pinned IDs. Evaluation columns
 are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without evaluation
@@ -132,6 +135,25 @@ python run.py import path/to/exported_user_sheet.csv --out data/input/Games_Cata
 
 Both `import` and `enrich` support “in place” runs (e.g. `import X.csv --out X.csv`, or
 `enrich X.csv --merge-output X.csv`). For `enrich`, provider/public columns are always regenerated.
+
+### Provider selection
+
+Provider lists are comma-separated via `--source`:
+
+```bash
+# all providers
+python run.py enrich data/input/Games_Catalog.csv --source all
+
+# core providers (fastest/highest value): IGDB + RAWG + Steam
+python run.py import data/input/Games_User.csv --out data/input/Games_Catalog.csv --source core
+
+# explicit list
+python run.py import data/input/Games_User.csv --out data/input/Games_Catalog.csv --source igdb,rawg,steam
+```
+
+Steam notes:
+- Steam `appdetails` requests use `l=english&cc=us` (some AppIDs return `success=false` without a country code).
+- When `Steam_AppID` is empty but IGDB/RAWG exposes it, the importer may infer and pin it automatically.
 
 ### Experiments (subsets / debugging)
 
@@ -151,115 +173,23 @@ This keeps the main catalog workflow under `data/input/`, `data/output/`, and `d
 - `docs/providers/provider-field-reference.md`: field reference (catalog + examples)
 - `docs/providers/provider-json-schema.md`: example capture file conventions
 
-### Basic Usage
+### CLI help
 
-Process all sources with a single command:
-
-```bash
-python run.py data/input/Games_User.csv
-```
-
-This will:
-- Process all API sources (IGDB, RAWG, Steam, SteamSpy, HLTB)
-- Save individual results to `data/output/`
-- Automatically merge all results into `Games_Enriched.csv`
-
-### Process Specific Sources
-
-Process only specific API sources:
+The CLI is subcommand-based:
 
 ```bash
-# Process only IGDB
-python run.py data/input/Games_User.csv --source igdb
-
-# Process only RAWG
-python run.py data/input/Games_User.csv --source rawg
-
-# Process only Steam
-python run.py data/input/Games_User.csv --source steam
-
-# Process SteamSpy (requires Steam data first)
-python run.py data/input/Games_User.csv --source steamspy
-
-# Process only HowLongToBeat
-python run.py data/input/Games_User.csv --source hltb
+python run.py --help
+python run.py import --help
+python run.py enrich --help
+python run.py sync --help
 ```
 
-### Custom Output and Cache Directories
+### Files and folders
 
-```bash
-# Specify custom output directory
-python run.py data/input/Games_User.csv --output my_output/
-
-# Specify custom cache directory
-python run.py data/input/Games_User.csv --cache my_cache/
-
-# Use custom credentials file (default: data/credentials.yaml)
-python run.py data/input/Games_User.csv --credentials my_credentials.yaml
-```
-
-### Merge Only
-
-If you've already processed files and just want to merge:
-
-```bash
-python run.py data/input/Games_User.csv --source all --merge
-```
-
-### Validation Report
-
-Generate a cross-provider consistency report (title/year/platform + Steam AppID cross-check), including a suggested canonical title when providers disagree:
-
-```bash
-python run.py data/input/Games_User.csv --merge --validate
-```
-
-The report includes `ReviewTitle` (a broader “needs review” flag). High-confidence rename suggestions are surfaced via `ValidationTags` (for example `suggest_rename`).
-
-The report is intentionally compact; use `ValidationTags` for a summary of detected issues (for
-example `suggest_rename` and `needs_review`).
-
-### Command-Line Options
-
-```
-positional arguments:
-  input                 Input CSV file with game catalog
-
-optional arguments:
-  --output OUTPUT       Output directory for generated files (default: data/output)
-  --cache CACHE        Cache directory for API responses (default: data/cache)
-  --credentials CREDENTIALS
-                       Path to credentials.yaml file (default: data/credentials.yaml)
-  --source {igdb,rawg,steam,steamspy,hltb,all}
-                       Which API source to process (default: all)
-  --merge              Merge all processed files into a final CSV
-  --merge-output MERGE_OUTPUT
-                       Output file for merged results (default: data/output/Games_Enriched.csv)
-  --log-file LOG_FILE  Log file path (default: data/logs/log-<timestamp>-<command>.log)
-  --validate           Generate a cross-provider validation report (default: off)
-  --validate-output VALIDATE_OUTPUT
-                       Output file for validation report (default: data/output/Validation_Report.csv)
-  --debug              Enable DEBUG logging (default: INFO)
-```
-
-The CLI also supports explicit subcommands: `import`, `enrich`, `sync`, and `validate`.
-
-### Input/Output
-
-- **Input**: Any CSV file with a "Name" column containing game names
-- **Output**: Generated files are saved in the output directory (default: `data/output/`):
-  - `Provider_IGDB.csv`
-  - `Provider_RAWG.csv`
-  - `Provider_Steam.csv`
-  - `Provider_SteamSpy.csv`
-  - `Provider_HLTB.csv`
-  - `Games_Enriched.csv` (merged result)
-  - `Validation_Report.csv` (cross-provider diagnostics; see `ValidationTags` column for a compact summary)
-
-The tool will:
-- Create output directories if they don't exist
-- Resume processing from where it left off (skips already processed rows)
-- Save progress incrementally every 10 processed games
+- Main inputs: `data/input/Games_User.csv` → `data/input/Games_Catalog.csv`
+- Main output: `data/output/Games_Enriched.csv`
+- Logs: `data/logs/log-<timestamp>-<command>.log`
+- Provider caches: `data/cache/*.json`
 
 ### Caching
 

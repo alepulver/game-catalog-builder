@@ -1,6 +1,6 @@
 # How the enrichment works
 
-This project enriches a “personal catalog” CSV (from MyVideoGameList) with metadata from multiple providers, then merges everything into a single output CSV and generates a validation report.
+This project enriches a “personal catalog” CSV (from MyVideoGameList) with metadata from multiple providers, then merges everything into a single output CSV.
 
 ## Overview
 
@@ -12,7 +12,7 @@ This project enriches a “personal catalog” CSV (from MyVideoGameList) with m
    - extracts a stable subset of fields into `data/output/Provider_<Provider>.csv`,
    - caches results to avoid re-fetching on re-runs.
 4. Merge all provider CSVs into `data/output/Games_Enriched.csv`.
-5. Generate `data/output/Validation_Report.csv` to help spot mismatches and suggest canonical titles.
+5. Review import diagnostics in `data/input/Games_Catalog.csv` (`ReviewTags`, `MatchConfidence`) and pin IDs as needed.
 
 Providers run in parallel at the CLI level, but each provider client itself is synchronous (no async in clients).
 
@@ -20,14 +20,14 @@ Providers run in parallel at the CLI level, but each provider client itself is s
 
 When a provider does not already have a cached ID for a given `Name`, it performs a search using the raw `Name` text and chooses the best match using fuzzy scoring.
 
-- Minimum acceptance threshold: ~65%.
+- Minimum acceptance threshold is configured in code (currently 65%).
 - If you provide a `YearHint` column (e.g. `1999`), it is used as a soft disambiguation signal during matching.
 - Prefer keeping `Name` year-free and putting disambiguation years in `YearHint` instead of suffixing titles with `"(YYYY)"`.
 - If the best match is not a perfect 100%, a `WARNING` is logged so you can review borderline matches.
 - If no acceptable match is found, the provider logs a `WARNING` and stores a “negative cache” entry so the same miss does not re-query repeatedly.
 - Request failures (no response) are not negative-cached, to avoid poisoning the cache when offline.
 
-Because MyVideoGameList titles can be non-standard, the search step is treated as “best effort”; the validation report is the main tool for spotting when providers returned different games for the same row.
+Because MyVideoGameList titles can be non-standard, the search step is treated as “best effort”; import diagnostics are the main tool for spotting when providers returned different games for the same row.
 
 ## Provider-specific search notes
 
@@ -54,6 +54,11 @@ Limitations:
 Implementation notes:
 - Steam selection uses appdetails (`type` + release date) to avoid DLC/music and to break ties; when the query has no sequel number, it strongly prefers a base/edition match over a sequel match when possible.
 - Fuzzy matching treats common edition tokens (e.g. “GOTY”, “Enhanced”, “Complete”) as ignorable when one title is a strict superset of the other.
+- If `Steam_AppID` is empty but `IGDB_ID` (or `RAWG_ID`) is pinned, the importer may infer a Steam AppID from:
+  - IGDB `external_games` (Steam uid), or
+  - RAWG store URLs containing `/app/<appid>`.
+  Inferred Steam AppIDs are validated via Steam appdetails: if the inferred appid is not `type=game`,
+  it is ignored and the importer falls back to name-based Steam search.
 
 ## Provider IDs, details, and caching
 
@@ -65,6 +70,12 @@ Each provider caches only **stable or raw** data (in JSON under `data/cache/`):
 The project intentionally does **not** cache “name → chosen ID” as a single pinned selection.
 Selection heuristics can change over time, so on re-runs the program re-selects from cached
 `by_query` candidates (no network) unless you explicitly pin an ID in `data/input/Games_Catalog.csv`.
+
+## Configuration (static for now)
+
+Most “magic numbers” (match thresholds, rate limits, batch sizes, retry settings) live in
+`game_catalog_builder/config.py`. They are currently static constants but are grouped so we can
+later make them configurable without chasing scattered literals.
 
 Providers that don’t expose stable IDs (or where the library doesn’t provide one) fall back to
 caching raw data under a synthetic key (e.g. `name:<normalized>`), but the search results are still
@@ -89,6 +100,9 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - Written once at the end of the import command.
   - During import, HLTB matching progress is also checkpointed every 25 processed rows because HLTB
     can be slow.
+  - When diagnostics are enabled, the import also writes:
+    - `ReviewTags`: compact tags (missing providers, low fuzzy scores, year/platform drift, and a few high-signal Steam-specific checks like `steam_series_mismatch` and `steam_appid_disagree:*`).
+    - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW` (missing providers are typically `MEDIUM`; strong drift signals like year/platform disagreements are `LOW`).
 
 - Merge output (`data/output/Games_Enriched.csv`)
   - Written after all selected providers finish.
@@ -124,7 +138,7 @@ The tool is designed to be resumable, so it persists both caches and intermediat
 ### Steam and SteamSpy
 
 - Steam search: `GET https://store.steampowered.com/api/storesearch?term=...&l=english&cc=US`
-- Steam details: `GET https://store.steampowered.com/api/appdetails?appids=<appid>&l=english`
+- Steam details: `GET https://store.steampowered.com/api/appdetails?appids=<appid>&l=english&cc=us`
 - SteamSpy details: `GET https://steamspy.com/api.php?request=appdetails&appid=<appid>`
 - SteamSpy starts as soon as Steam discovers an appid (streaming queue), it does not wait for Steam to finish the full file.
 
@@ -140,17 +154,12 @@ If the input contains duplicate `Name` values (e.g., the same game on two platfo
 
 The occurrence index is the per-name row number within the file and is preserved across provider outputs because they originate from the same input ordering.
 
-## Validation report
+## Validation vs import diagnostics
 
-The validation report (`Validation_Report.csv`) is meant to help answer:
+At the moment, the primary review surface is **import diagnostics** in `data/input/Games_Catalog.csv`:
 
-- “Did providers fetch the same game for this row?”
-- “Which provider is most likely wrong?”
-- “What canonical title should I rename this entry to?”
+- `ReviewTags`: compact tags describing why the row may need review.
+- `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW`.
 
-Key concepts:
-
-- `SuggestedCanonicalTitle` / `SuggestedCanonicalSource`: the best “canonical” name based on provider consensus and source preference.
-- `SuggestedRenamePersonalName`: strict/high-confidence rename suggestion (small list).
-- `ReviewTitle`: broader “review this title” list (larger list), with `ReviewTitleReason`.
-- `YearDisagree_RAWG_IGDB` is considered high-signal; Steam year drift is tracked separately because Steam often represents ports/remasters.
+“Validation report” style outputs may be added back later, but current workflow expects you to
+review and pin IDs directly in `data/input/Games_Catalog.csv`.

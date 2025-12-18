@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from ..config import VALIDATION
 from .utilities import fuzzy_score, normalize_game_name
 
 
@@ -52,8 +53,8 @@ def _as_year_int(s: str) -> int | None:
 
 @dataclass(frozen=True)
 class ValidationThresholds:
-    title_score_warn: int = 90
-    year_max_diff: int = 1
+    title_score_warn: int = VALIDATION.title_score_warn
+    year_max_diff: int = VALIDATION.year_max_diff
 
 
 _STEAM_EDITION_TOKENS = {

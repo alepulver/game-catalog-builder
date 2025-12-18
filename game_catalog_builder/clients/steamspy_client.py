@@ -6,6 +6,7 @@ from typing import Any
 
 import requests
 
+from ..config import REQUEST, RETRY, STEAMSPY
 from ..utils.utilities import (
     RateLimiter,
     load_json_cache,
@@ -20,7 +21,7 @@ class SteamSpyClient:
     def __init__(
         self,
         cache_path: str | Path,
-        min_interval_s: float = 1.0,
+        min_interval_s: float = STEAMSPY.min_interval_s,
     ):
         self.cache_path = Path(cache_path)
         self.stats: dict[str, int] = {
@@ -63,12 +64,12 @@ class SteamSpyClient:
                     "request": "appdetails",
                     "appid": appid,
                 },
-                timeout=10,
+                timeout=REQUEST.timeout_s,
             )
             r.raise_for_status()
             return r.json()
 
-        data = with_retries(_request, retries=3, on_fail_return=None)
+        data = with_retries(_request, retries=RETRY.retries, on_fail_return=None)
         if not data or not isinstance(data, dict):
             self.cache[key] = None
             save_json_cache({"by_id": self.cache}, self.cache_path)

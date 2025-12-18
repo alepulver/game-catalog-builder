@@ -58,10 +58,7 @@ Example: `Postal 4` → `POSTAL 4: No Regerts`.
 
 ### RAWG
 
-- Tries a strict search first (`search_exact=1`, `search_precise=1`).
-- Falls back to a looser search (no strict flags) when:
-  - strict returns **0** results, or
-  - strict returns results but the best match score is below the acceptance threshold.
+- Uses the standard search query (no strict flags) and then selects the best match via scoring.
 - For titles with subtitles, may try a fallback search using only the portion before `:` (e.g.
   `Doom II: Hell on Earth` → `Doom II`).
 - For short numbered titles (e.g. `WRC 6`), applies a conservative numeric filter so unrelated
@@ -77,8 +74,8 @@ Example: `Postal 4` → `POSTAL 4: No Regerts`.
 ### Steam
 
 - Searches Steam store (`storesearch`) using English.
-- If `YearHint` exists, it may fetch app details (`appdetails`) for a small set of candidates to:
-  - filter out non-`game` types
+- If `YearHint` exists (or the initial selection looks suspicious), it may fetch app details (`appdetails`) for a small set of candidates to:
+  - filter out non-`game` types (reject demos/DLC/soundtracks)
   - use Steam release date as an additional tie-breaker (note: Steam “release year” can be a port/re-release year).
 
 ## Caching (important)
@@ -115,5 +112,9 @@ HLTB searches are slow relative to other providers, so the cache is designed to 
 ## Known issues / limitations
 
 - Providers have provider-specific canonical titles; sometimes the “best” name differs per provider.
-- Steam search can surface DLC/soundtrack entries even when the base game exists; these should be pinned when encountered.
+- Steam search can surface DLC/soundtrack/demo entries even when the base game exists; the importer tries to reject these automatically (via appdetails `type` + DLC-like token filters), but some cases still require manual pinning.
 - `YearHint` is best-effort: Steam’s year may reflect store release/re-release, not the original release year.
+
+## Configuration (static for now)
+
+Selection thresholds (e.g. minimum match score), rate limits, batch sizes, and retry behavior are grouped in `game_catalog_builder/config.py`.

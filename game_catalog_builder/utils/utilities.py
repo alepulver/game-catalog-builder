@@ -12,6 +12,8 @@ from typing import Any, Callable
 
 import pandas as pd
 import yaml
+
+from ..config import RETRY
 from rapidfuzz import fuzz
 
 IDENTITY_NOT_FOUND = "__NOT_FOUND__"
@@ -538,9 +540,9 @@ class RateLimiter:
 def with_retries(
     fn: Callable[[], Any],
     *,
-    retries: int = 3,
-    base_sleep_s: float = 1.0,
-    jitter_s: float = 0.3,
+    retries: int = RETRY.retries,
+    base_sleep_s: float = RETRY.base_sleep_s,
+    jitter_s: float = RETRY.jitter_s,
     retry_on: tuple[type, ...] = (Exception,),
     on_fail_return: Any = None,
     context: str | None = None,
@@ -554,6 +556,26 @@ def with_retries(
             return fn()
         except retry_on as e:
             last_exc = e
+            retry_after_s: float | None = None
+            try:
+                import requests  # local import to avoid hard dependency at import time
+
+                if isinstance(last_exc, requests.exceptions.HTTPError):
+                    resp = getattr(last_exc, "response", None)
+                    status = getattr(resp, "status_code", None)
+                    if status == 429:
+                        headers = getattr(resp, "headers", {}) or {}
+                        try:
+                            ra = str(headers.get("Retry-After", "") or "").strip()
+                            if ra:
+                                retry_after_s = float(ra)
+                        except Exception:
+                            retry_after_s = None
+                        if retry_after_s is None:
+                            retry_after_s = RETRY.http_429_default_retry_after_s
+            except Exception:
+                retry_after_s = None
+
             if attempt == retries - 1:
                 if context and last_exc is not None:
                     # Make network-offline situations obvious in logs, and distinct from
@@ -583,8 +605,18 @@ def with_retries(
                         )
                 return on_fail_return
             sleep = base_sleep_s * (2**attempt) + random.uniform(0, jitter_s)
+            if retry_after_s is not None and retry_after_s > 0:
+                sleep = max(sleep, retry_after_s)
             time.sleep(sleep)
     return on_fail_return
+
+
+def iter_chunks(items: list[Any], chunk_size: int) -> list[list[Any]]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be > 0")
+    if not items:
+        return []
+    return [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]
 
 
 # ----------------------------

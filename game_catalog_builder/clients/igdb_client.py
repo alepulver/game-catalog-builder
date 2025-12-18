@@ -8,9 +8,11 @@ from typing import Any
 
 import requests
 
+from ..config import IGDB, MATCHING, REQUEST, RETRY
 from ..utils.utilities import (
     RateLimiter,
     extract_year_hint,
+    iter_chunks,
     load_json_cache,
     pick_best_match,
     save_json_cache,
@@ -28,7 +30,7 @@ class IGDBClient:
         client_secret: str,
         cache_path: str | Path,
         language: str = "en",
-        min_interval_s: float = 0.3,
+        min_interval_s: float = IGDB.min_interval_s,
     ):
         self.client_id = client_id
         self.client_secret = client_secret
@@ -70,7 +72,7 @@ class IGDBClient:
                 "client_secret": self.client_secret,
                 "grant_type": "client_credentials",
             },
-            timeout=10,
+            timeout=REQUEST.timeout_s,
         )
         r.raise_for_status()
         self._token = r.json()["access_token"]
@@ -95,12 +97,17 @@ class IGDBClient:
                 f"{IGDB_API_URL}/{endpoint}",
                 headers=self._headers(),
                 data=query,
-                timeout=10,
+                timeout=REQUEST.timeout_s,
             )
             r.raise_for_status()
             return r.json()
 
-        return with_retries(_request, retries=3, on_fail_return=None)
+        return with_retries(
+            _request,
+            retries=RETRY.retries,
+            on_fail_return=None,
+            context=f"IGDB POST /{endpoint}",
+        )
 
     def _post_cached(self, endpoint: str, query: str) -> Any:
         qkey = f"{self.language}:{endpoint}:{query.strip()}"
@@ -148,13 +155,35 @@ class IGDBClient:
         if not igdb_id_str:
             return None
 
-        id_key = f"{self.language}:{igdb_id_str}"
-        cached = self._by_id.get(id_key)
-        if isinstance(cached, dict):
-            self.stats["by_id_hit"] += 1
-            return self._extract_fields(cached)
+        return self.get_by_ids([igdb_id_str]).get(igdb_id_str)
 
-        query = f"""
+    def get_by_ids(self, igdb_ids: list[int | str]) -> dict[str, dict[str, Any]]:
+        """
+        Fetch multiple IGDB games by id in as few API calls as possible.
+
+        Returns a mapping of IGDB id (string) -> extracted IGDB_* fields dict.
+        """
+        ids: list[str] = []
+        for x in igdb_ids:
+            s = str(x).strip()
+            if s and s.isdigit():
+                ids.append(s)
+        if not ids:
+            return {}
+
+        out: dict[str, dict[str, Any]] = {}
+        missing: list[str] = []
+
+        for igdb_id_str in ids:
+            id_key = f"{self.language}:{igdb_id_str}"
+            cached = self._by_id.get(id_key)
+            if isinstance(cached, dict):
+                self.stats["by_id_hit"] += 1
+                out[igdb_id_str] = self._extract_fields(cached)
+            else:
+                missing.append(igdb_id_str)
+
+        base_fields = """
         fields id,name,first_release_date,
                platforms.name,
                genres.name,
@@ -164,19 +193,39 @@ class IGDBClient:
                franchises.name,
                game_engines.name,
                external_games.external_game_source,external_games.uid;
-        where id = {igdb_id_str};
-        limit 1;
         """
 
-        data = self._post_cached("games", query)
-        if not data or not isinstance(data, list):
-            return None
-        # _post_cached returns lightweight candidates; raw payload is stored in _by_id.
-        raw = self._by_id.get(id_key)
-        if isinstance(raw, dict):
-            self.stats["by_id_fetch"] += 1
-            return self._extract_fields(raw)
-        return None
+        for chunk in iter_chunks(missing, IGDB.get_by_ids_batch_size):
+            ids_expr = ",".join(chunk)
+            query = f"""
+            {base_fields}
+            where id = ({ids_expr});
+            limit {len(chunk)};
+            """
+            data = self._post("games", query)
+            if data is None:
+                continue
+            if not isinstance(data, list):
+                continue
+            fetched_any = False
+            for it in data:
+                if not isinstance(it, dict):
+                    continue
+                gid = it.get("id")
+                if gid is None:
+                    continue
+                gid_str = str(gid).strip()
+                if not gid_str:
+                    continue
+                id_key = f"{self.language}:{gid_str}"
+                self._by_id[id_key] = it
+                fetched_any = True
+                self.stats["by_id_fetch"] += 1
+                out[gid_str] = self._extract_fields(it)
+            if fetched_any:
+                self._save_cache()
+
+        return out
 
     # -------------------------------------------------
     # Main search
@@ -193,6 +242,10 @@ class IGDBClient:
         # IGDB search is often more reliable without a trailing year token; prefer a stripped
         # query, but keep the original name for cache keys and logging.
         search_text = stripped_name or str(game_name or "").strip()
+        # IGDB uses a query DSL with `search "..."`; escape quotes/backslashes and strip control
+        # characters to avoid 400s for odd titles.
+        search_text = search_text.replace("\\", "\\\\").replace('"', '\\"')
+        search_text = re.sub(r"[\r\n\t]+", " ", search_text).strip()
         base_fields = """
         fields id,name,first_release_date,
                platforms.name,
@@ -219,7 +272,7 @@ class IGDBClient:
             where first_release_date != null
               & first_release_date >= {start}
               & first_release_date <= {end};
-            limit 25;
+            limit {IGDB.search_limit};
             '''
             data = self._post_cached("games", query)
 
@@ -227,7 +280,7 @@ class IGDBClient:
             query = f'''
             search "{search_text}";
             {base_fields}
-            limit 25;
+            limit {IGDB.search_limit};
             '''
             data = self._post_cached("games", query)
         if data is None:
@@ -257,7 +310,7 @@ class IGDBClient:
             year_hint=year_hint,
             year_getter=_year_getter,
         )
-        if not best or score < 65:
+        if not best or score < MATCHING.min_score:
             # Log top 5 closest matches when not found
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
@@ -349,6 +402,11 @@ class IGDBClient:
                 continue
             source = ext.get("external_game_source")
             if source in (1, "1"):  # 1 == Steam (external_game_sources)
+                return str(ext.get("uid") or "").strip()
+            # Some cached payloads (or older exports) can use a friendlier shape:
+            #   { category: "steam", uid: "620" }
+            category = str(ext.get("category") or "").strip().lower()
+            if category == "steam":
                 return str(ext.get("uid") or "").strip()
         return ""
 

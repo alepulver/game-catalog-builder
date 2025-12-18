@@ -58,9 +58,8 @@ def test_rawg_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
     )
     assert client.search("No Such Game") is None
     assert client.search("No Such Game") is None
-    # RAWG uses a strict query first then a looser fallback; both are cached by query.
-    # First call: 2 HTTP requests (strict + loose), second call: 0 HTTP requests.
-    assert calls["rawg"] == 2
+    # RAWG caches negative search results; second call should not hit the network.
+    assert calls["rawg"] == 1
 
 
 def test_steam_extract_fields_fixture():
@@ -94,6 +93,9 @@ def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
 
     def fake_get(url, params=None, timeout=None):
         class Resp:
+            status_code = 200
+            headers: dict[str, str] = {}
+
             def raise_for_status(self):
                 return None
 

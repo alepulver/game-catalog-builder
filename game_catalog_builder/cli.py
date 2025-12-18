@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import shlex
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,6 +15,7 @@ from queue import Queue
 
 import pandas as pd
 
+from .config import CLI, IGDB, MATCHING, RAWG, STEAM, STEAMSPY
 from .clients import (
     HLTBClient,
     IGDBClient,
@@ -55,8 +57,12 @@ EVAL_COLUMNS = [
     "HLTB_MatchedName",
     "HLTB_MatchScore",
     "ReviewTags",
+    "MatchConfidence",
+    # Legacy column kept only so we can drop it from older CSVs.
     "NeedsReview",
 ]
+
+DIAGNOSTIC_COLUMNS = [c for c in EVAL_COLUMNS if c != "NeedsReview"]
 
 
 def drop_eval_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -102,17 +108,134 @@ def _platform_is_pc_like(platform_value: object) -> bool:
     return any(x in p for x in ("pc", "windows", "steam", "linux", "mac", "osx"))
 
 
-def fill_eval_tags(df: pd.DataFrame, *, sources: set[str] | None = None) -> pd.DataFrame:
+def _extract_steam_appid_from_rawg(rawg_obj: object) -> str:
+    if not isinstance(rawg_obj, dict):
+        return ""
+    stores = rawg_obj.get("stores")
+    if not isinstance(stores, list):
+        return ""
+    for it in stores:
+        if not isinstance(it, dict):
+            continue
+        url = str(it.get("url") or "").strip()
+        if not url:
+            continue
+        m = re.search(r"/app/(\d+)\b", url)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def fill_eval_tags(
+    df: pd.DataFrame, *, sources: set[str] | None = None, clients: dict[str, object] | None = None
+) -> pd.DataFrame:
     out = df.copy()
-    out = ensure_columns(out, {"ReviewTags": "", "NeedsReview": ""})
+    out = ensure_columns(out, {"ReviewTags": "", "MatchConfidence": ""})
 
     tags_list: list[str] = []
-    needs_list: list[str] = []
+    confidence_list: list[str] = []
 
     include_rawg = sources is None or "rawg" in sources
     include_igdb = sources is None or "igdb" in sources
     include_steam = sources is None or "steam" in sources
     include_hltb = sources is None or "hltb" in sources
+
+    def _int_year(v: object) -> int | None:
+        s = str(v or "").strip()
+        if s.isdigit() and len(s) == 4:
+            y = int(s)
+            if 1900 <= y <= 2100:
+                return y
+        return None
+
+    def _steam_year(details: object) -> int | None:
+        if not isinstance(details, dict):
+            return None
+        date = str((details.get("release_date") or {}).get("date") or "")
+        m = re.search(r"\b(19\d{2}|20\d{2})\b", date)
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+
+    def _rawg_year(obj: object) -> int | None:
+        if not isinstance(obj, dict):
+            return None
+        released = str(obj.get("released", "") or "").strip()
+        if len(released) >= 4 and released[:4].isdigit():
+            return int(released[:4])
+        return None
+
+    def _series_numbers(title: str) -> set[int]:
+        tokens = normalize_game_name(title).split()
+        out_set: set[int] = set()
+        for i, t in enumerate(tokens):
+            if not t.isdigit():
+                continue
+            # Ignore thousands-group patterns like "40,000" which normalize to "40 000".
+            if i + 1 < len(tokens) and tokens[i + 1].isdigit() and tokens[i + 1] == "000":
+                continue
+            # Avoid leading-zero “brand” tokens like 007.
+            if len(t) > 1 and t.startswith("0"):
+                continue
+            n = int(t)
+            if n == 0:
+                continue
+            if 1900 <= n <= 2100:
+                continue
+            if 0 < n <= 50:
+                out_set.add(n)
+        return out_set
+
+    def _platform_bucket(name: str) -> str | None:
+        n = normalize_game_name(name)
+        if any(x in n for x in ("pc", "windows", "mac", "osx", "linux")):
+            return "pc"
+        if "playstation" in n or n.startswith("ps"):
+            return "playstation"
+        if "xbox" in n:
+            return "xbox"
+        if any(x in n for x in ("nintendo", "switch", "wii")):
+            return "nintendo"
+        if any(x in n for x in ("ios", "android", "mobile")):
+            return "mobile"
+        return None
+
+    def _platforms_from_csv_list(s: str) -> set[str]:
+        out_set: set[str] = set()
+        for part in [p.strip() for p in s.split(",") if p.strip()]:
+            b = _platform_bucket(part)
+            if b:
+                out_set.add(b)
+        return out_set
+
+    def _platforms_from_rawg(obj: object) -> set[str]:
+        if not isinstance(obj, dict):
+            return set()
+        out_set: set[str] = set()
+        for it in obj.get("platforms", []) or []:
+            if not isinstance(it, dict):
+                continue
+            pname = (it.get("platform") or {}).get("name")
+            if not pname:
+                continue
+            b = _platform_bucket(str(pname))
+            if b:
+                out_set.add(b)
+        return out_set
+
+    def _platforms_from_steam(details: object) -> set[str]:
+        if not isinstance(details, dict):
+            return set()
+        plats = details.get("platforms") or {}
+        if not isinstance(plats, dict):
+            return set()
+        out_set: set[str] = set()
+        if plats.get("windows") or plats.get("mac") or plats.get("linux"):
+            out_set.add("pc")
+        return out_set
 
     for _, row in out.iterrows():
         tags: list[str] = []
@@ -120,14 +243,23 @@ def fill_eval_tags(df: pd.DataFrame, *, sources: set[str] | None = None) -> pd.D
         if disabled:
             tags.append("disabled")
 
-        missing = False
+        has_missing_provider = False
+        has_medium_issue = False
+        has_low_issue = False
+
+        name = str(row.get("Name", "") or "").strip()
+        year_hint = _int_year(row.get("YearHint", "")) or _int_year(row.get("Year", ""))
+
         if include_rawg:
             rawg_id = str(row.get("RAWG_ID", "") or "").strip()
             if rawg_id == IDENTITY_NOT_FOUND:
                 tags.append("rawg_not_found")
             elif not rawg_id:
                 tags.append("missing_rawg")
-                missing = True
+                has_missing_provider = True
+            elif not str(row.get("RAWG_MatchedName", "") or "").strip():
+                tags.append("rawg_id_unresolved")
+                has_low_issue = True
 
         if include_igdb:
             igdb_id = str(row.get("IGDB_ID", "") or "").strip()
@@ -135,7 +267,10 @@ def fill_eval_tags(df: pd.DataFrame, *, sources: set[str] | None = None) -> pd.D
                 tags.append("igdb_not_found")
             elif not igdb_id:
                 tags.append("missing_igdb")
-                missing = True
+                has_missing_provider = True
+            elif not str(row.get("IGDB_MatchedName", "") or "").strip():
+                tags.append("igdb_id_unresolved")
+                has_low_issue = True
 
         if include_steam:
             steam_id = str(row.get("Steam_AppID", "") or "").strip()
@@ -144,7 +279,10 @@ def fill_eval_tags(df: pd.DataFrame, *, sources: set[str] | None = None) -> pd.D
                 tags.append("steam_not_found")
             elif not steam_id and steam_expected:
                 tags.append("missing_steam")
-                missing = True
+                has_missing_provider = True
+            elif steam_id and not str(row.get("Steam_MatchedName", "") or "").strip():
+                tags.append("steam_id_unresolved")
+                has_low_issue = True
 
         if include_hltb:
             hltb_id = str(row.get("HLTB_ID", "") or "").strip()
@@ -154,9 +292,8 @@ def fill_eval_tags(df: pd.DataFrame, *, sources: set[str] | None = None) -> pd.D
                 tags.append("hltb_not_found")
             elif not hltb_name:
                 tags.append("missing_hltb")
-                missing = True
+                has_missing_provider = True
 
-        low_score = False
         for score_col, tag_prefix, enabled in (
             ("RAWG_MatchScore", "rawg_score", include_rawg),
             ("IGDB_MatchScore", "igdb_score", include_igdb),
@@ -168,15 +305,137 @@ def fill_eval_tags(df: pd.DataFrame, *, sources: set[str] | None = None) -> pd.D
             s = str(row.get(score_col, "") or "").strip()
             if s.isdigit() and int(s) < 100:
                 tags.append(f"{tag_prefix}:{s}")
-                low_score = True
+                score = int(s)
+                # Treat large title mismatches as low-confidence even if the provider returned a
+                # candidate (e.g. Diablo vs Diablo IV).
+                if score < 80:
+                    has_low_issue = True
+                elif score < 95:
+                    has_medium_issue = True
 
-        # Not-found sentinel is considered resolved; missing/low scores need review.
-        needs_review = (not disabled) and (missing or low_score)
+        # High signal metadata checks (requires cached provider payloads).
+        years: dict[str, int] = {}
+        platforms: dict[str, set[str]] = {}
+
+        if clients and isinstance(clients, dict):
+            if include_rawg:
+                rawg_id = str(row.get("RAWG_ID", "") or "").strip()
+                if rawg_id and rawg_id != IDENTITY_NOT_FOUND:
+                    rawg_client = clients.get("rawg")
+                    rawg_obj = rawg_client.get_by_id(rawg_id) if rawg_client else None
+                    y = _rawg_year(rawg_obj)
+                    if y is not None:
+                        years["rawg"] = y
+                    platforms["rawg"] = _platforms_from_rawg(rawg_obj)
+
+            if include_igdb:
+                igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+                if igdb_id and igdb_id != IDENTITY_NOT_FOUND:
+                    igdb_client = clients.get("igdb")
+                    igdb_obj = igdb_client.get_by_id(igdb_id) if igdb_client else None
+                    if isinstance(igdb_obj, dict):
+                        y = _int_year(igdb_obj.get("IGDB_Year", ""))
+                        if y is not None:
+                            years["igdb"] = y
+                        platforms["igdb"] = _platforms_from_csv_list(
+                            str(igdb_obj.get("IGDB_Platforms", "") or "")
+                        )
+
+            if include_steam:
+                steam_id = str(row.get("Steam_AppID", "") or "").strip()
+                if steam_id and steam_id != IDENTITY_NOT_FOUND:
+                    steam_client = clients.get("steam")
+                    try:
+                        appid = int(steam_id)
+                    except ValueError:
+                        appid = None
+                    details = steam_client.get_app_details(appid) if steam_client and appid else None
+                    y = _steam_year(details)
+                    if y is not None:
+                        years["steam"] = y
+                    platforms["steam"] = _platforms_from_steam(details)
+
+            # Cross-provider Steam AppID disagreements:
+            # - IGDB can expose a Steam uid under external_games.
+            # - RAWG can expose Steam /app/<appid> in store URLs.
+            if include_steam:
+                steam_id = str(row.get("Steam_AppID", "") or "").strip()
+                if steam_id and steam_id != IDENTITY_NOT_FOUND:
+                    igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+                    if include_igdb and igdb_id and igdb_id != IDENTITY_NOT_FOUND:
+                        igdb_client = clients.get("igdb")
+                        igdb_obj = igdb_client.get_by_id(igdb_id) if igdb_client else None
+                        igdb_steam = str((igdb_obj or {}).get("IGDB_SteamAppID") or "").strip()
+                        if igdb_steam and igdb_steam.isdigit() and igdb_steam != steam_id:
+                            tags.append("steam_appid_disagree:igdb")
+                            has_low_issue = True
+
+                    rawg_id = str(row.get("RAWG_ID", "") or "").strip()
+                    if include_rawg and rawg_id and rawg_id != IDENTITY_NOT_FOUND:
+                        rawg_client = clients.get("rawg")
+                        rawg_obj = rawg_client.get_by_id(rawg_id) if rawg_client else None
+                        rawg_steam = _extract_steam_appid_from_rawg(rawg_obj)
+                        if rawg_steam and rawg_steam.isdigit() and rawg_steam != steam_id:
+                            tags.append("steam_appid_disagree:rawg")
+                            has_low_issue = True
+
+        if year_hint is not None and years:
+            for prov, y in years.items():
+                drift = abs(y - year_hint)
+                # Steam release year is often a port/re-release year; only treat it as a strong
+                # mismatch when other high-signal checks also disagree (e.g. series numbers).
+                if prov == "steam":
+                    if drift >= 10:
+                        tags.append("steam_year_far")
+                        has_medium_issue = True
+                    elif drift >= 2:
+                        tags.append("steam_year_drift")
+                        has_medium_issue = True
+                    continue
+                if drift >= 2:
+                    tags.append(f"year_hint_far:{prov}")
+                    has_low_issue = True
+
+        # Prefer cross-provider year checks using RAWG/IGDB (original release years). Steam year is
+        # frequently later even for correct matches.
+        if "rawg" in years and "igdb" in years:
+            if abs(years["rawg"] - years["igdb"]) >= 2:
+                tags.append("year_disagree")
+                has_low_issue = True
+
+        if "steam" in platforms:
+            for other in ("rawg", "igdb"):
+                if other in platforms and platforms["steam"] and platforms[other]:
+                    if platforms["steam"].isdisjoint(platforms[other]):
+                        tags.append(f"platform_disagree:steam_{other}")
+                        has_low_issue = True
+
+        if include_steam:
+            steam_name = str(row.get("Steam_MatchedName", "") or "").strip()
+            steam_id = str(row.get("Steam_AppID", "") or "").strip()
+            if steam_id and steam_id != IDENTITY_NOT_FOUND and name and steam_name:
+                q_nums = _series_numbers(name)
+                s_nums = _series_numbers(steam_name)
+                if q_nums != s_nums:
+                    tags.append("steam_series_mismatch")
+                    has_low_issue = True
+
+        if disabled:
+            confidence = ""
+        elif has_low_issue:
+            confidence = "LOW"
+        elif has_missing_provider or has_medium_issue:
+            confidence = "MEDIUM"
+        else:
+            confidence = "HIGH"
+
         tags_list.append(", ".join(tags))
-        needs_list.append("YES" if needs_review else "")
+        confidence_list.append(confidence)
 
     out["ReviewTags"] = pd.Series(tags_list)
-    out["NeedsReview"] = pd.Series(needs_list)
+    out["MatchConfidence"] = pd.Series(confidence_list)
+    if "NeedsReview" in out.columns:
+        out = out.drop(columns=["NeedsReview"])
     return out
 
 
@@ -286,8 +545,8 @@ def process_steam_and_steamspy_streaming(
     Steam discovers appids and pushes (name, appid) into a queue; SteamSpy consumes appids as soon
     as they are available, without waiting for Steam to finish the whole file.
     """
-    steam_client = SteamClient(cache_path=steam_cache_path, min_interval_s=0.5)
-    steamspy_client = SteamSpyClient(cache_path=steamspy_cache_path, min_interval_s=0.5)
+    steam_client = SteamClient(cache_path=steam_cache_path, min_interval_s=STEAM.storesearch_min_interval_s)
+    steamspy_client = SteamSpyClient(cache_path=steamspy_cache_path, min_interval_s=STEAMSPY.min_interval_s)
 
     df_steam = load_or_merge_dataframe(input_csv, steam_output_csv)
     df_steamspy = read_csv(input_csv)
@@ -297,6 +556,25 @@ def process_steam_and_steamspy_streaming(
 
     def steam_producer() -> None:
         processed = 0
+        pending: dict[int, list[int]] = {}
+
+        def _flush_pending() -> None:
+            nonlocal processed
+            if not pending:
+                return
+            appids = list(pending.keys())
+            details_map = steam_client.get_app_details_many(appids)
+            for appid, indices in list(pending.items()):
+                details = details_map.get(appid)
+                if not details:
+                    continue
+                fields = steam_client.extract_fields(int(appid), details)
+                for idx2 in indices:
+                    for k, v in fields.items():
+                        df_steam.at[idx2, k] = v
+                processed += len(indices)
+            pending.clear()
+
         for idx, row in df_steam.iterrows():
             name = str(row.get("Name", "") or "").strip()
             if not name:
@@ -343,19 +621,32 @@ def process_steam_and_steamspy_streaming(
             df_steam.at[idx, "Steam_AppID"] = appid
             q.put((int(idx), name, appid))
 
-            details = steam_client.get_app_details(int(appid))
-            if not details:
+            try:
+                appid_int = int(appid)
+            except ValueError:
                 continue
 
-            fields = steam_client.extract_fields(int(appid), details)
-            for k, v in fields.items():
-                df_steam.at[idx, k] = v
+            cached_details = steam_client.get_app_details(appid_int)
+            if cached_details:
+                fields = steam_client.extract_fields(appid_int, cached_details)
+                for k, v in fields.items():
+                    df_steam.at[idx, k] = v
+                processed += 1
+            else:
+                pending.setdefault(appid_int, []).append(int(idx))
 
-            processed += 1
             if processed % 10 == 0:
                 base_cols = [c for c in ("RowId", "Name") if c in df_steam.columns]
                 steam_cols = base_cols + [c for c in df_steam.columns if c.startswith("Steam_")]
                 write_csv(df_steam[steam_cols], steam_output_csv)
+
+            if len(pending) >= CLI.steam_streaming_flush_batch_size:
+                _flush_pending()
+                base_cols = [c for c in ("RowId", "Name") if c in df_steam.columns]
+                steam_cols = base_cols + [c for c in df_steam.columns if c.startswith("Steam_")]
+                write_csv(df_steam[steam_cols], steam_output_csv)
+
+        _flush_pending()
 
         base_cols = [c for c in ("RowId", "Name") if c in df_steam.columns]
         steam_cols = base_cols + [c for c in df_steam.columns if c.startswith("Steam_")]
@@ -419,12 +710,31 @@ def process_igdb(
         client_secret=credentials.get("igdb", {}).get("client_secret", ""),
         cache_path=cache_path,
         language=language,
-        min_interval_s=0.3,
+        min_interval_s=IGDB.min_interval_s,
     )
 
     df = load_or_merge_dataframe(input_csv, output_csv)
 
     processed = 0
+
+    pending_by_id: dict[str, list[int]] = {}
+
+    def _flush_pending() -> None:
+        nonlocal processed
+        if not pending_by_id:
+            return
+        ids = list(pending_by_id.keys())
+        by_id = client.get_by_ids(ids)
+        for igdb_id, indices in list(pending_by_id.items()):
+            data = by_id.get(str(igdb_id))
+            if not data:
+                continue
+            for idx2 in indices:
+                for k, v in data.items():
+                    df.at[idx2, k] = v
+            processed += len(indices)
+        pending_by_id.clear()
+
     for idx, row in df.iterrows():
         name = row.get("Name", "").strip()
         if not name:
@@ -446,25 +756,34 @@ def process_igdb(
                 continue
 
         if override_id:
-            data = client.get_by_id(override_id)
-            if not data:
-                logging.warning(f"[IGDB] Override id not found: {name} (IGDB_ID {override_id})")
-                continue
+            df.at[idx, "IGDB_ID"] = str(override_id).strip()
+            pending_by_id.setdefault(str(override_id).strip(), []).append(int(idx))
         else:
-            logging.info(f"[IGDB] Processing: {name}")
-            data = client.search(name)
-            if not data:
-                continue
+            igdb_id = str(df.at[idx, "IGDB_ID"] or "").strip()
+            if igdb_id:
+                pending_by_id.setdefault(igdb_id, []).append(int(idx))
+            else:
+                logging.info(f"[IGDB] Processing: {name}")
+                data = client.search(name)
+                if not data:
+                    continue
+                for k, v in data.items():
+                    df.at[idx, k] = v
+                processed += 1
 
-        for k, v in data.items():
-            df.at[idx, k] = v
-
-        processed += 1
         if processed % 10 == 0:
             # Save only Name + IGDB columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
             write_csv(df[igdb_cols], output_csv)
+
+        if len(pending_by_id) >= CLI.igdb_flush_batch_size:
+            _flush_pending()
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
+            write_csv(df[igdb_cols], output_csv)
+
+    _flush_pending()
 
     # Save only Name + IGDB columns
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
@@ -488,7 +807,7 @@ def process_rawg(
         api_key=credentials.get("rawg", {}).get("api_key", ""),
         cache_path=cache_path,
         language=language,
-        min_interval_s=0.5,
+        min_interval_s=RAWG.min_interval_s,
     )
 
     df = load_or_merge_dataframe(input_csv, output_csv)
@@ -554,7 +873,7 @@ def process_steam(
     """Process games with Steam data."""
     client = SteamClient(
         cache_path=cache_path,
-        min_interval_s=0.5,
+        min_interval_s=STEAM.storesearch_min_interval_s,
     )
 
     df = load_or_merge_dataframe(input_csv, output_csv)
@@ -593,20 +912,28 @@ def process_steam(
             if not appid:
                 continue
 
-        details = client.get_app_details(appid)
-        if not details:
-            continue
+        cached_details = client.get_app_details(int(appid))
+        if cached_details:
+            fields = client.extract_fields(int(appid), cached_details)
+            for k, v in fields.items():
+                df.at[idx, k] = v
+            processed += 1
+        else:
+            pending.setdefault(int(appid), []).append(int(idx))
 
-        fields = client.extract_fields(appid, details)
-        for k, v in fields.items():
-            df.at[idx, k] = v
-
-        processed += 1
         if processed % 10 == 0:
             # Save only Name + Steam columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             steam_cols = base_cols + [c for c in df.columns if c.startswith("Steam_")]
             write_csv(df[steam_cols], output_csv)
+
+        if len(pending) >= CLI.steam_flush_batch_size:
+            _flush_pending()
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            steam_cols = base_cols + [c for c in df.columns if c.startswith("Steam_")]
+            write_csv(df[steam_cols], output_csv)
+
+    _flush_pending()
 
     # Save only Name + Steam columns
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
@@ -625,7 +952,7 @@ def process_steamspy(
     """Process games with SteamSpy data."""
     client = SteamSpyClient(
         cache_path=cache_path,
-        min_interval_s=0.5,
+        min_interval_s=STEAMSPY.min_interval_s,
     )
 
     if not input_csv.exists():
@@ -906,7 +1233,7 @@ def _normalize_catalog(
         "HLTB_Query": "",
     }
     if include_diagnostics:
-        required_cols.update({c: "" for c in EVAL_COLUMNS})
+        required_cols.update({c: "" for c in DIAGNOSTIC_COLUMNS})
 
     df = ensure_columns(df, required_cols)
     df["Name"] = df["Name"].astype(str).str.strip()
@@ -1276,7 +1603,9 @@ def _legacy_enrich(argv: list[str]) -> None:
                         continue
                     key = tag.split(":", 1)[0].strip()
                     tags_counter[key] = tags_counter.get(key, 0) + 1
-            top = sorted(tags_counter.items(), key=lambda kv: kv[1], reverse=True)[:10]
+            top = sorted(tags_counter.items(), key=lambda kv: kv[1], reverse=True)[
+                : MATCHING.suggestions_limit
+            ]
             if top:
                 logging.info("✔ Validation top tags: " + ", ".join(f"{k}={v}" for k, v in top))
 
@@ -1322,6 +1651,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
         allowed={"igdb", "rawg", "steam", "hltb"},
         aliases={"core": ["igdb", "rawg", "steam"]},
     )
+    diag_clients: dict[str, object] = {}
 
     def _year_hint(row: pd.Series) -> int | None:
         for col in ("YearHint", "Year", "ReleaseYear", "Release_Year"):
@@ -1351,8 +1681,9 @@ def _command_normalize(args: argparse.Namespace) -> None:
             client = RAWGClient(
                 api_key=api_key,
                 cache_path=cache_dir / "rawg_cache.json",
-                min_interval_s=0.5,
+                min_interval_s=RAWG.min_interval_s,
             )
+            diag_clients["rawg"] = client
             for idx, row in df.iterrows():
                 if _is_yes(row.get("Disabled", "")):
                     continue
@@ -1379,7 +1710,6 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     df.at[idx, "RAWG_MatchScore"] = (
                         str(fuzzy_score(name, matched)) if matched else ""
                     )
-            logging.info(f"[RAWG] Cache stats: {client.format_cache_stats()}")
 
     if "igdb" in sources:
         client_id = credentials.get("igdb", {}).get("client_id", "")
@@ -1389,8 +1719,9 @@ def _command_normalize(args: argparse.Namespace) -> None:
                 client_id=client_id,
                 client_secret=secret,
                 cache_path=cache_dir / "igdb_cache.json",
-                min_interval_s=0.3,
+                min_interval_s=IGDB.min_interval_s,
             )
+            diag_clients["igdb"] = client
             for idx, row in df.iterrows():
                 if _is_yes(row.get("Disabled", "")):
                     continue
@@ -1417,26 +1748,26 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     df.at[idx, "IGDB_MatchScore"] = (
                         str(fuzzy_score(name, matched)) if matched else ""
                     )
-            logging.info(f"[IGDB] Cache stats: {client.format_cache_stats()}")
 
     if "steam" in sources:
-        client = SteamClient(cache_path=cache_dir / "steam_cache.json", min_interval_s=0.5)
+        client = SteamClient(
+            cache_path=cache_dir / "steam_cache.json",
+            min_interval_s=STEAM.storesearch_min_interval_s,
+        )
+        diag_clients["steam"] = client
         for idx, row in df.iterrows():
             if _is_yes(row.get("Disabled", "")):
-                continue
-            if not _platform_is_pc_like(row.get("Platform", "")):
-                # Don't auto-pin Steam AppIDs for clearly non-PC rows unless the user explicitly
-                # provided one.
-                if str(row.get("Steam_AppID", "") or "").strip():
-                    continue
-                if include_diagnostics:
-                    df.at[idx, "Steam_MatchedName"] = ""
-                    df.at[idx, "Steam_MatchScore"] = ""
                 continue
             name = str(row.get("Name", "") or "").strip()
             if not name:
                 continue
             steam_id = str(row.get("Steam_AppID", "") or "").strip()
+            if not _platform_is_pc_like(row.get("Platform", "")) and not steam_id:
+                # Don't auto-pin Steam AppIDs for clearly non-PC rows.
+                if include_diagnostics:
+                    df.at[idx, "Steam_MatchedName"] = ""
+                    df.at[idx, "Steam_MatchScore"] = ""
+                continue
             if steam_id == IDENTITY_NOT_FOUND:
                 if include_diagnostics:
                     df.at[idx, "Steam_MatchedName"] = ""
@@ -1452,6 +1783,39 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     details = None
                 matched = str((details or {}).get("name") or "").strip()
             else:
+                # Cross-provider hints: try to infer Steam AppID from already-pinned providers.
+                inferred = ""
+                igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+                if igdb_id and igdb_id != IDENTITY_NOT_FOUND and diag_clients.get("igdb"):
+                    igdb_obj = diag_clients["igdb"].get_by_id(igdb_id)
+                    inferred = str((igdb_obj or {}).get("IGDB_SteamAppID") or "").strip()
+                if not inferred:
+                    rawg_id = str(row.get("RAWG_ID", "") or "").strip()
+                    if rawg_id and rawg_id != IDENTITY_NOT_FOUND and diag_clients.get("rawg"):
+                        rawg_obj = diag_clients["rawg"].get_by_id(rawg_id)
+                        inferred = _extract_steam_appid_from_rawg(rawg_obj)
+                if inferred.isdigit():
+                    inferred_int = int(inferred)
+                    details = client.get_app_details(inferred_int)
+                    details_type = str((details or {}).get("type") or "").strip().lower()
+                    if not details or (details_type and details_type != "game"):
+                        logging.warning(
+                            f"[STEAM] Ignoring inferred Steam AppID from other provider for '{name}': "
+                            f"appid={inferred} type={details_type or 'unknown'}"
+                        )
+                    else:
+                        df.at[idx, "Steam_AppID"] = inferred
+                        steam_id = inferred
+                        if include_diagnostics:
+                            matched = str((details or {}).get("name") or "").strip()
+                            df.at[idx, "Steam_MatchedName"] = matched
+                            df.at[idx, "Steam_MatchScore"] = (
+                                str(fuzzy_score(name, matched)) if matched else ""
+                            )
+                        # If we successfully inferred a Steam AppID, do not overwrite it by running
+                        # a secondary name-based search (which can surface DLC/soundtrack matches).
+                        continue
+
                 search = client.search_appid(name, year_hint=_year_hint(row))
                 matched = str((search or {}).get("name") or "").strip()
                 if search and search.get("id") is not None:
@@ -1459,10 +1823,10 @@ def _command_normalize(args: argparse.Namespace) -> None:
             if include_diagnostics:
                 df.at[idx, "Steam_MatchedName"] = matched
                 df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
-        logging.info(f"[STEAM] Cache stats: {client.format_cache_stats()}")
 
     if "hltb" in sources:
         client = HLTBClient(cache_path=cache_dir / "hltb_cache.json")
+        diag_clients["hltb"] = client
         processed = 0
         for idx, row in df.iterrows():
             if _is_yes(row.get("Disabled", "")):
@@ -1495,12 +1859,23 @@ def _command_normalize(args: argparse.Namespace) -> None:
             if processed % 25 == 0:
                 # Persist incremental progress; HLTB can be slow and long runs should be resumable.
                 write_csv(df, out)
-        logging.info(f"[HLTB] Cache stats: {client.format_cache_stats()}")
 
     if include_diagnostics:
-        df = fill_eval_tags(df, sources=set(sources))
+        df = fill_eval_tags(df, sources=set(sources), clients=diag_clients)
     else:
         df = drop_eval_columns(df)
+
+    # Cache stats are logged at the end so they include any fetches performed during diagnostics
+    # (e.g. Steam appdetails needed for year/series/platform checks).
+    if "rawg" in diag_clients:
+        logging.info(f"[RAWG] Cache stats: {diag_clients['rawg'].format_cache_stats()}")
+    if "igdb" in diag_clients:
+        logging.info(f"[IGDB] Cache stats: {diag_clients['igdb'].format_cache_stats()}")
+    if "steam" in diag_clients:
+        logging.info(f"[STEAM] Cache stats: {diag_clients['steam'].format_cache_stats()}")
+    if "hltb" in diag_clients:
+        logging.info(f"[HLTB] Cache stats: {diag_clients['hltb'].format_cache_stats()}")
+
     write_csv(df, out)
     logging.info(f"✔ Import matching completed: {out}")
 
@@ -1701,7 +2076,9 @@ def _command_validate(args: argparse.Namespace) -> None:
         input_path=args.enriched,
     )
     is_experiment = _is_under_dir(args.enriched, paths.data_experiments)
-    output_dir = args.output_dir or ((paths.data_experiments / "output") if is_experiment else paths.data_output)
+    output_dir = args.output_dir or (
+        (paths.data_experiments / "output") if is_experiment else paths.data_output
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     out = args.out or (output_dir / "Validation_Report.csv")
     if args.enriched:

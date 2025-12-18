@@ -29,7 +29,7 @@ def test_normalize_catalog_adds_rowid_and_identity_columns(tmp_path: Path) -> No
         "HLTB_MatchedName",
         "HLTB_MatchScore",
         "ReviewTags",
-        "NeedsReview",
+        "MatchConfidence",
     ):
         assert c in df.columns
 
@@ -57,6 +57,6 @@ def test_normalize_catalog_can_skip_diagnostics_columns(tmp_path: Path) -> None:
         "HLTB_MatchedName",
         "HLTB_MatchScore",
         "ReviewTags",
-        "NeedsReview",
+        "MatchConfidence",
     ):
         assert c not in df.columns

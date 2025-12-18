@@ -1,4 +1,4 @@
 - Make user data (input) and output columns configurable; for the latter, keep a schema or flat list of available data per provider with description (so they can be mapped to the output)
 - Keep working on derived metrics with ChatGPT (tags, estimated popularity, users, production level, replayability, mods, "must play classic", etc)
-- Add better validation columns and logs
-- Review logs, warnings, validation output, possible JSON, and simplify
+- Support for checking mod websites such as nexus to determine activity, number of mods, etc
+- Check if there is a remake or new edition?

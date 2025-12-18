@@ -62,7 +62,7 @@ def test_sync_back_updates_user_fields_and_keeps_provider_fields_out(tmp_path: P
     assert "RAWG_Name" not in out.columns
     # Evaluation/diagnostic columns should not be present in the synced catalog.
     assert "ReviewTags" not in out.columns
-    assert "NeedsReview" not in out.columns
+    assert "MatchConfidence" not in out.columns
 
     # Missing in enriched => disabled.
     r2 = out[out["RowId"] == "rid:2"].iloc[0].to_dict()

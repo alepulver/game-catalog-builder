@@ -22,7 +22,7 @@ def test_build_personal_base_for_enrich_strips_provider_columns() -> None:
                 "HLTB_Query": "",
                 "HLTB_Name": "Doom",
                 "RAWG_MatchScore": "100",
-                "NeedsReview": "YES",
+                "MatchConfidence": "HIGH",
             }
         ]
     )
@@ -43,5 +43,5 @@ def test_build_personal_base_for_enrich_strips_provider_columns() -> None:
 
     # Eval columns should be stripped.
     assert "RAWG_MatchScore" not in cols
-    assert "NeedsReview" not in cols
-
+    assert "MatchConfidence" not in cols
+    assert "ReviewTags" not in cols

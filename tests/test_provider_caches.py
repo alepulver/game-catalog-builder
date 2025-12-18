@@ -8,6 +8,9 @@ def test_steam_cache_is_id_based(tmp_path, monkeypatch):
 
     def fake_get(url, params=None, timeout=None):
         class Resp:
+            status_code = 200
+            headers: dict[str, str] = {}
+
             def raise_for_status(self):
                 return None
 
@@ -101,7 +104,7 @@ def test_rawg_cache_is_id_based(tmp_path, monkeypatch):
 def test_rawg_falls_back_to_loose_when_strict_matches_are_irrelevant(tmp_path, monkeypatch):
     from game_catalog_builder.clients.rawg_client import RAWGClient
 
-    calls = {"strict": 0, "loose": 0}
+    calls = {"loose": 0}
 
     def fake_get(url, params=None, timeout=None):
         assert "rawg.io" in url
@@ -111,10 +114,6 @@ def test_rawg_falls_back_to_loose_when_strict_matches_are_irrelevant(tmp_path, m
                 return None
 
             def json(self):
-                if params and params.get("search_exact") == 1:
-                    calls["strict"] += 1
-                    # Return irrelevant hits so strict is non-empty but low-scoring.
-                    return {"results": [{"id": 1, "name": "Juggernaut for Quake 2", "released": ""}]}
                 calls["loose"] += 1
                 return {"results": [{"id": 2, "name": "Quake II", "released": "1997-12-09"}]}
 
@@ -132,7 +131,6 @@ def test_rawg_falls_back_to_loose_when_strict_matches_are_irrelevant(tmp_path, m
     best = client.search("Quake II")
     assert best is not None
     assert best["id"] == 2
-    assert calls["strict"] == 1
     assert calls["loose"] == 1
 
 

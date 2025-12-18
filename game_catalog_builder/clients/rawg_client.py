@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from ..config import MATCHING, RAWG, REQUEST, RETRY
 from ..utils.utilities import (
     RateLimiter,
     extract_year_hint,
@@ -26,7 +27,7 @@ class RAWGClient:
         api_key: str,
         cache_path: str | Path,
         language: str = "en",
-        min_interval_s: float = 1.0,
+        min_interval_s: float = RAWG.min_interval_s,
     ):
         self.api_key = api_key
         self.language = (language or "en").strip() or "en"
@@ -96,12 +97,17 @@ class RAWGClient:
             r = requests.get(
                 f"{RAWG_API_URL}/{rawg_id_str}",
                 params={"key": self.api_key, "lang": self.language},
-                timeout=10,
+                timeout=REQUEST.timeout_s,
             )
             r.raise_for_status()
             return r.json()
 
-        data = with_retries(_request, retries=3, on_fail_return=None)
+        data = with_retries(
+            _request,
+            retries=RETRY.retries,
+            on_fail_return=None,
+            context=f"RAWG get_by_id id={rawg_id_str}",
+        )
         if isinstance(data, dict) and data.get("id") is not None:
             self._by_id[id_key] = data
             self._save_cache()
@@ -122,14 +128,6 @@ class RAWGClient:
         stripped_name = _strip_trailing_paren_year(str(game_name or "").strip())
 
         search_text = stripped_name or str(game_name or "").strip()
-
-        # RAWG can be surprisingly strict with search_exact/search_precise for some titles that
-        # exist in the catalog (e.g. "Postal 4"). Try strict first, then fall back to a looser
-        # query if we get 0 results.
-        strict_key = (
-            f"lang:{self.language}|search:{search_text}|page_size:40|search_exact:1|search_precise:1"
-        )
-        loose_key = f"lang:{self.language}|search:{search_text}|page_size:40"
 
         def _candidates_from_results(results: Any) -> list[dict[str, Any]]:
             out: list[dict[str, Any]] = []
@@ -162,11 +160,16 @@ class RAWGClient:
 
             def _request():
                 self.ratelimiter.wait()
-                r = requests.get(RAWG_API_URL, params=params, timeout=10)
+                r = requests.get(RAWG_API_URL, params=params, timeout=REQUEST.timeout_s)
                 r.raise_for_status()
                 return r.json()
 
-            got = with_retries(_request, retries=3, on_fail_return=None)
+            got = with_retries(
+                _request,
+                retries=RETRY.retries,
+                on_fail_return=None,
+                context=f"RAWG search term={str(params.get('search') or '')!r}",
+            )
             if isinstance(got, dict):
                 candidates = _candidates_from_results(got.get("results") or [])
                 self._by_query[query_key] = candidates
@@ -222,54 +225,25 @@ class RAWGClient:
                 year_getter=_year_getter,
             )
 
-        def _search_term(
-            term: str,
-        ) -> tuple[dict[str, Any] | None, int, list[tuple[str, int]], bool]:
-            skey = (
-                f"lang:{self.language}|search:{term}|page_size:40|search_exact:1|search_precise:1"
-            )
+        def _search_term(term: str) -> tuple[dict[str, Any] | None, int, list[tuple[str, int]], bool]:
             lkey = f"lang:{self.language}|search:{term}|page_size:40"
 
-            strict = _fetch(
-                skey,
-                {
-                    "search": term,
-                    "page_size": 40,
-                    "search_exact": 1,
-                    "search_precise": 1,
-                    "key": self.api_key,
-                    "lang": self.language,
-                },
+            cands = _fetch(
+                lkey,
+                {"search": term, "page_size": 40, "key": self.api_key, "lang": self.language},
             )
-            if strict is None:
+            if cands is None:
                 return None, 0, [], False
 
-            cands = strict
-            if not cands:
-                loose = _fetch(
-                    lkey,
-                    {"search": term, "page_size": 40, "key": self.api_key, "lang": self.language},
-                )
-                cands = loose or []
-
             best, score, top = _pick(term, cands) if cands else (None, 0, [])
-            if cands and score < 65:
-                loose = _fetch(
-                    lkey,
-                    {"search": term, "page_size": 40, "key": self.api_key, "lang": self.language},
-                )
-                if isinstance(loose, list) and loose:
-                    best2, score2, top2 = _pick(term, loose)
-                    if score2 > score:
-                        best, score, top = best2, score2, top2
 
             # If the candidate clearly starts with the query (common for short numbered names),
             # allow it as a match even if token_sort_ratio is low.
-            if best and score < 65:
+            if best and score < MATCHING.min_score:
                 q_norm = normalize_game_name(term)
                 b_norm = normalize_game_name(str(best.get("name", "") or ""))
                 if q_norm and b_norm.startswith(q_norm) and _non_year_number_tokens(term):
-                    score = 65
+                    score = MATCHING.min_score
 
             return best, score, top, True
 
@@ -282,7 +256,7 @@ class RAWGClient:
             return None
 
         # If still no decent match, try stripping a subtitle after ":" as a fallback.
-        if score < 65 and ":" in search_text:
+        if score < MATCHING.min_score and ":" in search_text:
             base = search_text.split(":", 1)[0].strip()
             if base and base != search_text:
                 best2, score2, top2, ok2 = _search_term(base)
@@ -290,7 +264,7 @@ class RAWGClient:
                     best, score, top_matches = best2, score2, top2
 
         # Minimum threshold to accept the match
-        if not best or score < 65:
+        if not best or score < MATCHING.min_score:
             # Log top 5 closest matches when not found
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]

@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from game_catalog_builder.clients import HLTBClient, IGDBClient
+from game_catalog_builder.config import IGDB
 from game_catalog_builder.utils import fuzzy_score, load_credentials, normalize_game_name
 
 
@@ -265,7 +266,7 @@ def fetch_igdb(
             client_secret=credentials.get("igdb", {}).get("client_secret", ""),
             cache_path=out_dir / "_igdb_cache_unused.json",
             language=language,
-            min_interval_s=0.3,
+            min_interval_s=IGDB.min_interval_s,
         )
 
         # Example: expanded single-call query (no secondary endpoint lookups).

@@ -15,6 +15,7 @@ def test_fill_eval_tags_marks_missing_and_not_found() -> None:
                 "RAWG_ID": "",
                 "IGDB_ID": IDENTITY_NOT_FOUND,
                 "Steam_AppID": "123",
+                "Steam_MatchedName": "A",
                 "HLTB_Query": "",
                 "HLTB_MatchedName": "",
                 "RAWG_MatchScore": "",
@@ -25,7 +26,7 @@ def test_fill_eval_tags_marks_missing_and_not_found() -> None:
         ]
     )
     out = fill_eval_tags(df)
-    assert out.iloc[0]["NeedsReview"] == "YES"
+    assert out.iloc[0]["MatchConfidence"] == "MEDIUM"
     tags = out.iloc[0]["ReviewTags"]
     assert "missing_rawg" in tags
     assert "igdb_not_found" in tags
@@ -54,6 +55,5 @@ def test_fill_eval_tags_ignores_disabled_rows() -> None:
         ]
     )
     out = fill_eval_tags(df)
-    assert out.iloc[0]["NeedsReview"] == ""
+    assert out.iloc[0]["MatchConfidence"] == ""
     assert "disabled" in out.iloc[0]["ReviewTags"]
-
