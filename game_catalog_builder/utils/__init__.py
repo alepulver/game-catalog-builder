@@ -8,6 +8,7 @@ from .utilities import (
     ensure_columns,
     ensure_row_ids,
     ensure_row_ids_in_input,
+    extract_year_hint,
     fuzzy_score,
     is_row_processed,
     load_credentials,
@@ -22,6 +23,7 @@ from .validation import ValidationThresholds, generate_validation_report
 __all__ = [
     "ProjectPaths",
     "IDENTITY_NOT_FOUND",
+    "extract_year_hint",
     "ensure_columns",
     "ensure_row_ids_in_input",
     "ensure_row_ids",

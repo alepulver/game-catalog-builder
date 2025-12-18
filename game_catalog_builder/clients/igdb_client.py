@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +10,8 @@ import requests
 
 from ..utils.utilities import (
     RateLimiter,
+    extract_year_hint,
     load_json_cache,
-    normalize_game_name,
     pick_best_match,
     save_json_cache,
     with_retries,
@@ -33,8 +34,20 @@ class IGDBClient:
         self.client_secret = client_secret
         self.language = (language or "en").strip() or "en"
         self.cache_path = Path(cache_path)
-        self._by_id: dict[str, dict[str, str]] = {}
-        self._by_name: dict[str, str | None] = {}
+        self.stats: dict[str, int] = {
+            "by_query_hit": 0,
+            "by_query_fetch": 0,
+            "by_query_negative_hit": 0,
+            "by_query_negative_fetch": 0,
+            "by_id_hit": 0,
+            "by_id_fetch": 0,
+        }
+        # Cache raw IGDB game payloads keyed by id (language:id). Derived output fields are
+        # computed on-demand to keep caches independent of code changes.
+        self._by_id: dict[str, dict[str, Any]] = {}
+        # Cache by exact query string, storing only lightweight candidates
+        # (id/name/first_release_date).
+        self._by_query: dict[str, list[dict[str, Any]]] = {}
         self._load_cache(load_json_cache(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
 
@@ -89,6 +102,44 @@ class IGDBClient:
 
         return with_retries(_request, retries=3, on_fail_return=None)
 
+    def _post_cached(self, endpoint: str, query: str) -> Any:
+        qkey = f"{self.language}:{endpoint}:{query.strip()}"
+        cached = self._by_query.get(qkey)
+        if cached is not None:
+            self.stats["by_query_hit"] += 1
+            if not cached:
+                self.stats["by_query_negative_hit"] += 1
+            return cached
+
+        data = self._post(endpoint, query)
+        if not isinstance(data, list):
+            return data
+
+        # Populate by_id with raw game payloads and store only lightweight candidates under
+        # by_query.
+        candidates: list[dict[str, Any]] = []
+        for it in data:
+            if not isinstance(it, dict):
+                continue
+            gid = it.get("id")
+            if gid is None:
+                continue
+            id_key = f"{self.language}:{gid}"
+            self._by_id[id_key] = it
+            candidates.append(
+                {
+                    "id": gid,
+                    "name": it.get("name", ""),
+                    "first_release_date": it.get("first_release_date"),
+                }
+            )
+        self._by_query[qkey] = candidates
+        self._save_cache()
+        self.stats["by_query_fetch"] += 1
+        if not candidates:
+            self.stats["by_query_negative_fetch"] += 1
+        return candidates
+
     def get_by_id(self, igdb_id: int | str) -> dict[str, Any] | None:
         """
         Fetch an IGDB game by id (preferring cache).
@@ -100,7 +151,8 @@ class IGDBClient:
         id_key = f"{self.language}:{igdb_id_str}"
         cached = self._by_id.get(id_key)
         if isinstance(cached, dict):
-            return cached
+            self.stats["by_id_hit"] += 1
+            return self._extract_fields(cached)
 
         query = f"""
         fields id,name,first_release_date,
@@ -116,38 +168,32 @@ class IGDBClient:
         limit 1;
         """
 
-        data = self._post("games", query)
-        if not data or not isinstance(data, list) or len(data) == 0:
+        data = self._post_cached("games", query)
+        if not data or not isinstance(data, list):
             return None
-
-        best = data[0]
-        if not isinstance(best, dict):
-            return None
-
-        enriched = self._extract_fields(best)
-        out_id = enriched.get("IGDB_ID", "").strip()
-        if out_id:
-            out_key = f"{self.language}:{out_id}"
-            self._by_id[out_key] = enriched
-            self._save_cache()
-        return enriched
+        # _post_cached returns lightweight candidates; raw payload is stored in _by_id.
+        raw = self._by_id.get(id_key)
+        if isinstance(raw, dict):
+            self.stats["by_id_fetch"] += 1
+            return self._extract_fields(raw)
+        return None
 
     # -------------------------------------------------
     # Main search
     # -------------------------------------------------
-    def search(self, game_name: str) -> dict[str, Any] | None:
-        name_key = f"{self.language}:{normalize_game_name(game_name)}"
-        if name_key in self._by_name:
-            id_key = self._by_name[name_key]
-            if not id_key:
-                return None
-            cached = self._by_id.get(str(id_key))
-            if cached:
-                return cached
-            return None
+    def search(self, game_name: str, year_hint: int | None = None) -> dict[str, Any] | None:
+        def _strip_trailing_paren_year(s: str) -> str:
+            y = extract_year_hint(s)
+            if y is None:
+                return s
+            return re.sub(r"\s*\(\s*(19\d{2}|20\d{2})\s*\)\s*$", "", s).strip() or s
 
-        query = f'''
-        search "{game_name}";
+        stripped_name = _strip_trailing_paren_year(str(game_name or "").strip())
+
+        # IGDB search is often more reliable without a trailing year token; prefer a stripped
+        # query, but keep the original name for cache keys and logging.
+        search_text = stripped_name or str(game_name or "").strip()
+        base_fields = """
         fields id,name,first_release_date,
                platforms.name,
                genres.name,
@@ -157,18 +203,60 @@ class IGDBClient:
                franchises.name,
                game_engines.name,
                external_games.external_game_source,external_games.uid;
-        limit 10;
-        '''
+        """
 
-        data = self._post("games", query)
+        data = None
+        if year_hint is not None:
+            # Try a narrow year window first to avoid common pitfalls like sequels, remakes,
+            # and upcoming placeholders (e.g. "Silent Hill f").
+            start = int(datetime(int(year_hint) - 1, 1, 1, tzinfo=timezone.utc).timestamp())
+            end = int(
+                datetime(int(year_hint) + 1, 12, 31, 23, 59, 59, tzinfo=timezone.utc).timestamp()
+            )
+            query = f'''
+            search "{search_text}";
+            {base_fields}
+            where first_release_date != null
+              & first_release_date >= {start}
+              & first_release_date <= {end};
+            limit 25;
+            '''
+            data = self._post_cached("games", query)
+
+        if not data:
+            query = f'''
+            search "{search_text}";
+            {base_fields}
+            limit 25;
+            '''
+            data = self._post_cached("games", query)
+        if data is None:
+            logging.warning(
+                f"IGDB search request failed for '{game_name}' (no response); "
+                "not caching as not-found."
+            )
+            return None
         if not data or not isinstance(data, list) or len(data) == 0:
             # No results from API - log warning
             logging.warning(f"Not found in IGDB: '{game_name}'. No results from API.")
-            self._by_name[name_key] = None
-            self._save_cache()
             return None
 
-        best, score, top_matches = pick_best_match(game_name, data, name_key="name")
+        def _year_getter(obj: dict[str, Any]) -> int | None:
+            ts = obj.get("first_release_date")
+            if isinstance(ts, (int, float)) and ts > 0:
+                try:
+                    return int(datetime.fromtimestamp(ts, tz=timezone.utc).year)
+                except Exception:
+                    return None
+            return None
+
+        best, score, top_matches = pick_best_match(
+            search_text,
+            data,
+            name_key="name",
+            year_hint=year_hint,
+            year_getter=_year_getter,
+        )
         if not best or score < 65:
             # Log top 5 closest matches when not found
             if top_matches:
@@ -178,8 +266,6 @@ class IGDBClient:
                 )
             else:
                 logging.warning(f"Not found in IGDB: '{game_name}'. No matches found.")
-            self._by_name[name_key] = None
-            self._save_cache()
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
@@ -193,16 +279,22 @@ class IGDBClient:
                 msg += f", alternatives: {', '.join(top_names)}"
             logging.warning(msg)
 
-        enriched = self._extract_fields(best)
-        igdb_id = enriched.get("IGDB_ID", "").strip()
+        igdb_id = str(best.get("id") or "").strip()
         if igdb_id:
-            id_key = f"{self.language}:{igdb_id}"
-            self._by_id[id_key] = enriched
-            self._by_name[name_key] = id_key
-        else:
-            self._by_name[name_key] = None
-        self._save_cache()
-        return enriched
+            raw = self._by_id.get(f"{self.language}:{igdb_id}")
+            if not isinstance(raw, dict):
+                # Partial migration case: fetch raw by id.
+                return self.get_by_id(igdb_id)
+            return self._extract_fields(raw)
+        return None
+
+    def format_cache_stats(self) -> str:
+        s = self.stats
+        return (
+            f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
+            f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
+            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']}"
+        )
 
     def _extract_fields(self, game: dict[str, Any]) -> dict[str, str]:
         def join_names(items: Any) -> str:
@@ -226,7 +318,7 @@ class IGDBClient:
         ts = game.get("first_release_date")
         if isinstance(ts, (int, float)) and ts > 0:
             try:
-                year = str(datetime.fromtimestamp(ts).year)
+                year = str(datetime.fromtimestamp(ts, tz=timezone.utc).year)
             except Exception:
                 year = ""
 
@@ -265,12 +357,25 @@ class IGDBClient:
             return
 
         by_id = raw.get("by_id")
-        by_name = raw.get("by_name")
-        if not isinstance(by_id, dict) or not isinstance(by_name, dict):
-            return
-
-        self._by_id = {str(k): v for k, v in by_id.items() if isinstance(v, dict)}
-        self._by_name = {str(k): (str(v) if v else None) for k, v in by_name.items()}
+        by_query = raw.get("by_query")
+        if isinstance(by_id, dict):
+            # Only keep raw IGDB game dicts here. Legacy extracted dicts (IGDB_*) are ignored;
+            # they should be migrated in-place from by_query where raw payloads are available.
+            self._by_id = {
+                str(k): v for k, v in by_id.items() if isinstance(v, dict) and "id" in v
+            }
+        if isinstance(by_query, dict):
+            out: dict[str, list[dict[str, Any]]] = {}
+            for k, v in by_query.items():
+                if isinstance(v, list):
+                    out[str(k)] = [it for it in v if isinstance(it, dict)]
+            self._by_query = out
 
     def _save_cache(self) -> None:
-        save_json_cache({"by_id": self._by_id, "by_name": self._by_name}, self.cache_path)
+        save_json_cache(
+            {
+                "by_id": self._by_id,
+                "by_query": self._by_query,
+            },
+            self.cache_path,
+        )

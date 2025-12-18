@@ -27,6 +27,7 @@ from .utils import (
     ProjectPaths,
     ensure_columns,
     ensure_row_ids,
+    extract_year_hint,
     fuzzy_score,
     generate_validation_report,
     is_row_processed,
@@ -64,7 +65,7 @@ def drop_eval_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 PROVIDER_PREFIXES = ("RAWG_", "IGDB_", "Steam_", "SteamSpy_", "HLTB_")
-PINNED_ID_COLS = {"RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_Query"}
+PINNED_ID_COLS = {"RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_ID", "HLTB_Query"}
 
 
 def build_personal_base_for_enrich(df: pd.DataFrame) -> pd.DataFrame:
@@ -94,12 +95,24 @@ def _is_yes(v: object) -> bool:
     return str(v or "").strip().upper() in {"YES", "Y", "TRUE", "1"}
 
 
-def fill_eval_tags(df: pd.DataFrame) -> pd.DataFrame:
+def _platform_is_pc_like(platform_value: object) -> bool:
+    p = str(platform_value or "").strip().lower()
+    if not p:
+        return True
+    return any(x in p for x in ("pc", "windows", "steam", "linux", "mac", "osx"))
+
+
+def fill_eval_tags(df: pd.DataFrame, *, sources: set[str] | None = None) -> pd.DataFrame:
     out = df.copy()
     out = ensure_columns(out, {"ReviewTags": "", "NeedsReview": ""})
 
     tags_list: list[str] = []
     needs_list: list[str] = []
+
+    include_rawg = sources is None or "rawg" in sources
+    include_igdb = sources is None or "igdb" in sources
+    include_steam = sources is None or "steam" in sources
+    include_hltb = sources is None or "hltb" in sources
 
     for _, row in out.iterrows():
         tags: list[str] = []
@@ -108,42 +121,50 @@ def fill_eval_tags(df: pd.DataFrame) -> pd.DataFrame:
             tags.append("disabled")
 
         missing = False
-        rawg_id = str(row.get("RAWG_ID", "") or "").strip()
-        if rawg_id == IDENTITY_NOT_FOUND:
-            tags.append("rawg_not_found")
-        elif not rawg_id:
-            tags.append("missing_rawg")
-            missing = True
+        if include_rawg:
+            rawg_id = str(row.get("RAWG_ID", "") or "").strip()
+            if rawg_id == IDENTITY_NOT_FOUND:
+                tags.append("rawg_not_found")
+            elif not rawg_id:
+                tags.append("missing_rawg")
+                missing = True
 
-        igdb_id = str(row.get("IGDB_ID", "") or "").strip()
-        if igdb_id == IDENTITY_NOT_FOUND:
-            tags.append("igdb_not_found")
-        elif not igdb_id:
-            tags.append("missing_igdb")
-            missing = True
+        if include_igdb:
+            igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+            if igdb_id == IDENTITY_NOT_FOUND:
+                tags.append("igdb_not_found")
+            elif not igdb_id:
+                tags.append("missing_igdb")
+                missing = True
 
-        steam_id = str(row.get("Steam_AppID", "") or "").strip()
-        if steam_id == IDENTITY_NOT_FOUND:
-            tags.append("steam_not_found")
-        elif not steam_id:
-            tags.append("missing_steam")
-            missing = True
+        if include_steam:
+            steam_id = str(row.get("Steam_AppID", "") or "").strip()
+            steam_expected = _platform_is_pc_like(row.get("Platform", ""))
+            if steam_id == IDENTITY_NOT_FOUND:
+                tags.append("steam_not_found")
+            elif not steam_id and steam_expected:
+                tags.append("missing_steam")
+                missing = True
 
-        hltb_query = str(row.get("HLTB_Query", "") or "").strip()
-        hltb_name = str(row.get("HLTB_MatchedName", "") or "").strip()
-        if hltb_query == IDENTITY_NOT_FOUND:
-            tags.append("hltb_not_found")
-        elif not hltb_name:
-            tags.append("missing_hltb")
-            missing = True
+        if include_hltb:
+            hltb_id = str(row.get("HLTB_ID", "") or "").strip()
+            hltb_query = str(row.get("HLTB_Query", "") or "").strip()
+            hltb_name = str(row.get("HLTB_MatchedName", "") or "").strip()
+            if hltb_id == IDENTITY_NOT_FOUND or hltb_query == IDENTITY_NOT_FOUND:
+                tags.append("hltb_not_found")
+            elif not hltb_name:
+                tags.append("missing_hltb")
+                missing = True
 
         low_score = False
-        for score_col, tag_prefix in (
-            ("RAWG_MatchScore", "rawg_score"),
-            ("IGDB_MatchScore", "igdb_score"),
-            ("Steam_MatchScore", "steam_score"),
-            ("HLTB_MatchScore", "hltb_score"),
+        for score_col, tag_prefix, enabled in (
+            ("RAWG_MatchScore", "rawg_score", include_rawg),
+            ("IGDB_MatchScore", "igdb_score", include_igdb),
+            ("Steam_MatchScore", "steam_score", include_steam),
+            ("HLTB_MatchScore", "hltb_score", include_hltb),
         ):
+            if not enabled:
+                continue
             s = str(row.get(score_col, "") or "").strip()
             if s.isdigit() and int(s) < 100:
                 tags.append(f"{tag_prefix}:{s}")
@@ -156,6 +177,52 @@ def fill_eval_tags(df: pd.DataFrame) -> pd.DataFrame:
 
     out["ReviewTags"] = pd.Series(tags_list)
     out["NeedsReview"] = pd.Series(needs_list)
+    return out
+
+
+def _parse_sources(
+    raw: str, *, allowed: set[str], aliases: dict[str, list[str]] | None = None
+) -> list[str]:
+    """
+    Parse a provider list string like:
+      - "all"
+      - "core"
+      - "igdb,rawg,steam"
+
+    Returns a de-duplicated list preserving order.
+    """
+    s = str(raw or "").strip()
+    if not s:
+        raise SystemExit("Missing --source value")
+
+    tokens = [t.strip().lower() for t in s.split(",") if t.strip()]
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(x: str) -> None:
+        if x in seen:
+            return
+        seen.add(x)
+        out.append(x)
+
+    if len(tokens) == 1 and tokens[0] in {"all"}:
+        for x in sorted(allowed):
+            _add(x)
+        return out
+
+    aliases = aliases or {}
+    for t in tokens:
+        if t in aliases:
+            for x in aliases[t]:
+                if x not in allowed:
+                    raise SystemExit(f"Unknown provider in alias '{t}': {x}")
+                _add(x)
+            continue
+        if t not in allowed:
+            raise SystemExit(
+                f"Unknown provider: {t}. Allowed: {', '.join(sorted(allowed | set(aliases)))}"
+            )
+        _add(t)
     return out
 
 
@@ -333,6 +400,9 @@ def process_steam_and_steamspy_streaming(
         f1.result()
         f2.result()
 
+    logging.info(f"[STEAM] Cache stats: {steam_client.format_cache_stats()}")
+    logging.info(f"[STEAMSPY] Cache stats: {steamspy_client.format_cache_stats()}")
+
 
 def process_igdb(
     input_csv: Path,
@@ -400,6 +470,7 @@ def process_igdb(
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
     write_csv(df[igdb_cols], output_csv)
+    logging.info(f"[IGDB] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ IGDB completed: {output_csv}")
 
 
@@ -469,6 +540,7 @@ def process_rawg(
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     rawg_cols = base_cols + [c for c in df.columns if c.startswith("RAWG_")]
     write_csv(df[rawg_cols], output_csv)
+    logging.info(f"[RAWG] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ RAWG completed: {output_csv}")
 
 
@@ -540,6 +612,7 @@ def process_steam(
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     steam_cols = base_cols + [c for c in df.columns if c.startswith("Steam_")]
     write_csv(df[steam_cols], output_csv)
+    logging.info(f"[STEAM] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ Steam completed: {output_csv}")
 
 
@@ -594,6 +667,7 @@ def process_steamspy(
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     steamspy_cols = base_cols + [c for c in df.columns if c.startswith("SteamSpy_")]
     write_csv(df[steamspy_cols], output_csv)
+    logging.info(f"[STEAMSPY] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ SteamSpy completed: {output_csv}")
 
 
@@ -617,9 +691,11 @@ def process_hltb(
 
         rowid = str(row.get("RowId", "") or "").strip()
         query = ""
+        pinned_id = ""
         if identity_overrides and rowid:
+            pinned_id = str(identity_overrides.get(rowid, {}).get("HLTB_ID", "") or "").strip()
             query = str(identity_overrides.get(rowid, {}).get("HLTB_Query", "") or "").strip()
-        if query == IDENTITY_NOT_FOUND:
+        if pinned_id == IDENTITY_NOT_FOUND or query == IDENTITY_NOT_FOUND:
             clear_prefixed_columns(df, int(idx), "HLTB_")
             continue
         query = query or name
@@ -630,7 +706,7 @@ def process_hltb(
                 continue
 
         logging.info(f"[HLTB] Processing: {query}")
-        data = client.search(query)
+        data = client.search(name, query=query, hltb_id=pinned_id or None)
         if not data:
             continue
 
@@ -648,6 +724,7 @@ def process_hltb(
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     hltb_cols = base_cols + [c for c in df.columns if c.startswith("HLTB_")]
     write_csv(df[hltb_cols], output_csv)
+    logging.info(f"[HLTB] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ HLTB completed: {output_csv}")
 
 
@@ -696,28 +773,58 @@ def _common_paths() -> tuple[Path, ProjectPaths]:
     return project_root, paths
 
 
-def _default_log_file(paths: ProjectPaths, *, command_name: str) -> Path:
-    logs_dir = paths.data_logs
+def _is_under_dir(path: Path | None, root: Path) -> bool:
+    if path is None:
+        return False
+    try:
+        root_r = root.resolve()
+        p_r = path.resolve()
+        return p_r == root_r or root_r in p_r.parents
+    except Exception:
+        return False
+
+
+def _default_log_file(
+    paths: ProjectPaths, *, command_name: str, logs_dir: Path | None = None
+) -> Path:
+    logs_dir = logs_dir or paths.data_logs
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     now = datetime.now()
     stamp = now.strftime("%Y%m%d-%H%M%S") + f".{now.microsecond // 1000:03d}"
-    base = f"{command_name}-{stamp}.log"
+    base = f"log-{stamp}-{command_name}.log"
     candidate = logs_dir / base
     if not candidate.exists():
         return candidate
 
     for i in range(2, 1000):
-        p = logs_dir / f"{command_name}-{stamp}-{i}.log"
+        p = logs_dir / f"log-{stamp}-{command_name}-{i}.log"
         if not p.exists():
             return p
-    return logs_dir / f"{command_name}-{stamp}-{os.getpid()}.log"
+    return logs_dir / f"log-{stamp}-{command_name}-{os.getpid()}.log"
 
 
 def _setup_logging_from_args(
-    paths: ProjectPaths, log_file: Path | None, debug: bool, *, command_name: str
+    paths: ProjectPaths,
+    log_file: Path | None,
+    debug: bool,
+    *,
+    command_name: str,
+    input_path: Path | None = None,
 ) -> None:
-    setup_logging(log_file or _default_log_file(paths, command_name=command_name))
+    default_logs_dir: Path | None = None
+    if input_path is not None:
+        try:
+            exp_root = paths.data_experiments.resolve()
+            inp = input_path.resolve()
+            if exp_root == inp or exp_root in inp.parents:
+                default_logs_dir = paths.data_experiments_logs
+        except Exception:
+            default_logs_dir = None
+
+    setup_logging(
+        log_file or _default_log_file(paths, command_name=command_name, logs_dir=default_logs_dir)
+    )
     if debug:
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.DEBUG)
@@ -729,29 +836,79 @@ def _setup_logging_from_args(
     logging.info(f"Invocation: {argv}")
 
 
-def _normalize_catalog(input_csv: Path, output_csv: Path) -> Path:
+def _normalize_catalog(
+    input_csv: Path, output_csv: Path, *, include_diagnostics: bool = True
+) -> Path:
     df = read_csv(input_csv)
     if "Name" not in df.columns:
         raise SystemExit(f"Missing required column 'Name' in {input_csv}")
+
+    # Preserve RowId (and pinned provider identifiers) when re-importing from a user export that
+    # doesn't include RowId yet.
+    if (
+        output_csv.exists()
+        and input_csv.resolve() != output_csv.resolve()
+        and "RowId" not in df.columns
+    ):
+        prev = read_csv(output_csv)
+        if "Name" in prev.columns and "RowId" in prev.columns:
+            df["__occ"] = df.groupby("Name").cumcount()
+            prev["__occ"] = prev.groupby("Name").cumcount()
+
+            carry_cols = [
+                c
+                for c in (
+                    "RowId",
+                    "Disabled",
+                    "YearHint",
+                    "RAWG_ID",
+                    "IGDB_ID",
+                    "Steam_AppID",
+                    "HLTB_ID",
+                    "HLTB_Query",
+                )
+                if c in prev.columns
+            ]
+            if carry_cols:
+                merged = df.merge(
+                    prev[["Name", "__occ"] + carry_cols],
+                    on=["Name", "__occ"],
+                    how="left",
+                    suffixes=("", "_prev"),
+                )
+                merged = merged.drop(columns=["__occ"])
+                for c in carry_cols:
+                    prev_col = f"{c}_prev"
+                    if prev_col not in merged.columns:
+                        continue
+                    if c not in merged.columns:
+                        merged[c] = merged[prev_col]
+                    else:
+                        mask = merged[c].astype(str).str.strip().eq("")
+                        merged.loc[mask, c] = merged.loc[mask, prev_col]
+                    merged = merged.drop(columns=[prev_col])
+                df = merged
 
     if "RowId" in df.columns:
         rowid = df["RowId"].astype(str).str.strip()
         if rowid.duplicated().any():
             raise SystemExit(f"Duplicate RowId values in {input_csv}; fix them before importing.")
 
-    df = ensure_columns(
-        df,
-        {
-            "RowId": "",
-            "Name": "",
-            "Disabled": "",
-            "RAWG_ID": "",
-            "IGDB_ID": "",
-            "Steam_AppID": "",
-            "HLTB_Query": "",
-            **{c: "" for c in EVAL_COLUMNS},
-        },
-    )
+    required_cols: dict[str, str] = {
+        "RowId": "",
+        "Name": "",
+        "Disabled": "",
+        "YearHint": "",
+        "RAWG_ID": "",
+        "IGDB_ID": "",
+        "Steam_AppID": "",
+        "HLTB_ID": "",
+        "HLTB_Query": "",
+    }
+    if include_diagnostics:
+        required_cols.update({c: "" for c in EVAL_COLUMNS})
+
+    df = ensure_columns(df, required_cols)
     df["Name"] = df["Name"].astype(str).str.strip()
     with_ids, created = ensure_row_ids(df)
     write_csv(with_ids, output_csv)
@@ -781,7 +938,7 @@ def _sync_back_catalog(
     enriched["RowId"] = enriched["RowId"].astype(str).str.strip()
 
     provider_prefixes = ("RAWG_", "IGDB_", "Steam_", "SteamSpy_", "HLTB_")
-    provider_id_cols = {"RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_Query"}
+    provider_id_cols = {"RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_ID", "HLTB_Query"}
     always_keep = {"RowId", "Name"} | provider_id_cols
 
     sync_cols: list[str] = []
@@ -890,7 +1047,7 @@ def _legacy_enrich(argv: list[str]) -> None:
     parser.add_argument(
         "--log-file",
         type=Path,
-        help="Log file path (default: data/logs/<command>-<timestamp>.log)",
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
     )
     parser.add_argument(
         "--debug",
@@ -914,30 +1071,34 @@ def _legacy_enrich(argv: list[str]) -> None:
     project_root, paths = _common_paths()
 
     # Set up logging (after paths are ensured)
-    _setup_logging_from_args(paths, args.log_file, args.debug, command_name="legacy")
+    _setup_logging_from_args(
+        paths, args.log_file, args.debug, command_name="legacy", input_path=args.input
+    )
     logging.info("Starting game catalog enrichment")
 
     # Set up paths
     input_csv = args.input
     if not input_csv.exists():
         parser.error(f"Input file not found: {input_csv}")
+    is_experiment = _is_under_dir(input_csv, paths.data_experiments)
     before = read_csv(input_csv)
     with_ids, created = ensure_row_ids(before)
     # If we had to create RowIds, avoid overwriting the user's original file: write a new input
     # next to the identity map (under the output dir) and use it from now on.
     if created > 0 or "RowId" not in before.columns:
+        default_out_dir = (paths.data_experiments / "output") if is_experiment else paths.data_output
         safe_input = (
-            args.output or paths.data_output
+            args.output or default_out_dir
         ) / f"{input_csv.stem}_with_rowid{input_csv.suffix}"
         write_csv(with_ids, safe_input)
         logging.info(f"✔ RowId initialized: wrote new input CSV: {safe_input} (new ids: {created})")
         logging.info(f"ℹ Use this input file going forward: {safe_input}")
         input_csv = safe_input
 
-    output_dir = args.output or paths.data_output
+    output_dir = args.output or ((paths.data_experiments / "output") if is_experiment else paths.data_output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = args.cache or paths.data_cache
+    cache_dir = args.cache or ((paths.data_experiments / "cache") if is_experiment else paths.data_cache)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Read pinned IDs/queries directly from the input CSV when present.
@@ -1132,22 +1293,57 @@ def _legacy_enrich(argv: list[str]) -> None:
 
 def _command_normalize(args: argparse.Namespace) -> None:
     project_root, paths = _common_paths()
-    _setup_logging_from_args(paths, args.log_file, args.debug, command_name="import")
-    cache_dir = args.cache or paths.data_cache
+    _setup_logging_from_args(
+        paths, args.log_file, args.debug, command_name="import", input_path=args.input
+    )
+    is_experiment = _is_under_dir(args.input, paths.data_experiments)
+    cache_dir = args.cache or ((paths.data_experiments / "cache") if is_experiment else paths.data_cache)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    out = args.out or (paths.data_input / "Games_Catalog.csv")
+    if args.out:
+        out = args.out
+    else:
+        out = (
+            (paths.data_experiments / "output" / f"{args.input.stem}_Catalog.csv")
+            if is_experiment
+            else (paths.data_input / "Games_Catalog.csv")
+        )
     out.parent.mkdir(parents=True, exist_ok=True)
-    _normalize_catalog(args.input, out)
+    include_diagnostics = bool(args.diagnostics)
+    _normalize_catalog(args.input, out, include_diagnostics=include_diagnostics)
 
     # Provider matching to populate pinned IDs and diagnostics.
     credentials_path = args.credentials or (project_root / "data" / "credentials.yaml")
     credentials = load_credentials(credentials_path)
 
     df = read_csv(out)
-    sources = (
-        ["igdb", "rawg", "steam", "hltb"] if args.source == "all" else [args.source]
+    sources = _parse_sources(
+        args.source,
+        allowed={"igdb", "rawg", "steam", "hltb"},
+        aliases={"core": ["igdb", "rawg", "steam"]},
     )
+
+    def _year_hint(row: pd.Series) -> int | None:
+        for col in ("YearHint", "Year", "ReleaseYear", "Release_Year"):
+            if col not in row.index:
+                continue
+            v = str(row.get(col, "") or "").strip()
+            if v.isdigit() and len(v) == 4:
+                y = int(v)
+                if 1900 <= y <= 2100:
+                    return y
+        return extract_year_hint(str(row.get("Name", "") or ""))
+
+    if "YearHint" in df.columns:
+        for idx, row in df.iterrows():
+            if _is_yes(row.get("Disabled", "")):
+                continue
+            existing = str(row.get("YearHint", "") or "").strip()
+            if existing:
+                continue
+            inferred = extract_year_hint(str(row.get("Name", "") or ""))
+            if inferred is not None:
+                df.at[idx, "YearHint"] = str(inferred)
 
     if "rawg" in sources:
         api_key = credentials.get("rawg", {}).get("api_key", "")
@@ -1165,21 +1361,25 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     continue
                 rawg_id = str(row.get("RAWG_ID", "") or "").strip()
                 if rawg_id == IDENTITY_NOT_FOUND:
-                    df.at[idx, "RAWG_MatchedName"] = ""
-                    df.at[idx, "RAWG_MatchScore"] = ""
+                    if include_diagnostics:
+                        df.at[idx, "RAWG_MatchedName"] = ""
+                        df.at[idx, "RAWG_MatchScore"] = ""
                     continue
                 if rawg_id:
+                    if not include_diagnostics:
+                        continue
                     obj = client.get_by_id(rawg_id)
                 else:
-                    obj = client.search(name)
+                    obj = client.search(name, year_hint=_year_hint(row))
                     if obj and obj.get("id") is not None:
                         df.at[idx, "RAWG_ID"] = str(obj.get("id") or "").strip()
-                if obj and isinstance(obj, dict):
+                if include_diagnostics and obj and isinstance(obj, dict):
                     matched = str(obj.get("name") or "").strip()
                     df.at[idx, "RAWG_MatchedName"] = matched
                     df.at[idx, "RAWG_MatchScore"] = (
                         str(fuzzy_score(name, matched)) if matched else ""
                     )
+            logging.info(f"[RAWG] Cache stats: {client.format_cache_stats()}")
 
     if "igdb" in sources:
         client_id = credentials.get("igdb", {}).get("client_id", "")
@@ -1199,86 +1399,128 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     continue
                 igdb_id = str(row.get("IGDB_ID", "") or "").strip()
                 if igdb_id == IDENTITY_NOT_FOUND:
-                    df.at[idx, "IGDB_MatchedName"] = ""
-                    df.at[idx, "IGDB_MatchScore"] = ""
+                    if include_diagnostics:
+                        df.at[idx, "IGDB_MatchedName"] = ""
+                        df.at[idx, "IGDB_MatchScore"] = ""
                     continue
                 if igdb_id:
+                    if not include_diagnostics:
+                        continue
                     obj = client.get_by_id(igdb_id)
                 else:
-                    obj = client.search(name)
+                    obj = client.search(name, year_hint=_year_hint(row))
                     if obj and str(obj.get("IGDB_ID", "") or "").strip():
                         df.at[idx, "IGDB_ID"] = str(obj.get("IGDB_ID") or "").strip()
-                if obj and isinstance(obj, dict):
+                if include_diagnostics and obj and isinstance(obj, dict):
                     matched = str(obj.get("IGDB_Name") or "").strip()
                     df.at[idx, "IGDB_MatchedName"] = matched
                     df.at[idx, "IGDB_MatchScore"] = (
                         str(fuzzy_score(name, matched)) if matched else ""
                     )
+            logging.info(f"[IGDB] Cache stats: {client.format_cache_stats()}")
 
     if "steam" in sources:
         client = SteamClient(cache_path=cache_dir / "steam_cache.json", min_interval_s=0.5)
         for idx, row in df.iterrows():
             if _is_yes(row.get("Disabled", "")):
                 continue
+            if not _platform_is_pc_like(row.get("Platform", "")):
+                # Don't auto-pin Steam AppIDs for clearly non-PC rows unless the user explicitly
+                # provided one.
+                if str(row.get("Steam_AppID", "") or "").strip():
+                    continue
+                if include_diagnostics:
+                    df.at[idx, "Steam_MatchedName"] = ""
+                    df.at[idx, "Steam_MatchScore"] = ""
+                continue
             name = str(row.get("Name", "") or "").strip()
             if not name:
                 continue
             steam_id = str(row.get("Steam_AppID", "") or "").strip()
             if steam_id == IDENTITY_NOT_FOUND:
-                df.at[idx, "Steam_MatchedName"] = ""
-                df.at[idx, "Steam_MatchScore"] = ""
+                if include_diagnostics:
+                    df.at[idx, "Steam_MatchedName"] = ""
+                    df.at[idx, "Steam_MatchScore"] = ""
                 continue
+            matched = ""
             if steam_id:
+                if not include_diagnostics:
+                    continue
                 try:
                     details = client.get_app_details(int(steam_id))
                 except ValueError:
                     details = None
                 matched = str((details or {}).get("name") or "").strip()
             else:
-                search = client.search_appid(name)
+                search = client.search_appid(name, year_hint=_year_hint(row))
                 matched = str((search or {}).get("name") or "").strip()
                 if search and search.get("id") is not None:
                     df.at[idx, "Steam_AppID"] = str(search.get("id") or "").strip()
-            df.at[idx, "Steam_MatchedName"] = matched
-            df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+            if include_diagnostics:
+                df.at[idx, "Steam_MatchedName"] = matched
+                df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+        logging.info(f"[STEAM] Cache stats: {client.format_cache_stats()}")
 
     if "hltb" in sources:
         client = HLTBClient(cache_path=cache_dir / "hltb_cache.json")
+        processed = 0
         for idx, row in df.iterrows():
             if _is_yes(row.get("Disabled", "")):
                 continue
             name = str(row.get("Name", "") or "").strip()
             if not name:
                 continue
+            hltb_id = str(row.get("HLTB_ID", "") or "").strip()
             query = str(row.get("HLTB_Query", "") or "").strip()
-            if query == IDENTITY_NOT_FOUND:
-                df.at[idx, "HLTB_MatchedName"] = ""
-                df.at[idx, "HLTB_MatchScore"] = ""
+            if hltb_id == IDENTITY_NOT_FOUND or query == IDENTITY_NOT_FOUND:
+                if include_diagnostics:
+                    df.at[idx, "HLTB_MatchedName"] = ""
+                    df.at[idx, "HLTB_MatchScore"] = ""
                 continue
-            q = query or name
-            data = client.search(q)
-            matched = str((data or {}).get("HLTB_Name") or "").strip()
-            df.at[idx, "HLTB_MatchedName"] = matched
-            df.at[idx, "HLTB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
 
-    df = fill_eval_tags(df)
+            if hltb_id and not include_diagnostics:
+                # Pinned id is already present and we don't need to refresh match diagnostics.
+                continue
+
+            q = query or name
+            data = client.search(name, query=q, hltb_id=hltb_id or None)
+            if data and str(data.get("HLTB_ID", "") or "").strip() and not hltb_id:
+                df.at[idx, "HLTB_ID"] = str(data.get("HLTB_ID") or "").strip()
+            if include_diagnostics:
+                matched = str((data or {}).get("HLTB_Name") or "").strip()
+                df.at[idx, "HLTB_MatchedName"] = matched
+                df.at[idx, "HLTB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+
+            processed += 1
+            if processed % 25 == 0:
+                # Persist incremental progress; HLTB can be slow and long runs should be resumable.
+                write_csv(df, out)
+        logging.info(f"[HLTB] Cache stats: {client.format_cache_stats()}")
+
+    if include_diagnostics:
+        df = fill_eval_tags(df, sources=set(sources))
+    else:
+        df = drop_eval_columns(df)
     write_csv(df, out)
     logging.info(f"✔ Import matching completed: {out}")
 
 
 def _command_enrich(args: argparse.Namespace) -> None:
     project_root, paths = _common_paths()
-    _setup_logging_from_args(paths, args.log_file, args.debug, command_name="enrich")
+    _setup_logging_from_args(
+        paths, args.log_file, args.debug, command_name="enrich", input_path=args.input
+    )
     logging.info("Starting game catalog enrichment")
 
+    is_experiment = _is_under_dir(args.input, paths.data_experiments)
     input_csv = args.input
     if not input_csv.exists():
         raise SystemExit(f"Input file not found: {input_csv}")
 
-    output_dir = args.output or paths.data_output
+    output_dir = args.output or ((paths.data_experiments / "output") if is_experiment else paths.data_output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = args.cache or paths.data_cache
+    cache_dir = args.cache or ((paths.data_experiments / "cache") if is_experiment else paths.data_cache)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     merge_output = args.merge_output or (output_dir / "Games_Enriched.csv")
@@ -1319,8 +1561,10 @@ def _command_enrich(args: argparse.Namespace) -> None:
             if p.exists():
                 p.unlink()
 
-    sources_to_process = (
-        ["igdb", "rawg", "steam", "steamspy", "hltb"] if args.source == "all" else [args.source]
+    sources_to_process = _parse_sources(
+        args.source,
+        allowed={"igdb", "rawg", "steam", "steamspy", "hltb"},
+        aliases={"core": ["igdb", "rawg", "steam"]},
     )
 
     def run_source(source: str) -> None:
@@ -1440,15 +1684,24 @@ def _command_enrich(args: argparse.Namespace) -> None:
 
 def _command_sync_back(args: argparse.Namespace) -> None:
     _, paths = _common_paths()
-    _setup_logging_from_args(paths, args.log_file, args.debug, command_name="sync")
+    _setup_logging_from_args(
+        paths, args.log_file, args.debug, command_name="sync", input_path=args.catalog
+    )
     out = args.out or args.catalog
     _sync_back_catalog(catalog_csv=args.catalog, enriched_csv=args.enriched, output_csv=out)
 
 
 def _command_validate(args: argparse.Namespace) -> None:
     _, paths = _common_paths()
-    _setup_logging_from_args(paths, args.log_file, args.debug, command_name="validate")
-    output_dir = args.output_dir or paths.data_output
+    _setup_logging_from_args(
+        paths,
+        args.log_file,
+        args.debug,
+        command_name="validate",
+        input_path=args.enriched,
+    )
+    is_experiment = _is_under_dir(args.enriched, paths.data_experiments)
+    output_dir = args.output_dir or ((paths.data_experiments / "output") if is_experiment else paths.data_output)
     output_dir.mkdir(parents=True, exist_ok=True)
     out = args.out or (output_dir / "Validation_Report.csv")
     if args.enriched:
@@ -1483,7 +1736,7 @@ def main(argv: list[str] | None = None) -> None:
         p_import.add_argument(
             "--log-file",
             type=Path,
-            help="Log file path (default: data/logs/<command>-<timestamp>.log)",
+            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
         )
         p_import.add_argument("--cache", type=Path, help="Cache directory (default: data/cache)")
         p_import.add_argument(
@@ -1491,9 +1744,18 @@ def main(argv: list[str] | None = None) -> None:
         )
         p_import.add_argument(
             "--source",
-            choices=["igdb", "rawg", "steam", "hltb", "all"],
+            type=str,
             default="all",
-            help="Which providers to match for IDs (default: all)",
+            help=(
+                "Which providers to match for IDs (e.g. 'core' or 'igdb,rawg,steam') "
+                "(default: all)"
+            ),
+        )
+        p_import.add_argument(
+            "--diagnostics",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Include match diagnostics columns in the output (default: true)",
         )
         p_import.add_argument(
             "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
@@ -1511,7 +1773,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         p_enrich.add_argument(
             "--source",
-            choices=["igdb", "rawg", "steam", "steamspy", "hltb", "all"],
+            type=str,
             default="all",
         )
         p_enrich.add_argument(
@@ -1536,7 +1798,7 @@ def main(argv: list[str] | None = None) -> None:
         p_enrich.add_argument(
             "--log-file",
             type=Path,
-            help="Log file path (default: data/logs/<command>-<timestamp>.log)",
+            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
         )
         p_enrich.add_argument(
             "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
@@ -1555,7 +1817,7 @@ def main(argv: list[str] | None = None) -> None:
         p_sync.add_argument(
             "--log-file",
             type=Path,
-            help="Log file path (default: data/logs/<command>-<timestamp>.log)",
+            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
         )
         p_sync.add_argument(
             "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
@@ -1581,7 +1843,7 @@ def main(argv: list[str] | None = None) -> None:
         p_val.add_argument(
             "--log-file",
             type=Path,
-            help="Log file path (default: data/logs/<command>-<timestamp>.log)",
+            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
         )
         p_val.add_argument(
             "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"

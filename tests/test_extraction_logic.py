@@ -58,7 +58,9 @@ def test_rawg_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
     )
     assert client.search("No Such Game") is None
     assert client.search("No Such Game") is None
-    assert calls["rawg"] == 1
+    # RAWG uses a strict query first then a looser fallback; both are cached by query.
+    # First call: 2 HTTP requests (strict + loose), second call: 0 HTTP requests.
+    assert calls["rawg"] == 2
 
 
 def test_steam_extract_fields_fixture():
@@ -145,7 +147,7 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
     }
 
     raw = json.loads((tmp_path / "steamspy_cache.json").read_text(encoding="utf-8"))
-    assert raw.get("999") == data
+    assert raw["by_id"]["999"]["owners"] == "10,000 .. 20,000"
 
 
 def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatch):
@@ -259,8 +261,8 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
     assert fake.calls == 1
 
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
-    assert raw["by_name"]["example game"] == "123"
-    assert raw["by_id"]["123"]["HLTB_Main"] == "10"
+    assert raw["by_query"]["q:Example Game"][0]["game_id"] == 123
+    assert raw["by_id"]["123"]["main_story"] == "10"
 
 
 def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):

@@ -114,14 +114,34 @@ python run.py enrich data/input/Games_Catalog.csv --source all --validate
 Your original export does not need a `RowId` column. If it’s missing, `import` will generate stable
 RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must be unique.
 
-`import` also adds provider ID columns (`RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_Query`) and a
-small set of evaluation columns (match scores/tags) so you can adjust IDs before enrichment. It
-refreshes match diagnostics by fetching the provider name for any pinned IDs. These evaluation
-columns are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without
-evaluation columns.
+`import` also adds:
+- Provider ID columns (`RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_ID`) so you can pin matches.
+- An optional `HLTB_Query` override (used only when `HLTB_ID` is empty) for tricky HLTB searches.
+- A `YearHint` column you can fill (e.g. `1999`) to disambiguate titles like reboots/remakes.
+- A small set of evaluation columns (match scores/tags) so you can adjust IDs before enrichment.
+
+It refreshes match diagnostics by fetching the provider name for any pinned IDs. Evaluation columns
+are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without evaluation
+columns.
+
+If you want a clean catalog right away (no diagnostic columns), run:
+
+```bash
+python run.py import path/to/exported_user_sheet.csv --out data/input/Games_Catalog.csv --no-diagnostics
+```
 
 Both `import` and `enrich` support “in place” runs (e.g. `import X.csv --out X.csv`, or
 `enrich X.csv --merge-output X.csv`). For `enrich`, provider/public columns are always regenerated.
+
+### Experiments (subsets / debugging)
+
+If your input CSV lives under `data/experiments/`, the CLI defaults to writing to:
+
+- logs: `data/experiments/logs/`
+- cache: `data/experiments/cache/`
+- output: `data/experiments/output/`
+
+This keeps the main catalog workflow under `data/input/`, `data/output/`, and `data/cache/` clean.
 
 ## Docs
 
@@ -215,7 +235,7 @@ optional arguments:
   --merge              Merge all processed files into a final CSV
   --merge-output MERGE_OUTPUT
                        Output file for merged results (default: data/output/Games_Enriched.csv)
-  --log-file LOG_FILE  Log file path (default: data/logs/<command>-<timestamp>.log)
+  --log-file LOG_FILE  Log file path (default: data/logs/log-<timestamp>-<command>.log)
   --validate           Generate a cross-provider validation report (default: off)
   --validate-output VALIDATE_OUTPUT
                        Output file for validation report (default: data/output/Validation_Report.csv)
@@ -243,10 +263,12 @@ The tool will:
 
 ### Caching
 
-Provider caches are stored under `data/cache/` and are keyed by provider IDs when available, with a separate name-to-id mapping to avoid repeated searches on reruns.
+Provider caches are stored under `data/cache/`:
 
-If you change cache logic (or pull updates that do), old JSON cache files may become incompatible. In
-that case, delete the corresponding file under `data/cache/` and rerun to rebuild it.
+- `by_query`: query → lightweight candidate lists (including negative caching for not-found).
+- `by_id`: provider ID → raw provider payload.
+
+If you delete a cache file under `data/cache/`, the tool will refetch it as needed.
 
 ## Project Structure
 
@@ -267,9 +289,11 @@ game-catalog-builder/
 │       ├── merger.py
 │       └── utilities.py
 ├── data/
-│   ├── input/                 # Input CSVs (ignored; keep folder)
-│   ├── output/                # Generated outputs + logs (ignored; keep folder)
-│   └── cache/                 # API caches (ignored; keep folder)
+│   ├── input/                 # Main catalog inputs (ignored; keep folder)
+│   ├── output/                # Main catalog outputs (ignored; keep folder)
+│   ├── cache/                 # Main provider caches (ignored; keep folder)
+│   ├── logs/                  # Execution logs (ignored; keep folder)
+│   └── experiments/           # Subsets/debug runs (ignored; keep folder)
 ├── run.py                     # Entry point
 ├── pyproject.toml            # Project metadata
 ├── requirements.txt          # Python dependencies

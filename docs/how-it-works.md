@@ -21,23 +21,88 @@ Providers run in parallel at the CLI level, but each provider client itself is s
 When a provider does not already have a cached ID for a given `Name`, it performs a search using the raw `Name` text and chooses the best match using fuzzy scoring.
 
 - Minimum acceptance threshold: ~65%.
+- If you provide a `YearHint` column (e.g. `1999`), it is used as a soft disambiguation signal during matching.
+- Prefer keeping `Name` year-free and putting disambiguation years in `YearHint` instead of suffixing titles with `"(YYYY)"`.
 - If the best match is not a perfect 100%, a `WARNING` is logged so you can review borderline matches.
 - If no acceptable match is found, the provider logs a `WARNING` and stores a “negative cache” entry so the same miss does not re-query repeatedly.
+- Request failures (no response) are not negative-cached, to avoid poisoning the cache when offline.
 
 Because MyVideoGameList titles can be non-standard, the search step is treated as “best effort”; the validation report is the main tool for spotting when providers returned different games for the same row.
 
+## Provider-specific search notes
+
+In practice, providers react differently to years embedded in the search string:
+
+- Steam: the store search endpoint is sensitive to punctuation/extra tokens; `"(YYYY)"` often hurts recall, and it does not expose a release year to use for filtering. Prefer a clean `Name` + `YearHint`.
+- IGDB: searches tend to work better without a trailing `"(YYYY)"`. When `YearHint` is present, the client first tries a narrow release-date window (±1 year), then falls back to an unfiltered search.
+- RAWG: generally tolerant, but year tokens can still skew fuzzy scoring; `YearHint` helps break ties when multiple candidates share a similar name.
+- HLTB: uses `HLTB_ID` when pinned; otherwise it searches by query and strips a trailing `"(YYYY)"` when needed.
+
+### Base game vs editions
+
+For search/matching, a “base game” title and an edition/remaster are often acceptable equivalents for pinning:
+
+- Prefer: base game or “complete/definitive/GOTY/remastered” editions (still the same game identity).
+- Avoid: sequels, support packs, soundtracks, demos, season passes, DLC-only entries.
+
+Limitations:
+- Some “base games” have provider-specific canonical titles/subtitles (e.g. IGDB may return a long subtitle
+  while Steam/RAWG use a shorter name). In those cases, do not rename your original `Name` just to satisfy
+  one provider; instead, fix it at the pinning stage by editing the provider ID columns in
+  `data/input/Games_Catalog.csv`.
+
+Implementation notes:
+- Steam selection uses appdetails (`type` + release date) to avoid DLC/music and to break ties; when the query has no sequel number, it strongly prefers a base/edition match over a sequel match when possible.
+- Fuzzy matching treats common edition tokens (e.g. “GOTY”, “Enhanced”, “Complete”) as ignorable when one title is a strict superset of the other.
+
 ## Provider IDs, details, and caching
 
-Each provider keeps two cache layers (in JSON under `data/cache/`):
+Each provider caches only **stable or raw** data (in JSON under `data/cache/`):
 
-- `by_name`: maps normalized names to a provider ID (or `null` if not found).
-- `by_id`: maps provider IDs to extracted/enriched row fields.
+- `by_query`: query key → lightweight candidate list (IDs + display names + minimal date info).
+- `by_id`: provider ID → raw provider payload (details response or expanded search hit).
 
-On re-runs:
-- if `by_id` already has the game’s ID, the provider skips searching by name entirely;
-- otherwise it uses `by_name` (if present) to avoid repeating the search step.
+The project intentionally does **not** cache “name → chosen ID” as a single pinned selection.
+Selection heuristics can change over time, so on re-runs the program re-selects from cached
+`by_query` candidates (no network) unless you explicitly pin an ID in `data/input/Games_Catalog.csv`.
 
-Providers that don’t expose stable IDs (or where the library doesn’t provide one) fall back to caching by normalized name.
+Providers that don’t expose stable IDs (or where the library doesn’t provide one) fall back to
+caching raw data under a synthetic key (e.g. `name:<normalized>`), but the search results are still
+cached by query.
+
+## Persistence (CSV + cache writes)
+
+The tool is designed to be resumable, so it persists both caches and intermediate CSVs frequently:
+
+- Provider caches (`data/cache/*.json`)
+  - Written immediately after a successful “search by query” response is received (including empty
+    results for negative caching).
+  - Written immediately after a successful “fetch by id/details” response is received.
+  - Request failures (no response / exception) are not negative-cached.
+
+- Provider output CSVs (`data/output/Provider_<Provider>.csv`)
+  - Written incrementally every 10 processed rows for that provider.
+  - Final file always includes only `RowId`, `Name`, plus that provider’s prefixed columns
+    (e.g. `IGDB_*`).
+
+- Import output (`data/input/Games_Catalog.csv`)
+  - Written once at the end of the import command.
+  - During import, HLTB matching progress is also checkpointed every 25 processed rows because HLTB
+    can be slow.
+
+- Merge output (`data/output/Games_Enriched.csv`)
+  - Written after all selected providers finish.
+  - After merging, diagnostic/eval columns are dropped so the enriched CSV stays focused on
+  user-editable fields + provider enrichment fields.
+
+## Logs (how to read them)
+
+- Each run writes a separate log file under `data/logs/` (or `data/experiments/logs/` for experiment inputs).
+- Providers emit `Cache stats` summary lines at completion (hits vs fetches, including negative-cache counts).
+- When requests fail after retries (e.g. no internet), the logs include distinct error markers:
+  - `[NETWORK] ...` (connection/timeout/SSL)
+  - `[HTTP] ...` (non-2xx responses)
+  - These are intentionally separate from provider “Not found ...” warnings.
 
 ## Per-provider flow
 
@@ -52,6 +117,7 @@ Providers that don’t expose stable IDs (or where the library doesn’t provide
 - OAuth token: `POST https://id.twitch.tv/oauth2/token`
 - Game query: `POST /v4/games`
 - The client uses field expansion so each game requires a single `/v4/games` request (excluding OAuth).
+- When `YearHint` is present, the search first tries a narrow release-date window (±1 year) to avoid sequels/remakes and upcoming placeholders; it falls back to an unfiltered search if nothing matches.
 - ID: `IGDB_ID`
 - Steam cross-check: `external_games.external_game_source == 1` → `external_games.uid` is stored as `IGDB_SteamAppID` when present.
 
@@ -64,7 +130,9 @@ Providers that don’t expose stable IDs (or where the library doesn’t provide
 
 ### HowLongToBeat (HLTB)
 
-- Uses `howlongtobeatpy` library search and extracts playtime fields.
+- Uses `howlongtobeatpy`:
+  - When `HLTB_ID` is present, it uses the library’s `search_from_id(id)` to avoid ambiguity.
+  - Otherwise it searches by name (optionally using `HLTB_Query`) and extracts playtime fields.
 
 ## Merge behavior (duplicate names)
 
