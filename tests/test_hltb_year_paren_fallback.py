@@ -33,4 +33,3 @@ def test_hltb_strips_trailing_year_parentheses_for_search(tmp_path, monkeypatch)
     out2 = client.search("Spider-Man 2 (2004)")
     assert out2 is not None
     assert calls == ["Spider-Man 2 (2004)", "Spider-Man 2"]
-

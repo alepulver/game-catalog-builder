@@ -35,6 +35,7 @@ Current output columns:
 | `RAWG_Platforms` | `platforms[].platform.name` | Platform list |
 | `RAWG_Tags` | `tags[].name` | Tag list (project filters Cyrillic duplicates) |
 | `RAWG_Rating` | `rating` | Average rating |
+| `Score_RAWG_100` | `rating` | Rating normalized to 0–100 |
 | `RAWG_RatingsCount` | `ratings_count` | Rating count |
 | `RAWG_Metacritic` | `metacritic` | Metacritic score |
 
@@ -71,6 +72,9 @@ Current output columns (from the `/v4/games` object returned by the query):
 | `IGDB_Franchise` | `franchises[].name` | Franchise(s) |
 | `IGDB_Engine` | `game_engines[].name` | Engine(s) |
 | `IGDB_SteamAppID` | `external_games[]` | Cross-check Steam uid when `external_game_source == 1` |
+| `IGDB_Rating` | `rating` | IGDB user rating (0–100, float) |
+| `IGDB_RatingCount` | `rating_count` | Rating count |
+| `Score_IGDB_100` | `rating` | Rating normalized to 0–100 (rounded) |
 
 Other useful fields you can request via `fields` (still in the same call):
 
@@ -102,6 +106,7 @@ Current output columns (from the `data` object inside appdetails):
 | `Steam_ReviewCount` | `recommendations.total` | Review count |
 | `Steam_Price` | `is_free` / `price_overview.final_formatted` | Price string |
 | `Steam_Categories` | `categories[].description` | Category list |
+| `Steam_Metacritic` | `metacritic.score` | Metacritic score (Steam) |
 
 Other useful fields available in appdetails:
 
@@ -126,6 +131,9 @@ Current output columns:
 | `SteamSpy_Players` | `players_forever` | Lifetime players |
 | `SteamSpy_CCU` | `ccu` | Concurrent users |
 | `SteamSpy_PlaytimeAvg` | `average_forever` | Average playtime |
+| `SteamSpy_Positive` | `positive` | Positive reviews |
+| `SteamSpy_Negative` | `negative` | Negative reviews |
+| `Score_SteamSpy_100` | `positive/negative` | Positive ratio normalized to 0–100 |
 
 Other useful fields available:
 
@@ -137,7 +145,7 @@ Other useful fields available:
 
 - Library: https://pypi.org/project/howlongtobeatpy/
 
-- **ID**: library-provided `game_id` when present; otherwise normalized-name fallback.
+- **ID**: `HLTB_ID` (numeric game id; visible in HLTB URLs like `https://howlongtobeat.com/game/8940`).
 - **Search**: `howlongtobeatpy.HowLongToBeat().search(<name>)`
 - **Details**: same search result object (library wraps HTTP calls).
 
@@ -149,7 +157,14 @@ Current output columns (from the best match object):
 | `HLTB_Main` | `main_story` | Main story time (hours) |
 | `HLTB_Extra` | `main_extra` | Main + extras (hours) |
 | `HLTB_Completionist` | `completionist` | Completionist time (hours) |
+| `HLTB_ReleaseYear` | `release_world` | Release year (when present) |
+| `HLTB_Platforms` | `profile_platforms` | Platform list (when present) |
+| `Score_HLTB_100` | `review_score` | HLTB score normalized to 0–100 (when present) |
 
 Other useful attributes commonly present:
 
 - `profile_dev`, `profile_platform`, `release_world`, `rating` (varies by library version/data)
+
+Note: the project caches the full HLTB result object payload (JSON-serialized) under `data/cache/`
+even though only a small subset is written to CSV. This lets you add new derived fields later
+without re-fetching.

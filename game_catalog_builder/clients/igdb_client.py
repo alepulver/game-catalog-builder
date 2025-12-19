@@ -43,10 +43,12 @@ class IGDBClient:
             "by_query_negative_fetch": 0,
             "by_id_hit": 0,
             "by_id_fetch": 0,
+            "by_id_negative_hit": 0,
+            "by_id_negative_fetch": 0,
         }
         # Cache raw IGDB game payloads keyed by id (language:id). Derived output fields are
         # computed on-demand to keep caches independent of code changes.
-        self._by_id: dict[str, dict[str, Any]] = {}
+        self._by_id: dict[str, Any] = {}
         # Cache by exact query string, storing only lightweight candidates
         # (id/name/first_release_date).
         self._by_query: dict[str, list[dict[str, Any]]] = {}
@@ -180,18 +182,36 @@ class IGDBClient:
             if isinstance(cached, dict):
                 self.stats["by_id_hit"] += 1
                 out[igdb_id_str] = self._extract_fields(cached)
+            elif cached is None and id_key in self._by_id:
+                self.stats["by_id_negative_hit"] += 1
             else:
                 missing.append(igdb_id_str)
 
         base_fields = """
         fields id,name,first_release_date,
+               summary,storyline,
+               rating,rating_count,
+               category,status,
+               websites.url,
                platforms.name,
                genres.name,
                themes.name,
+               keywords.name,
                game_modes.name,
                player_perspectives.name,
                franchises.name,
                game_engines.name,
+               collections.name,
+               parent_game.name,
+               version_parent.name,
+               dlcs.name,
+               expansions.name,
+               ports.name,
+               involved_companies.company.name,
+               involved_companies.developer,
+               involved_companies.publisher,
+               age_ratings.category,
+               age_ratings.rating,
                external_games.external_game_source,external_games.uid;
         """
 
@@ -208,6 +228,7 @@ class IGDBClient:
             if not isinstance(data, list):
                 continue
             fetched_any = False
+            fetched_ids: set[str] = set()
             for it in data:
                 if not isinstance(it, dict):
                     continue
@@ -221,8 +242,15 @@ class IGDBClient:
                 self._by_id[id_key] = it
                 fetched_any = True
                 self.stats["by_id_fetch"] += 1
+                fetched_ids.add(gid_str)
                 out[gid_str] = self._extract_fields(it)
-            if fetched_any:
+            negative_any = False
+            for want in chunk:
+                if want not in fetched_ids:
+                    self._by_id[f"{self.language}:{want}"] = None
+                    self.stats["by_id_negative_fetch"] += 1
+                    negative_any = True
+            if fetched_any or negative_any:
                 self._save_cache()
 
         return out
@@ -248,13 +276,29 @@ class IGDBClient:
         search_text = re.sub(r"[\r\n\t]+", " ", search_text).strip()
         base_fields = """
         fields id,name,first_release_date,
+               summary,storyline,
+               rating,rating_count,
+               category,status,
+               websites.url,
                platforms.name,
                genres.name,
                themes.name,
+               keywords.name,
                game_modes.name,
                player_perspectives.name,
                franchises.name,
                game_engines.name,
+               collections.name,
+               parent_game.name,
+               version_parent.name,
+               dlcs.name,
+               expansions.name,
+               ports.name,
+               involved_companies.company.name,
+               involved_companies.developer,
+               involved_companies.publisher,
+               age_ratings.category,
+               age_ratings.rating,
                external_games.external_game_source,external_games.uid;
         """
 
@@ -346,7 +390,8 @@ class IGDBClient:
         return (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
-            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']}"
+            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']})"
         )
 
     def _extract_fields(self, game: dict[str, Any]) -> dict[str, str]:
@@ -375,6 +420,15 @@ class IGDBClient:
             except Exception:
                 year = ""
 
+        rating = game.get("rating", None)
+        rating_count = game.get("rating_count", None)
+        score_100 = ""
+        if isinstance(rating, (int, float)):
+            try:
+                score_100 = str(int(round(float(rating))))
+            except Exception:
+                score_100 = ""
+
         return {
             "IGDB_ID": str(game.get("id", "") or ""),
             "IGDB_Name": str(game.get("name", "") or ""),
@@ -387,6 +441,9 @@ class IGDBClient:
             "IGDB_Franchise": join_names(game.get("franchises")),
             "IGDB_Engine": join_names(game.get("game_engines")),
             "IGDB_SteamAppID": steam_appid,
+            "IGDB_Rating": str(rating if rating is not None else ""),
+            "IGDB_RatingCount": str(rating_count if rating_count is not None else ""),
+            "Score_IGDB_100": score_100,
         }
 
     def _steam_appid_from_external_games(self, external_games: list[Any]) -> str:
@@ -420,7 +477,9 @@ class IGDBClient:
             # Only keep raw IGDB game dicts here. Legacy extracted dicts (IGDB_*) are ignored;
             # they should be migrated in-place from by_query where raw payloads are available.
             self._by_id = {
-                str(k): v for k, v in by_id.items() if isinstance(v, dict) and "id" in v
+                str(k): v
+                for k, v in by_id.items()
+                if (isinstance(v, dict) and "id" in v) or v is None
             }
         if isinstance(by_query, dict):
             out: dict[str, list[dict[str, Any]]] = {}

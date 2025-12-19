@@ -120,6 +120,8 @@ RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must 
 - A `YearHint` column you can fill (e.g. `1999`) to disambiguate titles like reboots/remakes.
 - A small set of diagnostic columns so you can adjust IDs before enrichment:
   - `RAWG_MatchedName`, `RAWG_MatchScore`, etc
+  - For HLTB, the importer also captures extra match context:
+    - `HLTB_MatchedYear`, `HLTB_MatchedPlatforms`
   - `ReviewTags` (compact reasons to review)
   - `MatchConfidence` (`HIGH` / `MEDIUM` / `LOW`)
 
@@ -197,6 +199,10 @@ Provider caches are stored under `data/cache/`:
 
 - `by_query`: query → lightweight candidate lists (including negative caching for not-found).
 - `by_id`: provider ID → raw provider payload.
+
+Enriched outputs also include unified provider score columns (0–100 where available):
+- `Score_RAWG_100`, `Score_IGDB_100`, `Score_SteamSpy_100`, `Score_HLTB_100`
+- Provider-specific Metacritic scores when available: `RAWG_Metacritic`, `Steam_Metacritic`
 
 If you delete a cache file under `data/cache/`, the tool will refetch it as needed.
 

@@ -101,3 +101,31 @@ def test_validation_ignores_warhammer_40000_as_series_number() -> None:
     row = report.iloc[0].to_dict()
     assert row["SeriesNumbers"] == "Steam:2"
     assert "series_disagree" not in row["ValidationTags"]
+
+
+def test_validation_flags_hltb_year_and_platform_disagreement() -> None:
+    from game_catalog_builder.utils.validation import generate_validation_report
+
+    df = pd.DataFrame(
+        [
+            {
+                "Name": "Example",
+                "RAWG_Name": "Example",
+                "IGDB_Name": "Example",
+                "Steam_Name": "Example",
+                "HLTB_Name": "Example",
+                "RAWG_Year": "2000",
+                "IGDB_Year": "2000",
+                "Steam_ReleaseYear": "2000",
+                "HLTB_ReleaseYear": "2010",
+                "RAWG_Platforms": "PC",
+                "IGDB_Platforms": "PC",
+                "Steam_Platforms": "Windows",
+                "HLTB_Platforms": "PlayStation 2",
+            }
+        ]
+    )
+    report = generate_validation_report(df)
+    row = report.iloc[0].to_dict()
+    assert "year_disagree_hltb" in row["ValidationTags"]
+    assert "platform_disagree_hltb" in row["ValidationTags"]

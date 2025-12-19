@@ -69,4 +69,3 @@ def test_fill_eval_tags_flags_steam_appid_disagree_rawg() -> None:
     tags = out.iloc[0]["ReviewTags"]
     assert "steam_appid_disagree:rawg" in tags
     assert out.iloc[0]["MatchConfidence"] == "LOW"
-

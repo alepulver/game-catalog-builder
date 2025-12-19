@@ -31,4 +31,3 @@ def test_hltb_get_by_id_uses_library_search_from_id(tmp_path, monkeypatch):
     data2 = client.get_by_id(8940)
     assert data2 is not None
     assert calls == [8940]
-

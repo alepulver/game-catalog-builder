@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ from ..utils.utilities import (
 
 STEAM_SEARCH_URL = "https://store.steampowered.com/api/storesearch"
 STEAM_APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
+STEAM_PACKAGEDETAILS_URL = "https://store.steampowered.com/api/packagedetails"
 
 
 class SteamClient:
@@ -38,11 +38,21 @@ class SteamClient:
             "by_query_negative_fetch": 0,
             "by_id_hit": 0,
             "by_id_fetch": 0,
+            "by_id_negative_hit": 0,
+            "by_id_negative_fetch": 0,
+            "by_package_hit": 0,
+            "by_package_fetch": 0,
+            "by_package_negative_hit": 0,
+            "by_package_negative_fetch": 0,
         }
         # Cache search results by exact query (list of {id,name,type}).
         self._by_query: dict[str, list[dict[str, Any]]] = {}
         # Cache raw appdetails payloads keyed by appid.
         self._by_id: dict[str, Any] = {}
+        self._by_id_negative: set[str] = set()
+        # Cache raw packagedetails payloads keyed by package/sub id.
+        self._by_package: dict[str, Any] = {}
+        self._by_package_negative: set[str] = set()
         self._load_cache(load_json_cache(self.cache_path))
         # Steam storesearch and appdetails have different rate limits. appdetails is much stricter,
         # so we keep a slower limiter (and dynamic 429 backoff) for details.
@@ -70,6 +80,9 @@ class SteamClient:
 
         by_query = raw.get("by_query")
         by_id = raw.get("by_id")
+        by_package = raw.get("by_package")
+        by_id_negative = raw.get("by_id_negative")
+        by_package_negative = raw.get("by_package_negative")
         if not isinstance(by_id, dict):
             logging.warning(
                 "Steam cache file is in an incompatible format; ignoring it (delete it to rebuild)."
@@ -84,15 +97,68 @@ class SteamClient:
                 if isinstance(v, list):
                     out[str(k)] = [it for it in v if isinstance(it, dict)]
             self._by_query = out
+        if isinstance(by_package, dict):
+            self._by_package = {str(k): v for k, v in by_package.items() if isinstance(v, dict)}
+        if isinstance(by_id_negative, list):
+            self._by_id_negative = {str(x) for x in by_id_negative if str(x).strip()}
+        if isinstance(by_package_negative, list):
+            self._by_package_negative = {str(x) for x in by_package_negative if str(x).strip()}
 
     def _save_cache(self) -> None:
         save_json_cache(
             {
                 "by_id": self._by_id,
                 "by_query": self._by_query,
+                "by_package": self._by_package,
+                "by_id_negative": sorted(self._by_id_negative),
+                "by_package_negative": sorted(self._by_package_negative),
             },
             self.cache_path,
         )
+
+    def _get_package_details(self, packageid: int) -> dict[str, Any] | None:
+        if str(packageid) in self._by_package_negative:
+            self.stats["by_package_negative_hit"] += 1
+            return None
+        cached = self._by_package.get(str(packageid))
+        if isinstance(cached, dict):
+            self.stats["by_package_hit"] += 1
+            return cached
+
+        def _request():
+            self.appdetails_ratelimiter.wait()
+            url = f"{STEAM_PACKAGEDETAILS_URL}?packageids={packageid}&l=english&cc=us"
+            r = requests.get(url, timeout=REQUEST.timeout_s)
+            r.raise_for_status()
+            return r.json()
+
+        data = with_retries(
+            _request,
+            retries=RETRY.retries,
+            base_sleep_s=max(2.0, RETRY.base_sleep_s),
+            on_fail_return=None,
+            context=f"Steam packagedetails packageid={packageid}",
+        )
+        if not isinstance(data, dict):
+            return None
+        entry = data.get(str(packageid))
+        if not isinstance(entry, dict):
+            return None
+        if not entry.get("success"):
+            self._by_package_negative.add(str(packageid))
+            self._save_cache()
+            self.stats["by_package_negative_fetch"] += 1
+            return None
+        payload = entry.get("data")
+        if not isinstance(payload, dict):
+            self._by_package_negative.add(str(packageid))
+            self._save_cache()
+            self.stats["by_package_negative_fetch"] += 1
+            return None
+        self._by_package[str(packageid)] = payload
+        self._save_cache()
+        self.stats["by_package_fetch"] += 1
+        return payload
 
     # -------------------------------------------------
     # Search AppID by name
@@ -104,10 +170,32 @@ class SteamClient:
                 return s
             return re.sub(r"\s*\(\s*(19\d{2}|20\d{2})\s*\)\s*$", "", s).strip() or s
 
+        def _strip_common_editions_for_search(s: str) -> str:
+            # Steam storesearch can return "sub" results for edition strings (which are not appids).
+            # Strip common edition suffixes to improve the odds of finding the base app.
+            out = s
+            patterns = [
+                r"\bgame\s+of\s+the\s+year\s+edition\b",
+                r"\bgoty\s+edition\b",
+                r"\bcomplete\s+edition\b",
+                r"\bultimate\s+edition\b",
+                r"\bdefinitive\s+edition\b",
+                r"\bdeluxe\s+edition\b",
+                r"\bcollector'?s\s+edition\b",
+                r"\bgold\s+edition\b",
+            ]
+            for pat in patterns:
+                out = re.sub(pat, "", out, flags=re.IGNORECASE).strip()
+            out = re.sub(r"\s{2,}", " ", out).strip()
+            return out or s
+
         stripped_name = _strip_trailing_paren_year(str(game_name or "").strip())
+        base_name = _strip_common_editions_for_search(stripped_name)
         search_terms: list[str] = (
             [stripped_name] if stripped_name else [str(game_name or "").strip()]
         )
+        if base_name and base_name not in search_terms:
+            search_terms.append(base_name)
         if str(game_name or "").strip() and str(game_name or "").strip() not in search_terms:
             search_terms.append(str(game_name or "").strip())
         if year_hint is not None and stripped_name:
@@ -115,6 +203,7 @@ class SteamClient:
 
         results: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
+        sub_ids: list[int] = []
         request_failed = False
 
         for term in search_terms:
@@ -124,6 +213,7 @@ class SteamClient:
             query_key = f"l:english|cc:US|term:{term}"
             cached_items = self._by_query.get(query_key)
             if cached_items is None:
+
                 def _request(term=term):
                     self.storesearch_ratelimiter.wait()
                     r = requests.get(
@@ -163,6 +253,15 @@ class SteamClient:
             for it in cached_items:
                 if not isinstance(it, dict):
                     continue
+                it_type = str(it.get("type", "") or "").strip().lower()
+                # Ignore non-app storesearch results; appdetails only works with real appids.
+                if it_type and it_type not in {"app", "game"}:
+                    if it_type == "sub":
+                        try:
+                            sub_ids.append(int(str(it.get("id") or "").strip()))
+                        except ValueError:
+                            pass
+                    continue
                 it_id = str(it.get("id") or "").strip()
                 if not it_id or it_id in seen_ids:
                     continue
@@ -172,6 +271,85 @@ class SteamClient:
             # If we got any items, stop trying more terms.
             if results:
                 break
+
+        if not results and sub_ids and not request_failed:
+            # Steam storesearch sometimes returns a package/subscription id (type=sub) for
+            # edition strings (GOTY/Complete/etc). Those are not appids and cannot be used with
+            # appdetails; try to resolve them to their underlying appids via packagedetails.
+            appids: list[int] = []
+            for pid in sub_ids[:10]:
+                pkg = self._get_package_details(pid)
+                if not isinstance(pkg, dict):
+                    continue
+                apps = pkg.get("apps") or []
+                if not isinstance(apps, list):
+                    continue
+                for a in apps:
+                    if not isinstance(a, dict):
+                        continue
+                    aid = a.get("id")
+                    if aid is None:
+                        continue
+                    try:
+                        ai = int(str(aid).strip())
+                    except ValueError:
+                        continue
+                    appids.append(ai)
+            # Dedup while preserving order
+            seen = set()
+            appids = [a for a in appids if not (a in seen or seen.add(a))]
+            if appids:
+                details_by_id = self.get_app_details_many(
+                    appids[: STEAM.appdetails_refine_candidates]
+                )
+                detail_candidates: list[dict[str, Any]] = []
+                for appid, details in details_by_id.items():
+                    if not isinstance(details, dict):
+                        continue
+                    if str(details.get("type", "") or "").strip().lower() != "game":
+                        continue
+                    detail_candidates.append(
+                        {
+                            "id": appid,
+                            "name": str(details.get("name", "") or ""),
+                            "_details": details,
+                        }
+                    )
+
+                def _details_year_getter(obj: dict[str, Any]) -> int | None:
+                    details = obj.get("_details") if isinstance(obj, dict) else None
+                    if not isinstance(details, dict):
+                        return None
+                    release = details.get("release_date", {}) or {}
+                    text = str(release.get("date", "") or "")
+                    m = re.search(r"\b(19\d{2}|20\d{2})\b", text)
+                    if m:
+                        try:
+                            return int(m.group(1))
+                        except ValueError:
+                            return None
+                    return None
+
+                if detail_candidates:
+                    query = stripped_name or str(game_name or "").strip()
+                    best, score, top_matches = pick_best_match(
+                        query,
+                        detail_candidates,
+                        name_key="name",
+                        year_hint=year_hint,
+                        year_getter=_details_year_getter,
+                    )
+                    if best and score >= MATCHING.min_score:
+                        if score < 100:
+                            msg = (
+                                f"Close match for '{game_name}': Selected '{best.get('name', '')}' "
+                                f"(score: {score}%)"
+                            )
+                            if top_matches:
+                                top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
+                                msg += f", alternatives: {', '.join(top_names)}"
+                            logging.warning(msg)
+                        return best
 
         if not results:
             if request_failed:
@@ -282,15 +460,16 @@ class SteamClient:
         query_dlc_like = _looks_dlc_like(query)
 
         # If the user did not ask for DLC-like content, prefer Steam storesearch results that are
-        # typed as a game (when the endpoint provides a type).
+        # typed as an app (Steam uses type=app|sub|bundle; only appids work with appdetails).
         if not query_dlc_like:
-            typed_games = [
-                it
-                for it in results
-                if str(it.get("type", "") or "").strip().lower() in {"game", ""}
-            ]
-            if typed_games and len(typed_games) < len(results):
-                results = typed_games
+
+            def _store_type(it: dict[str, Any]) -> str:
+                return str(it.get("type", "") or "").strip().lower()
+
+            app_like = [it for it in results if _store_type(it) in {"app", "", "game"}]
+            # Only drop sub/bundle when we have any app-like alternatives.
+            if app_like and len(app_like) < len(results):
+                results = app_like
 
             # Also drop obviously DLC-like titles when we have any non-DLC-like alternatives.
             non_dlc_like = [
@@ -313,11 +492,34 @@ class SteamClient:
         # names, so appdetails is the only reliable way to reject non-game types.
         selected_name = str((best or {}).get("name", "") or "").strip()
         selected_type = str((best or {}).get("type", "") or "").strip().lower()
+        best_type = selected_type
+        best_appid: int | None
+        try:
+            best_appid = int(str((best or {}).get("id") or "").strip())
+        except ValueError:
+            best_appid = None
+
+        # Steam storesearch can return non-app IDs (type=sub/bundle). Those cannot be resolved via
+        # appdetails and should never be pinned.
+        selected_is_non_app = bool(best_type and best_type not in {"app", "game"})
+        selected_valid_game: bool | None = None
+        if best_appid is not None and not query_dlc_like and not selected_is_non_app:
+            selected_details = self.get_app_details(best_appid)
+            if isinstance(selected_details, dict):
+                details_type = str(selected_details.get("type", "") or "").strip().lower()
+                details_name = str(selected_details.get("name", "") or "").strip()
+                selected_valid_game = details_type == "game" and not (
+                    details_name and _looks_dlc_like(details_name)
+                )
+            else:
+                selected_valid_game = False
+
         suspicious = (
             year_hint is not None
             or score < MATCHING.suspicious_score
             or (selected_name and _looks_dlc_like(selected_name) and not query_dlc_like)
-            or (selected_type and selected_type not in {"game"} and not query_dlc_like)
+            or (selected_is_non_app and not query_dlc_like)
+            or (selected_valid_game is False)
             or (_series_numbers(query) != _series_numbers(selected_name))
         )
         if suspicious:
@@ -336,30 +538,6 @@ class SteamClient:
 
             details_by_id = self.get_app_details_many(sampled_appids)
 
-            # If the initially-selected storesearch item is a DLC/non-game in appdetails, reject
-            # it even if the storesearch title doesn't include DLC-like tokens.
-            if best and not query_dlc_like:
-                try:
-                    selected_appid = int(str(best.get("id") or "").strip())
-                except ValueError:
-                    selected_appid = None
-                if selected_appid is not None:
-                    selected_details = details_by_id.get(selected_appid)
-                    if isinstance(selected_details, dict):
-                        details_type = str(selected_details.get("type", "") or "").strip().lower()
-                        details_name = str(selected_details.get("name", "") or "").strip()
-                        if details_type and details_type != "game":
-                            logging.warning(
-                                f"Not found on Steam: '{game_name}'. Selected appdetails type is not game: "
-                                f"appid={selected_appid} type={details_type!r}"
-                            )
-                            return None
-                        if details_name and _looks_dlc_like(details_name):
-                            logging.warning(
-                                f"Not found on Steam: '{game_name}'. Selected title looks like DLC/non-game: '{details_name}'"
-                            )
-                            return None
-
             for appid in sampled_appids:
                 details = details_by_id.get(appid)
                 if not isinstance(details, dict):
@@ -373,7 +551,9 @@ class SteamClient:
 
             if not query_dlc_like:
                 detail_candidates = [
-                    c for c in detail_candidates if not _looks_dlc_like(str(c.get("name", "") or ""))
+                    c
+                    for c in detail_candidates
+                    if not _looks_dlc_like(str(c.get("name", "") or ""))
                 ]
 
             def _details_year_getter(obj: dict[str, Any]) -> int | None:
@@ -398,8 +578,47 @@ class SteamClient:
                     year_hint=year_hint,
                     year_getter=_details_year_getter,
                 )
-                if best2 is not None and score2 >= max(score, MATCHING.min_score):
-                    best, score, top_matches = best2, score2, top2
+                if best2 is not None and score2 >= MATCHING.min_score:
+                    must_replace = bool(selected_is_non_app or selected_valid_game is False)
+                    if must_replace or score2 >= max(score, MATCHING.min_score):
+                        best, score, top_matches = best2, score2, top2
+
+        # Final guard: never pin non-app Steam storesearch results (subs/bundles).
+        if best and not query_dlc_like:
+            final_type = str(best.get("type", "") or "").strip().lower()
+            if final_type and final_type not in {"app", "game"}:
+                logging.warning(
+                    f"Not found on Steam: '{game_name}'. Selected storesearch type is not an app: "
+                    f"id={best.get('id')} type={final_type!r}"
+                )
+                return None
+            try:
+                final_appid = int(str(best.get("id") or "").strip())
+            except ValueError:
+                final_appid = None
+            if final_appid is not None:
+                final_details = self.get_app_details(final_appid)
+                if not isinstance(final_details, dict):
+                    logging.warning(
+                        f"Not found on Steam: '{game_name}'. "
+                        "Selected Steam ID could not be resolved via appdetails. "
+                        f"appid={final_appid}"
+                    )
+                    return None
+                final_details_type = str(final_details.get("type", "") or "").strip().lower()
+                final_details_name = str(final_details.get("name", "") or "").strip()
+                if final_details_type and final_details_type != "game":
+                    logging.warning(
+                        f"Not found on Steam: '{game_name}'. Selected appdetails type is not game: "
+                        f"appid={final_appid} type={final_details_type!r}"
+                    )
+                    return None
+                if final_details_name and _looks_dlc_like(final_details_name):
+                    logging.warning(
+                        f"Not found on Steam: '{game_name}'. "
+                        f"Selected title looks like DLC/non-game: '{final_details_name}'"
+                    )
+                    return None
 
         # Final guard: if we still ended up selecting a DLC-like title but the query isn't
         # DLC-like, treat it as not found rather than pinning the wrong Steam app.
@@ -407,7 +626,8 @@ class SteamClient:
             chosen = str(best.get("name", "") or "").strip()
             if chosen and _looks_dlc_like(chosen):
                 logging.warning(
-                    f"Not found on Steam: '{game_name}'. Selected title looks like DLC/non-game: '{chosen}'"
+                    f"Not found on Steam: '{game_name}'. "
+                    f"Selected title looks like DLC/non-game: '{chosen}'"
                 )
                 return None
 
@@ -448,6 +668,9 @@ class SteamClient:
         out: dict[int, dict[str, Any]] = {}
         missing: list[int] = []
         for appid in appids:
+            if str(appid) in self._by_id_negative:
+                self.stats["by_id_negative_hit"] += 1
+                continue
             cached = self._by_id.get(str(appid))
             if isinstance(cached, dict):
                 self.stats["by_id_hit"] += 1
@@ -460,23 +683,42 @@ class SteamClient:
 
             def _request():
                 self.appdetails_ratelimiter.wait()
-                r = requests.get(
-                    STEAM_APPDETAILS_URL,
-                    params={"appids": ids, "l": "english", "cc": "us"},
-                    timeout=REQUEST.timeout_s,
-                )
+                # Steam's appdetails endpoint does not reliably accept URL-encoded commas in the
+                # `appids` query param. Build the query string manually to keep commas literal.
+                url = f"{STEAM_APPDETAILS_URL}?appids={ids}&l=english&cc=us"
+                r = requests.get(url, timeout=REQUEST.timeout_s)
+                # Some Steam IDs in the wild are not appids (e.g. package ids) and the endpoint
+                # can respond with 400 for multi-id requests. Treat 400 as a non-retriable miss
+                # (and for batches, fall back to single-id requests to salvage valid entries).
+                if r.status_code == 400:
+                    return {"__status": 400}
                 r.raise_for_status()
-                return r.json()
+                return {"__status": 200, "__data": r.json()}
 
-            return with_retries(
+            got = with_retries(
                 _request,
                 retries=RETRY.retries,
                 base_sleep_s=max(2.0, RETRY.base_sleep_s),
                 on_fail_return=None,
                 context=f"Steam appdetails appids={ids}",
             )
+            if not isinstance(got, dict):
+                return None
+            status = got.get("__status")
+            if status == 400:
+                if len(chunk) > 1:
+                    merged: dict[str, Any] = {}
+                    for single in chunk:
+                        one = _fetch_chunk([single])
+                        if isinstance(one, dict):
+                            merged.update(one)
+                    return merged
+                logging.warning(f"Steam appdetails rejected appid={ids} (HTTP 400); skipping")
+                return {}
+            return got.get("__data") if status == 200 else None
 
         # Fetch missing IDs in small chunks to keep response sizes reasonable.
+        wrote_negative = False
         for chunk in iter_chunks(missing, STEAM.appdetails_batch_size):
             data = _fetch_chunk(chunk)
             if not isinstance(data, dict):
@@ -487,15 +729,21 @@ class SteamClient:
                     continue
                 if not entry.get("success"):
                     logging.warning(f"Steam appdetails returned success=false for appid={appid}")
+                    self._by_id_negative.add(str(appid))
+                    wrote_negative = True
+                    self.stats["by_id_negative_fetch"] += 1
                     continue
                 details = entry.get("data")
                 if not isinstance(details, dict):
+                    self._by_id_negative.add(str(appid))
+                    wrote_negative = True
+                    self.stats["by_id_negative_fetch"] += 1
                     continue
                 self._by_id[str(appid)] = details
                 out[appid] = details
                 self.stats["by_id_fetch"] += 1
 
-        if missing:
+        if missing or wrote_negative:
             self._save_cache()
         return out
 
@@ -507,7 +755,10 @@ class SteamClient:
         return (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
-            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']}"
+            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
+            f"by_package hit={s['by_package_hit']} fetch={s['by_package_fetch']} "
+            f"(neg hit={s['by_package_negative_hit']} fetch={s['by_package_negative_fetch']})"
         )
 
     # -------------------------------------------------
@@ -535,6 +786,8 @@ class SteamClient:
 
         recommendations = details.get("recommendations", {})
         review_count = recommendations.get("total", "")
+        metacritic = details.get("metacritic", {}) or {}
+        metacritic_score = metacritic.get("score", "")
 
         release = details.get("release_date", {}) or {}
         release_year = extract_year(str(release.get("date", "") or ""))
@@ -558,4 +811,5 @@ class SteamClient:
             "Steam_ReviewPercent": "",  # Steam doesn't expose this directly without extra scraping
             "Steam_Price": price,
             "Steam_Categories": ", ".join(categories),
+            "Steam_Metacritic": str(metacritic_score),
         }

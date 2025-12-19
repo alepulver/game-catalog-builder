@@ -146,6 +146,9 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
         "SteamSpy_Players": "1234",
         "SteamSpy_CCU": "12",
         "SteamSpy_PlaytimeAvg": "56",
+        "SteamSpy_Positive": "",
+        "SteamSpy_Negative": "",
+        "Score_SteamSpy_100": "",
     }
 
     raw = json.loads((tmp_path / "steamspy_cache.json").read_text(encoding="utf-8"))
@@ -241,6 +244,9 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
             self.main_story = main_story
             self.main_extra = ""
             self.completionist = ""
+            self.release_world = 2000
+            self.profile_platforms = ["PC"]
+            self.game_web_link = "https://howlongtobeat.com/game/123"
 
     class FakeHLTB:
         def __init__(self, results):
@@ -265,6 +271,7 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
     assert raw["by_query"]["q:Example Game"][0]["game_id"] == 123
     assert raw["by_id"]["123"]["main_story"] == "10"
+    assert raw["by_id"]["123"]["release_world"] == 2000
 
 
 def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
@@ -282,7 +289,16 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
     steamspy_out = tmp_path / "Provider_SteamSpy.csv"
 
     def fake_get(url, params=None, timeout=None):
+        def _appids_from_url(u: str) -> list[str]:
+            if "appids=" not in u:
+                return []
+            raw = u.split("appids=", 1)[1].split("&", 1)[0]
+            return [s.strip() for s in raw.split(",") if s.strip()]
+
         class Resp:
+            status_code = 200
+            headers: dict[str, str] = {}
+
             def raise_for_status(self):
                 return None
 
@@ -295,10 +311,19 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
                         return {"items": [{"id": 222, "name": "Game B", "type": "app"}]}
                     return {"items": []}
                 if "appdetails" in url:
-                    appid = str((params or {}).get("appids"))
-                    return {
-                        appid: {"success": True, "data": {"name": f"Game {appid}", "is_free": True}}
-                    }
+                    ids = _appids_from_url(url)
+                    payload = {}
+                    for appid in ids:
+                        payload[appid] = {
+                            "success": True,
+                            "data": {
+                                "steam_appid": int(appid),
+                                "name": f"Game {appid}",
+                                "type": "game",
+                                "is_free": True,
+                            },
+                        }
+                    return payload
                 if "steamspy.com" in url:
                     return {
                         "owners": "1 .. 2",

@@ -260,12 +260,14 @@ def generate_validation_report(
     df: pd.DataFrame,
     *,
     thresholds: ValidationThresholds | None = None,
+    enabled_providers: set[str] | None = None,
 ) -> pd.DataFrame:
     """
     Produce a per-row cross-provider consistency report for the merged CSV.
     """
     if thresholds is None:
         thresholds = ValidationThresholds()
+    enabled = {p.strip().lower() for p in (enabled_providers or set()) if p.strip()}
     rows: list[dict[str, str]] = []
 
     for _, r in df.iterrows():
@@ -284,6 +286,7 @@ def generate_validation_report(
         rawg_year = _as_year_int(str(r.get("RAWG_Year", "") or ""))
         igdb_year = _as_year_int(str(r.get("IGDB_Year", "") or ""))
         steam_year = _as_year_int(str(r.get("Steam_ReleaseYear", "") or ""))
+        hltb_year = _as_year_int(str(r.get("HLTB_ReleaseYear", "") or ""))
 
         years: list[tuple[str, int]] = []
         if rawg_year is not None:
@@ -292,6 +295,8 @@ def generate_validation_report(
             years.append(("IGDB", igdb_year))
         if steam_year is not None:
             years.append(("Steam", steam_year))
+        if hltb_year is not None:
+            years.append(("HLTB", hltb_year))
 
         steam_is_edition = _steam_is_edition_or_port(steam_name)
         steam_is_dlc = _steam_looks_like_dlc(
@@ -302,6 +307,12 @@ def generate_validation_report(
         if rawg_year is not None and igdb_year is not None:
             if abs(rawg_year - igdb_year) > thresholds.year_max_diff:
                 year_disagree_rawg_igdb = "YES"
+
+        year_disagree_hltb = ""
+        if hltb_year is not None:
+            anchor = igdb_year if igdb_year is not None else rawg_year
+            if anchor is not None and abs(hltb_year - anchor) > thresholds.year_max_diff:
+                year_disagree_hltb = "YES"
 
         steam_year_disagree = ""
         steam_year_diff_vs_rawg = _year_diff(steam_year, rawg_year)
@@ -327,6 +338,23 @@ def generate_validation_report(
             platform_intersection = ", ".join(sorted(inter))
             if not inter:
                 platform_disagree = "YES"
+
+        platform_disagree_hltb = ""
+        hltb_plat = _normalize_platforms(str(r.get("HLTB_Platforms", "") or ""))
+        if hltb_plat:
+            # Compare HLTB to a stable anchor set to avoid shrinking intersections too aggressively.
+            anchor = None
+            rawg_plat = _normalize_platforms(str(r.get("RAWG_Platforms", "") or ""))
+            igdb_plat = _normalize_platforms(str(r.get("IGDB_Platforms", "") or ""))
+            steam_plat = _normalize_platforms(str(r.get("Steam_Platforms", "") or ""))
+            if rawg_plat and igdb_plat:
+                inter = rawg_plat & igdb_plat
+                if inter:
+                    anchor = inter
+            if anchor is None:
+                anchor = igdb_plat or rawg_plat or steam_plat
+            if anchor and not (anchor & hltb_plat):
+                platform_disagree_hltb = "YES"
 
         steam_appid = str(r.get("Steam_AppID", "") or "").strip()
         igdb_steam_appid = str(r.get("IGDB_SteamAppID", "") or "").strip()
@@ -398,6 +426,10 @@ def generate_validation_report(
             ("HLTB", "HLTB_Main"),
             ("SteamSpy", "SteamSpy_Owners"),
         ):
+            if enabled and prov.lower() not in enabled:
+                continue
+            if col not in df.columns:
+                continue
             if not str(r.get(col, "") or "").strip():
                 not_found.append(prov)
 
@@ -517,8 +549,12 @@ def generate_validation_report(
             validation_tags.append("year_disagree_rawg_igdb")
         if steam_year_disagree == "YES":
             validation_tags.append("steam_year_disagree")
+        if year_disagree_hltb == "YES":
+            validation_tags.append("year_disagree_hltb")
         if platform_disagree == "YES":
             validation_tags.append("platform_disagree")
+        if platform_disagree_hltb == "YES":
+            validation_tags.append("platform_disagree_hltb")
         if steam_appid_mismatch == "YES":
             validation_tags.append("steam_appid_mismatch")
         if edition_disagree == "YES":

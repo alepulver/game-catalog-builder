@@ -37,7 +37,8 @@ class SteamSpyClient:
             self.cache = {}
         else:
             logging.warning(
-                "SteamSpy cache file is in an incompatible format; ignoring it (delete it to rebuild)."
+                "SteamSpy cache file is in an incompatible format; ignoring it "
+                "(delete it to rebuild)."
             )
             self.cache = {}
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
@@ -92,11 +93,25 @@ class SteamSpyClient:
 
     @staticmethod
     def _extract_fields(data: dict[str, Any]) -> dict[str, str]:
+        positive = data.get("positive", "")
+        negative = data.get("negative", "")
+        score_100 = ""
+        try:
+            pos_i = int(str(positive))
+            neg_i = int(str(negative))
+            denom = pos_i + neg_i
+            if denom > 0:
+                score_100 = str(int(round(pos_i / denom * 100.0)))
+        except Exception:
+            score_100 = ""
         return {
             "SteamSpy_Owners": str(data.get("owners", "")),
             "SteamSpy_Players": str(data.get("players_forever", "")),
             "SteamSpy_CCU": str(data.get("ccu", "")),
             "SteamSpy_PlaytimeAvg": str(data.get("average_forever", "")),
+            "SteamSpy_Positive": str(positive),
+            "SteamSpy_Negative": str(negative),
+            "Score_SteamSpy_100": score_100,
         }
 
     def format_cache_stats(self) -> str:

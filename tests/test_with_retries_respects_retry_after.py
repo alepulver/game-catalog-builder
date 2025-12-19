@@ -2,8 +2,9 @@ from __future__ import annotations
 
 
 def test_with_retries_respects_retry_after(monkeypatch):
-    from game_catalog_builder.utils.utilities import with_retries
     import requests
+
+    from game_catalog_builder.utils.utilities import with_retries
 
     class Resp:
         status_code = 429

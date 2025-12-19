@@ -39,6 +39,8 @@ class RAWGClient:
             "by_query_negative_fetch": 0,
             "by_id_hit": 0,
             "by_id_fetch": 0,
+            "by_id_negative_hit": 0,
+            "by_id_negative_fetch": 0,
         }
         self._by_id: dict[str, Any] = {}
         # Cache by the exact query string/params used, storing only a lightweight list of
@@ -87,6 +89,9 @@ class RAWGClient:
             return None
 
         id_key = self._id_key(rawg_id_str)
+        if id_key in self._by_id and self._by_id.get(id_key) is None:
+            self.stats["by_id_negative_hit"] += 1
+            return None
         cached = self._by_id.get(id_key)
         if isinstance(cached, dict):
             self.stats["by_id_hit"] += 1
@@ -113,6 +118,12 @@ class RAWGClient:
             self._save_cache()
             self.stats["by_id_fetch"] += 1
             return data
+        # If RAWG returned a real payload but it isn't a valid game object, cache it as a
+        # negative by-id result to avoid repeated fetches.
+        if isinstance(data, dict):
+            self._by_id[id_key] = None
+            self._save_cache()
+            self.stats["by_id_negative_fetch"] += 1
         return None
 
     # ----------------------------
@@ -225,7 +236,9 @@ class RAWGClient:
                 year_getter=_year_getter,
             )
 
-        def _search_term(term: str) -> tuple[dict[str, Any] | None, int, list[tuple[str, int]], bool]:
+        def _search_term(
+            term: str,
+        ) -> tuple[dict[str, Any] | None, int, list[tuple[str, int]], bool]:
             lkey = f"lang:{self.language}|search:{term}|page_size:40"
 
             cands = _fetch(
@@ -300,7 +313,8 @@ class RAWGClient:
         return (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
-            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']}"
+            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']})"
         )
 
     # ----------------------------
@@ -319,6 +333,14 @@ class RAWGClient:
 
         released = rawg_obj.get("released") or ""
 
+        rating_val = rawg_obj.get("rating", None)
+        score_100 = ""
+        try:
+            if rating_val is not None:
+                score_100 = str(int(round(float(rating_val) / 5.0 * 100.0)))
+        except Exception:
+            score_100 = ""
+
         return {
             "RAWG_ID": str(rawg_obj.get("id", "")),
             "RAWG_Name": str(rawg_obj.get("name", "") or ""),
@@ -328,7 +350,8 @@ class RAWGClient:
             "RAWG_Genre2": genres[1] if len(genres) > 1 else "",
             "RAWG_Platforms": ", ".join(p for p in platforms if p),
             "RAWG_Tags": ", ".join(t for t in tags if t),
-            "RAWG_Rating": str(rawg_obj.get("rating", "")),
+            "RAWG_Rating": str(rating_val if rating_val is not None else ""),
+            "Score_RAWG_100": score_100,
             "RAWG_RatingsCount": str(rawg_obj.get("ratings_count", "")),
             "RAWG_Metacritic": str(rawg_obj.get("metacritic", "")),
         }

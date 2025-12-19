@@ -100,14 +100,16 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - Written once at the end of the import command.
   - During import, HLTB matching progress is also checkpointed every 25 processed rows because HLTB
     can be slow.
-  - When diagnostics are enabled, the import also writes:
+- When diagnostics are enabled, the import also writes:
     - `ReviewTags`: compact tags (missing providers, low fuzzy scores, year/platform drift, and a few high-signal Steam-specific checks like `steam_series_mismatch` and `steam_appid_disagree:*`).
     - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW` (missing providers are typically `MEDIUM`; strong drift signals like year/platform disagreements are `LOW`).
 
 - Merge output (`data/output/Games_Enriched.csv`)
   - Written after all selected providers finish.
-  - After merging, diagnostic/eval columns are dropped so the enriched CSV stays focused on
+- After merging, diagnostic/eval columns are dropped so the enriched CSV stays focused on
   user-editable fields + provider enrichment fields.
+- Enriched outputs include a small set of provider score fields normalized to 0–100 where possible:
+  - `Score_RAWG_100`, `Score_IGDB_100`, `Score_SteamSpy_100`, `Score_HLTB_100`
 
 ## Logs (how to read them)
 
@@ -147,6 +149,8 @@ The tool is designed to be resumable, so it persists both caches and intermediat
 - Uses `howlongtobeatpy`:
   - When `HLTB_ID` is present, it uses the library’s `search_from_id(id)` to avoid ambiguity.
   - Otherwise it searches by name (optionally using `HLTB_Query`) and extracts playtime fields.
+- The project caches the full HLTB result object payload (JSON-serialized) so additional derived
+  fields can be added later without re-fetching.
 
 ## Merge behavior (duplicate names)
 
@@ -156,10 +160,14 @@ The occurrence index is the per-name row number within the file and is preserved
 
 ## Validation vs import diagnostics
 
-At the moment, the primary review surface is **import diagnostics** in `data/input/Games_Catalog.csv`:
+The primary review surface is **import diagnostics** in `data/input/Games_Catalog.csv`:
 
 - `ReviewTags`: compact tags describing why the row may need review.
 - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW`.
 
-“Validation report” style outputs may be added back later, but current workflow expects you to
-review and pin IDs directly in `data/input/Games_Catalog.csv`.
+In addition, you can generate a read-only **validation report** after enrichment:
+
+- `enrich --validate` writes `data/output/Validation_Report.csv`
+- `validate` can generate the same report from an existing enriched CSV
+
+Validation focuses on cross-provider consistency checks and is not treated as a source of truth.

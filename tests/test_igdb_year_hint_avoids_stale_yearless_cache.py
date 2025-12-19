@@ -47,4 +47,3 @@ def test_igdb_year_hint_does_not_use_yearless_cache_when_year_mismatches(tmp_pat
     assert out is not None
     assert out["IGDB_Name"] == "Fallout"
     assert calls["post"] == 1
-

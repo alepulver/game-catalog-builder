@@ -11,13 +11,20 @@ def test_steam_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
     def fake_get(url, params=None, timeout=None):
         assert "appdetails" in url
         calls["appdetails"] += 1
-        appids = str((params or {}).get("appids") or "")
+        appids = ""
+        if "appids=" in url:
+            appids = url.split("appids=", 1)[1].split("&", 1)[0]
         ids = [s.strip() for s in appids.split(",") if s.strip()]
         payload = {}
         for s in ids:
             payload[s] = {
                 "success": True,
-                "data": {"steam_appid": int(s), "name": f"Game {s}", "type": "game", "is_free": True},
+                "data": {
+                    "steam_appid": int(s),
+                    "name": f"Game {s}",
+                    "type": "game",
+                    "is_free": True,
+                },
             }
 
         class Resp:

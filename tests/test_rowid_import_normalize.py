@@ -37,4 +37,3 @@ def test_normalize_rejects_duplicate_rowids(tmp_path: Path) -> None:
     )
     with pytest.raises(SystemExit):
         _normalize_catalog(inp, out)
-

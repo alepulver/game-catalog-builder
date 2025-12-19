@@ -35,14 +35,18 @@ def test_import_inferred_steam_appid_does_not_overwrite_with_name_search(tmp_pat
             return {"name": "Half-Life 2: Episode One", "type": "game"}
 
         def search_appid(self, *_args, **_kwargs):
-            raise AssertionError("name-based Steam search should be skipped when inferred ID exists")
+            raise AssertionError(
+                "name-based Steam search should be skipped when inferred ID exists"
+            )
 
         def format_cache_stats(self) -> str:
             return "by_query hit=0 fetch=0 (neg hit=0 fetch=0), by_id hit=0 fetch=0"
 
     monkeypatch.setattr(cli_mod, "IGDBClient", FakeIGDBClient)
     monkeypatch.setattr(cli_mod, "SteamClient", FakeSteamClient)
-    monkeypatch.setattr(cli_mod, "load_credentials", lambda _p: {"igdb": {"client_id": "x", "client_secret": "y"}})
+    monkeypatch.setattr(
+        cli_mod, "load_credentials", lambda _p: {"igdb": {"client_id": "x", "client_secret": "y"}}
+    )
 
     input_csv = tmp_path / "Games_User.csv"
     output_csv = tmp_path / "Games_Catalog.csv"

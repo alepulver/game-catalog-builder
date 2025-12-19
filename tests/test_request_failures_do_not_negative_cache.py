@@ -19,4 +19,3 @@ def test_steam_request_failure_does_not_negative_cache(tmp_path, monkeypatch):
     assert client.search_appid("Borderlands") is None
     # If request failures were negative-cached, the second call would not retry.
     assert calls["storesearch"] == 6  # 2 calls * 3 retries
-

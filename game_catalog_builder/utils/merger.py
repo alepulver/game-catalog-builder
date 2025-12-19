@@ -71,8 +71,11 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
     steam_cols = [c for c in df.columns if c.startswith("Steam_")]
     steamspy_cols = [c for c in df.columns if c.startswith("SteamSpy_")]
     hltb_cols = [c for c in df.columns if c.startswith("HLTB_")]
+    score_cols = [c for c in df.columns if c.startswith("Score_")]
 
-    ordered = personal_cols + rawg_cols + igdb_cols + steam_cols + steamspy_cols + hltb_cols
+    ordered = (
+        personal_cols + score_cols + rawg_cols + igdb_cols + steam_cols + steamspy_cols + hltb_cols
+    )
 
     existing = [c for c in ordered if c in df.columns]
     remaining = [c for c in df.columns if c not in existing]

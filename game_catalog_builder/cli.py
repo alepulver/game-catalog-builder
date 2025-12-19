@@ -15,7 +15,6 @@ from queue import Queue
 
 import pandas as pd
 
-from .config import CLI, IGDB, MATCHING, RAWG, STEAM, STEAMSPY
 from .clients import (
     HLTBClient,
     IGDBClient,
@@ -23,6 +22,7 @@ from .clients import (
     SteamClient,
     SteamSpyClient,
 )
+from .config import CLI, IGDB, MATCHING, RAWG, STEAM, STEAMSPY
 from .utils import (
     IDENTITY_NOT_FOUND,
     PUBLIC_DEFAULT_COLS,
@@ -50,12 +50,17 @@ def clear_prefixed_columns(df: pd.DataFrame, idx: int, prefix: str) -> None:
 EVAL_COLUMNS = [
     "RAWG_MatchedName",
     "RAWG_MatchScore",
+    "RAWG_MatchedYear",
     "IGDB_MatchedName",
     "IGDB_MatchScore",
+    "IGDB_MatchedYear",
     "Steam_MatchedName",
     "Steam_MatchScore",
+    "Steam_MatchedYear",
     "HLTB_MatchedName",
     "HLTB_MatchScore",
+    "HLTB_MatchedYear",
+    "HLTB_MatchedPlatforms",
     "ReviewTags",
     "MatchConfidence",
     # Legacy column kept only so we can drop it from older CSVs.
@@ -226,6 +231,29 @@ def fill_eval_tags(
                 out_set.add(b)
         return out_set
 
+    def _platforms_from_hltb(obj: object) -> set[str]:
+        if not isinstance(obj, dict):
+            return set()
+        return _platforms_from_csv_list(str(obj.get("HLTB_Platforms", "") or ""))
+
+    def _genres_from_rawg(obj: object) -> set[str]:
+        if not isinstance(obj, dict):
+            return set()
+        out_set: set[str] = set()
+        for g in obj.get("genres", []) or []:
+            if not isinstance(g, dict):
+                continue
+            name = str(g.get("name", "") or "").strip()
+            if name:
+                out_set.add(normalize_game_name(name))
+        return out_set
+
+    def _genres_from_csv_list(s: str) -> set[str]:
+        out_set: set[str] = set()
+        for part in [p.strip() for p in str(s or "").split(",") if p.strip()]:
+            out_set.add(normalize_game_name(part))
+        return {x for x in out_set if x}
+
     def _platforms_from_steam(details: object) -> set[str]:
         if not isinstance(details, dict):
             return set()
@@ -316,6 +344,7 @@ def fill_eval_tags(
         # High signal metadata checks (requires cached provider payloads).
         years: dict[str, int] = {}
         platforms: dict[str, set[str]] = {}
+        genres: dict[str, set[str]] = {}
 
         if clients and isinstance(clients, dict):
             if include_rawg:
@@ -327,6 +356,7 @@ def fill_eval_tags(
                     if y is not None:
                         years["rawg"] = y
                     platforms["rawg"] = _platforms_from_rawg(rawg_obj)
+                    genres["rawg"] = _genres_from_rawg(rawg_obj)
 
             if include_igdb:
                 igdb_id = str(row.get("IGDB_ID", "") or "").strip()
@@ -340,6 +370,9 @@ def fill_eval_tags(
                         platforms["igdb"] = _platforms_from_csv_list(
                             str(igdb_obj.get("IGDB_Platforms", "") or "")
                         )
+                        genres["igdb"] = _genres_from_csv_list(
+                            str(igdb_obj.get("IGDB_Genres", "") or "")
+                        )
 
             if include_steam:
                 steam_id = str(row.get("Steam_AppID", "") or "").strip()
@@ -349,11 +382,24 @@ def fill_eval_tags(
                         appid = int(steam_id)
                     except ValueError:
                         appid = None
-                    details = steam_client.get_app_details(appid) if steam_client and appid else None
+                    details = (
+                        steam_client.get_app_details(appid) if steam_client and appid else None
+                    )
                     y = _steam_year(details)
                     if y is not None:
                         years["steam"] = y
                     platforms["steam"] = _platforms_from_steam(details)
+
+            if include_hltb:
+                hltb_id = str(row.get("HLTB_ID", "") or "").strip()
+                if hltb_id and hltb_id != IDENTITY_NOT_FOUND:
+                    hltb_client = clients.get("hltb")
+                    hltb_obj = hltb_client.get_by_id(hltb_id) if hltb_client else None
+                    if isinstance(hltb_obj, dict):
+                        y = _int_year(hltb_obj.get("HLTB_ReleaseYear", ""))
+                        if y is not None:
+                            years["hltb"] = y
+                        platforms["hltb"] = _platforms_from_hltb(hltb_obj)
 
             # Cross-provider Steam AppID disagreements:
             # - IGDB can expose a Steam uid under external_games.
@@ -403,12 +449,48 @@ def fill_eval_tags(
                 tags.append("year_disagree")
                 has_low_issue = True
 
+        if "rawg" in genres and "igdb" in genres and genres["rawg"] and genres["igdb"]:
+            if genres["rawg"].isdisjoint(genres["igdb"]):
+                tags.append("genre_disagree")
+                has_medium_issue = True
+
+        if "hltb" in years and ("rawg" in years or "igdb" in years):
+            # HLTB can occasionally use a re-release year; treat disagreement as strong only when
+            # RAWG/IGDB agree with each other.
+            disagree_rawg = "rawg" in years and abs(years["hltb"] - years["rawg"]) >= 2
+            disagree_igdb = "igdb" in years and abs(years["hltb"] - years["igdb"]) >= 2
+            if disagree_rawg or disagree_igdb:
+                tags.append("year_disagree_hltb")
+                if "rawg" in years and "igdb" in years and abs(years["rawg"] - years["igdb"]) < 2:
+                    if disagree_rawg and disagree_igdb:
+                        has_low_issue = True
+                    else:
+                        has_medium_issue = True
+                else:
+                    has_medium_issue = True
+
         if "steam" in platforms:
             for other in ("rawg", "igdb"):
                 if other in platforms and platforms["steam"] and platforms[other]:
                     if platforms["steam"].isdisjoint(platforms[other]):
                         tags.append(f"platform_disagree:steam_{other}")
                         has_low_issue = True
+
+        if "hltb" in platforms and platforms["hltb"]:
+            disagrees: list[str] = []
+            for other in ("rawg", "igdb"):
+                if (
+                    other in platforms
+                    and platforms[other]
+                    and platforms["hltb"].isdisjoint(platforms[other])
+                ):
+                    disagrees.append(other)
+            if disagrees:
+                tags.append("platform_disagree_hltb")
+                if "rawg" in disagrees and "igdb" in disagrees:
+                    has_low_issue = True
+                else:
+                    has_medium_issue = True
 
         if include_steam:
             steam_name = str(row.get("Steam_MatchedName", "") or "").strip()
@@ -545,8 +627,12 @@ def process_steam_and_steamspy_streaming(
     Steam discovers appids and pushes (name, appid) into a queue; SteamSpy consumes appids as soon
     as they are available, without waiting for Steam to finish the whole file.
     """
-    steam_client = SteamClient(cache_path=steam_cache_path, min_interval_s=STEAM.storesearch_min_interval_s)
-    steamspy_client = SteamSpyClient(cache_path=steamspy_cache_path, min_interval_s=STEAMSPY.min_interval_s)
+    steam_client = SteamClient(
+        cache_path=steam_cache_path, min_interval_s=STEAM.storesearch_min_interval_s
+    )
+    steamspy_client = SteamSpyClient(
+        cache_path=steamspy_cache_path, min_interval_s=STEAMSPY.min_interval_s
+    )
 
     df_steam = load_or_merge_dataframe(input_csv, steam_output_csv)
     df_steamspy = read_csv(input_csv)
@@ -679,10 +765,14 @@ def process_steam_and_steamspy_streaming(
                 steamspy_cols = base_cols + [
                     c for c in df_steamspy.columns if c.startswith("SteamSpy_")
                 ]
+                if "Score_SteamSpy_100" in df_steamspy.columns:
+                    steamspy_cols.append("Score_SteamSpy_100")
                 write_csv(df_steamspy[steamspy_cols], steamspy_output_csv)
 
         base_cols = [c for c in ("RowId", "Name") if c in df_steamspy.columns]
         steamspy_cols = base_cols + [c for c in df_steamspy.columns if c.startswith("SteamSpy_")]
+        if "Score_SteamSpy_100" in df_steamspy.columns:
+            steamspy_cols.append("Score_SteamSpy_100")
         write_csv(df_steamspy[steamspy_cols], steamspy_output_csv)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -775,12 +865,16 @@ def process_igdb(
             # Save only Name + IGDB columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
+            if "Score_IGDB_100" in df.columns:
+                igdb_cols.append("Score_IGDB_100")
             write_csv(df[igdb_cols], output_csv)
 
         if len(pending_by_id) >= CLI.igdb_flush_batch_size:
             _flush_pending()
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
+            if "Score_IGDB_100" in df.columns:
+                igdb_cols.append("Score_IGDB_100")
             write_csv(df[igdb_cols], output_csv)
 
     _flush_pending()
@@ -788,6 +882,8 @@ def process_igdb(
     # Save only Name + IGDB columns
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
+    if "Score_IGDB_100" in df.columns:
+        igdb_cols.append("Score_IGDB_100")
     write_csv(df[igdb_cols], output_csv)
     logging.info(f"[IGDB] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ IGDB completed: {output_csv}")
@@ -853,11 +949,15 @@ def process_rawg(
             # Save only Name + RAWG columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             rawg_cols = base_cols + [c for c in df.columns if c.startswith("RAWG_")]
+            if "Score_RAWG_100" in df.columns:
+                rawg_cols.append("Score_RAWG_100")
             write_csv(df[rawg_cols], output_csv)
 
     # Save only Name + RAWG columns
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     rawg_cols = base_cols + [c for c in df.columns if c.startswith("RAWG_")]
+    if "Score_RAWG_100" in df.columns:
+        rawg_cols.append("Score_RAWG_100")
     write_csv(df[rawg_cols], output_csv)
     logging.info(f"[RAWG] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ RAWG completed: {output_csv}")
@@ -878,9 +978,26 @@ def process_steam(
 
     df = load_or_merge_dataframe(input_csv, output_csv)
 
-    processed = 0
+    pending: dict[int, list[int]] = {}
+
+    def _flush_pending() -> None:
+        if not pending:
+            return
+        appids = list(pending.keys())
+        details_by_id = client.get_app_details_many(appids)
+        for appid, idxs in list(pending.items()):
+            details = details_by_id.get(appid)
+            if not isinstance(details, dict):
+                continue
+            fields = client.extract_fields(appid, details)
+            for idx in idxs:
+                for k, v in fields.items():
+                    df.at[idx, k] = v
+        pending.clear()
+
+    queued = 0
     for idx, row in df.iterrows():
-        name = row.get("Name", "").strip()
+        name = str(row.get("Name", "") or "").strip()
         if not name:
             continue
 
@@ -901,27 +1018,23 @@ def process_steam(
             else:
                 continue
 
-        if override_appid:
-            appid = int(override_appid)
-        else:
+        appid_str = override_appid or str(row.get("Steam_AppID", "") or "").strip()
+        if not appid_str:
             logging.info(f"[STEAM] Processing: {name}")
             search = client.search_appid(name)
-            if not search:
+            if not search or not search.get("id"):
                 continue
-            appid = search.get("id")
-            if not appid:
-                continue
+            appid_str = str(search.get("id") or "").strip()
+            df.at[idx, "Steam_AppID"] = appid_str
+        try:
+            appid = int(appid_str)
+        except ValueError:
+            continue
 
-        cached_details = client.get_app_details(int(appid))
-        if cached_details:
-            fields = client.extract_fields(int(appid), cached_details)
-            for k, v in fields.items():
-                df.at[idx, k] = v
-            processed += 1
-        else:
-            pending.setdefault(int(appid), []).append(int(idx))
+        pending.setdefault(appid, []).append(int(idx))
+        queued += 1
 
-        if processed % 10 == 0:
+        if queued % 10 == 0:
             # Save only Name + Steam columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             steam_cols = base_cols + [c for c in df.columns if c.startswith("Steam_")]
@@ -988,11 +1101,15 @@ def process_steamspy(
             # Save only Name + SteamSpy columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             steamspy_cols = base_cols + [c for c in df.columns if c.startswith("SteamSpy_")]
+            if "Score_SteamSpy_100" in df.columns:
+                steamspy_cols.append("Score_SteamSpy_100")
             write_csv(df[steamspy_cols], output_csv)
 
     # Save only Name + SteamSpy columns
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     steamspy_cols = base_cols + [c for c in df.columns if c.startswith("SteamSpy_")]
+    if "Score_SteamSpy_100" in df.columns:
+        steamspy_cols.append("Score_SteamSpy_100")
     write_csv(df[steamspy_cols], output_csv)
     logging.info(f"[STEAMSPY] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ SteamSpy completed: {output_csv}")
@@ -1045,11 +1162,15 @@ def process_hltb(
             # Save only Name + HLTB columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             hltb_cols = base_cols + [c for c in df.columns if c.startswith("HLTB_")]
+            if "Score_HLTB_100" in df.columns:
+                hltb_cols.append("Score_HLTB_100")
             write_csv(df[hltb_cols], output_csv)
 
     # Save only Name + HLTB columns
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     hltb_cols = base_cols + [c for c in df.columns if c.startswith("HLTB_")]
+    if "Score_HLTB_100" in df.columns:
+        hltb_cols.append("Score_HLTB_100")
     write_csv(df[hltb_cols], output_csv)
     logging.info(f"[HLTB] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ HLTB completed: {output_csv}")
@@ -1413,7 +1534,9 @@ def _legacy_enrich(argv: list[str]) -> None:
     # If we had to create RowIds, avoid overwriting the user's original file: write a new input
     # next to the identity map (under the output dir) and use it from now on.
     if created > 0 or "RowId" not in before.columns:
-        default_out_dir = (paths.data_experiments / "output") if is_experiment else paths.data_output
+        default_out_dir = (
+            (paths.data_experiments / "output") if is_experiment else paths.data_output
+        )
         safe_input = (
             args.output or default_out_dir
         ) / f"{input_csv.stem}_with_rowid{input_csv.suffix}"
@@ -1422,10 +1545,14 @@ def _legacy_enrich(argv: list[str]) -> None:
         logging.info(f"ℹ Use this input file going forward: {safe_input}")
         input_csv = safe_input
 
-    output_dir = args.output or ((paths.data_experiments / "output") if is_experiment else paths.data_output)
+    output_dir = args.output or (
+        (paths.data_experiments / "output") if is_experiment else paths.data_output
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = args.cache or ((paths.data_experiments / "cache") if is_experiment else paths.data_cache)
+    cache_dir = args.cache or (
+        (paths.data_experiments / "cache") if is_experiment else paths.data_cache
+    )
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Read pinned IDs/queries directly from the input CSV when present.
@@ -1626,7 +1753,9 @@ def _command_normalize(args: argparse.Namespace) -> None:
         paths, args.log_file, args.debug, command_name="import", input_path=args.input
     )
     is_experiment = _is_under_dir(args.input, paths.data_experiments)
-    cache_dir = args.cache or ((paths.data_experiments / "cache") if is_experiment else paths.data_cache)
+    cache_dir = args.cache or (
+        (paths.data_experiments / "cache") if is_experiment else paths.data_cache
+    )
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     if args.out:
@@ -1695,6 +1824,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     if include_diagnostics:
                         df.at[idx, "RAWG_MatchedName"] = ""
                         df.at[idx, "RAWG_MatchScore"] = ""
+                        df.at[idx, "RAWG_MatchedYear"] = ""
                     continue
                 if rawg_id:
                     if not include_diagnostics:
@@ -1706,10 +1836,12 @@ def _command_normalize(args: argparse.Namespace) -> None:
                         df.at[idx, "RAWG_ID"] = str(obj.get("id") or "").strip()
                 if include_diagnostics and obj and isinstance(obj, dict):
                     matched = str(obj.get("name") or "").strip()
+                    released = str(obj.get("released") or "").strip()
                     df.at[idx, "RAWG_MatchedName"] = matched
                     df.at[idx, "RAWG_MatchScore"] = (
                         str(fuzzy_score(name, matched)) if matched else ""
                     )
+                    df.at[idx, "RAWG_MatchedYear"] = released[:4] if len(released) >= 4 else ""
 
     if "igdb" in sources:
         client_id = credentials.get("igdb", {}).get("client_id", "")
@@ -1733,6 +1865,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     if include_diagnostics:
                         df.at[idx, "IGDB_MatchedName"] = ""
                         df.at[idx, "IGDB_MatchScore"] = ""
+                        df.at[idx, "IGDB_MatchedYear"] = ""
                     continue
                 if igdb_id:
                     if not include_diagnostics:
@@ -1748,6 +1881,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     df.at[idx, "IGDB_MatchScore"] = (
                         str(fuzzy_score(name, matched)) if matched else ""
                     )
+                    df.at[idx, "IGDB_MatchedYear"] = str(obj.get("IGDB_Year") or "").strip()
 
     if "steam" in sources:
         client = SteamClient(
@@ -1767,13 +1901,16 @@ def _command_normalize(args: argparse.Namespace) -> None:
                 if include_diagnostics:
                     df.at[idx, "Steam_MatchedName"] = ""
                     df.at[idx, "Steam_MatchScore"] = ""
+                    df.at[idx, "Steam_MatchedYear"] = ""
                 continue
             if steam_id == IDENTITY_NOT_FOUND:
                 if include_diagnostics:
                     df.at[idx, "Steam_MatchedName"] = ""
                     df.at[idx, "Steam_MatchScore"] = ""
+                    df.at[idx, "Steam_MatchedYear"] = ""
                 continue
             matched = ""
+            matched_year = ""
             if steam_id:
                 if not include_diagnostics:
                     continue
@@ -1781,8 +1918,20 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     details = client.get_app_details(int(steam_id))
                 except ValueError:
                     details = None
-                matched = str((details or {}).get("name") or "").strip()
-            else:
+                details_type = str((details or {}).get("type") or "").strip().lower()
+                if not details or (details_type and details_type != "game"):
+                    logging.warning(
+                        f"[STEAM] Ignoring pinned Steam_AppID for '{name}': appid={steam_id} "
+                        f"type={details_type or 'unknown'}"
+                    )
+                    df.at[idx, "Steam_AppID"] = ""
+                    steam_id = ""
+                else:
+                    matched = str((details or {}).get("name") or "").strip()
+                    release = (details or {}).get("release_date", {}) or {}
+                    m = re.search(r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or ""))
+                    matched_year = m.group(1) if m else ""
+            if not steam_id:
                 # Cross-provider hints: try to infer Steam AppID from already-pinned providers.
                 inferred = ""
                 igdb_id = str(row.get("IGDB_ID", "") or "").strip()
@@ -1794,35 +1943,70 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     if rawg_id and rawg_id != IDENTITY_NOT_FOUND and diag_clients.get("rawg"):
                         rawg_obj = diag_clients["rawg"].get_by_id(rawg_id)
                         inferred = _extract_steam_appid_from_rawg(rawg_obj)
-                if inferred.isdigit():
-                    inferred_int = int(inferred)
+                inferred_ids = [
+                    s.strip()
+                    for s in re.split(r"[,\s]+", inferred)
+                    if s.strip() and s.strip().isdigit()
+                ]
+                if inferred_ids:
+                    inferred_int = int(inferred_ids[0])
                     details = client.get_app_details(inferred_int)
                     details_type = str((details or {}).get("type") or "").strip().lower()
                     if not details or (details_type and details_type != "game"):
                         logging.warning(
-                            f"[STEAM] Ignoring inferred Steam AppID from other provider for '{name}': "
-                            f"appid={inferred} type={details_type or 'unknown'}"
+                            f"[STEAM] Ignoring inferred Steam AppID for '{name}': "
+                            f"appid={inferred_ids[0]} type={details_type or 'unknown'}"
                         )
                     else:
-                        df.at[idx, "Steam_AppID"] = inferred
-                        steam_id = inferred
+                        df.at[idx, "Steam_AppID"] = str(inferred_int)
+                        steam_id = str(inferred_int)
                         if include_diagnostics:
                             matched = str((details or {}).get("name") or "").strip()
                             df.at[idx, "Steam_MatchedName"] = matched
                             df.at[idx, "Steam_MatchScore"] = (
                                 str(fuzzy_score(name, matched)) if matched else ""
                             )
+                            release = (details or {}).get("release_date", {}) or {}
+                            m = re.search(
+                                r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or "")
+                            )
+                            df.at[idx, "Steam_MatchedYear"] = m.group(1) if m else ""
                         # If we successfully inferred a Steam AppID, do not overwrite it by running
                         # a secondary name-based search (which can surface DLC/soundtrack matches).
                         continue
 
                 search = client.search_appid(name, year_hint=_year_hint(row))
-                matched = str((search or {}).get("name") or "").strip()
                 if search and search.get("id") is not None:
-                    df.at[idx, "Steam_AppID"] = str(search.get("id") or "").strip()
+                    appid_str = str(search.get("id") or "").strip()
+                    df.at[idx, "Steam_AppID"] = appid_str
+
+                    if include_diagnostics and appid_str.isdigit():
+                        details = client.get_app_details(int(appid_str))
+                        details_type = str((details or {}).get("type") or "").strip().lower()
+                        if not details or (details_type and details_type != "game"):
+                            logging.warning(
+                                f"[STEAM] Ignoring Steam search result for '{name}': "
+                                f"appid={appid_str} type={details_type or 'unknown'}"
+                            )
+                            df.at[idx, "Steam_AppID"] = ""
+                            matched = ""
+                            matched_year = ""
+                        else:
+                            matched = str((details or {}).get("name") or "").strip()
+                            release = (details or {}).get("release_date", {}) or {}
+                            m = re.search(
+                                r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or "")
+                            )
+                            matched_year = m.group(1) if m else ""
+                    else:
+                        matched = str((search or {}).get("name") or "").strip()
+                else:
+                    matched = ""
+                    matched_year = ""
             if include_diagnostics:
                 df.at[idx, "Steam_MatchedName"] = matched
                 df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+                df.at[idx, "Steam_MatchedYear"] = matched_year
 
     if "hltb" in sources:
         client = HLTBClient(cache_path=cache_dir / "hltb_cache.json")
@@ -1840,6 +2024,8 @@ def _command_normalize(args: argparse.Namespace) -> None:
                 if include_diagnostics:
                     df.at[idx, "HLTB_MatchedName"] = ""
                     df.at[idx, "HLTB_MatchScore"] = ""
+                    df.at[idx, "HLTB_MatchedYear"] = ""
+                    df.at[idx, "HLTB_MatchedPlatforms"] = ""
                 continue
 
             if hltb_id and not include_diagnostics:
@@ -1854,6 +2040,12 @@ def _command_normalize(args: argparse.Namespace) -> None:
                 matched = str((data or {}).get("HLTB_Name") or "").strip()
                 df.at[idx, "HLTB_MatchedName"] = matched
                 df.at[idx, "HLTB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+                df.at[idx, "HLTB_MatchedYear"] = str(
+                    (data or {}).get("HLTB_ReleaseYear") or ""
+                ).strip()
+                df.at[idx, "HLTB_MatchedPlatforms"] = str(
+                    (data or {}).get("HLTB_Platforms") or ""
+                ).strip()
 
             processed += 1
             if processed % 25 == 0:
@@ -1892,10 +2084,14 @@ def _command_enrich(args: argparse.Namespace) -> None:
     if not input_csv.exists():
         raise SystemExit(f"Input file not found: {input_csv}")
 
-    output_dir = args.output or ((paths.data_experiments / "output") if is_experiment else paths.data_output)
+    output_dir = args.output or (
+        (paths.data_experiments / "output") if is_experiment else paths.data_output
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = args.cache or ((paths.data_experiments / "cache") if is_experiment else paths.data_cache)
+    cache_dir = args.cache or (
+        (paths.data_experiments / "cache") if is_experiment else paths.data_cache
+    )
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     merge_output = args.merge_output or (output_dir / "Games_Enriched.csv")
@@ -2049,7 +2245,8 @@ def _command_enrich(args: argparse.Namespace) -> None:
     if args.validate:
         validate_out = args.validate_output or (output_dir / "Validation_Report.csv")
         merged = read_csv(merge_output)
-        report = generate_validation_report(merged)
+        enabled_for_validation = {s.strip().lower() for s in sources_to_process if s.strip()}
+        report = generate_validation_report(merged, enabled_providers=enabled_for_validation)
         write_csv(report, validate_out)
         logging.info(f"✔ Validation report generated: {validate_out}")
 
@@ -2124,8 +2321,7 @@ def main(argv: list[str] | None = None) -> None:
             type=str,
             default="all",
             help=(
-                "Which providers to match for IDs (e.g. 'core' or 'igdb,rawg,steam') "
-                "(default: all)"
+                "Which providers to match for IDs (e.g. 'core' or 'igdb,rawg,steam') (default: all)"
             ),
         )
         p_import.add_argument(

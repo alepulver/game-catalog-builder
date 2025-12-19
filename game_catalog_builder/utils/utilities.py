@@ -12,9 +12,9 @@ from typing import Any, Callable
 
 import pandas as pd
 import yaml
+from rapidfuzz import fuzz
 
 from ..config import RETRY
-from rapidfuzz import fuzz
 
 IDENTITY_NOT_FOUND = "__NOT_FOUND__"
 
@@ -45,6 +45,7 @@ def extract_year_hint(text: str) -> int | None:
     if 1900 <= year <= 2100:
         return year
     return None
+
 
 # ----------------------------
 # Paths / Folder structure
@@ -594,15 +595,15 @@ def with_retries(
                                 f"[NETWORK] {context}: {type(last_exc).__name__}: {last_exc}"
                             )
                         elif isinstance(last_exc, http_types):
-                            logging.error(f"[HTTP] {context}: {type(last_exc).__name__}: {last_exc}")
+                            logging.error(
+                                f"[HTTP] {context}: {type(last_exc).__name__}: {last_exc}"
+                            )
                         else:
                             logging.error(
                                 f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}"
                             )
                     except Exception:
-                        logging.error(
-                            f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}"
-                        )
+                        logging.error(f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}")
                 return on_fail_return
             sleep = base_sleep_s * (2**attempt) + random.uniform(0, jitter_s)
             if retry_after_s is not None and retry_after_s > 0:
@@ -688,6 +689,7 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "RAWG_Platforms": "",
     "RAWG_Tags": "",
     "RAWG_Rating": "",
+    "Score_RAWG_100": "",
     "RAWG_RatingsCount": "",
     "RAWG_Metacritic": "",
     # IGDB
@@ -703,6 +705,9 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "IGDB_Engine": "",
     "IGDB_Companies": "",
     "IGDB_SteamAppID": "",
+    "IGDB_Rating": "",
+    "IGDB_RatingCount": "",
+    "Score_IGDB_100": "",
     # Steam
     "Steam_AppID": "",
     "Steam_Name": "",
@@ -713,14 +718,19 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "Steam_ReviewPercent": "",
     "Steam_Price": "",
     "Steam_Categories": "",
+    "Steam_Metacritic": "",
     # SteamSpy
     "SteamSpy_Owners": "",
     "SteamSpy_Players": "",
     "SteamSpy_CCU": "",
     "SteamSpy_PlaytimeAvg": "",
+    "SteamSpy_Positive": "",
+    "SteamSpy_Negative": "",
+    "Score_SteamSpy_100": "",
     # HLTB
     "HLTB_Name": "",
     "HLTB_Main": "",
     "HLTB_Extra": "",
     "HLTB_Completionist": "",
+    "Score_HLTB_100": "",
 }

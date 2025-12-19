@@ -16,8 +16,10 @@ def test_extract_steam_appid_from_rawg_store_url() -> None:
 
     rawg_obj = {
         "stores": [
-            {"store": {"id": 1, "name": "Steam"}, "url": "https://store.steampowered.com/app/620/DOOM/"},
+            {
+                "store": {"id": 1, "name": "Steam"},
+                "url": "https://store.steampowered.com/app/620/DOOM/",
+            },
         ]
     }
     assert _extract_steam_appid_from_rawg(rawg_obj) == "620"
-

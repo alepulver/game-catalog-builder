@@ -15,4 +15,3 @@ def test_extract_year_hint_ignores_non_year_numbers():
     assert extract_year_hint("007 Legends") is None
     assert extract_year_hint("NBA 2K24") is None
     assert extract_year_hint("") is None
-

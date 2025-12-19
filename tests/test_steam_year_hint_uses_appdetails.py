@@ -1,22 +1,33 @@
 from __future__ import annotations
 
+import json
+
+
+def _appids_from_url(u: str) -> str:
+    if "appids=" not in u:
+        return ""
+    return u.split("appids=", 1)[1].split("&", 1)[0]
+
+
+class Resp:
+    status_code = 200
+    headers: dict[str, str] = {}
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        # Provide a deep copy so tests don't accidentally rely on shared dict mutation.
+        return json.loads(json.dumps(self._payload))
+
 
 def test_steam_search_prefers_release_year_via_appdetails(tmp_path, monkeypatch):
-    import json
-
     from game_catalog_builder.clients.steam_client import SteamClient
 
     def fake_get(url, params=None, timeout=None):
-        class Resp:
-            def __init__(self, payload):
-                self._payload = payload
-
-            def raise_for_status(self):
-                return None
-
-            def json(self):
-                return json.loads(json.dumps(self._payload))
-
         if "storesearch" in url:
             return Resp(
                 {
@@ -29,7 +40,7 @@ def test_steam_search_prefers_release_year_via_appdetails(tmp_path, monkeypatch)
             )
 
         if "appdetails" in url:
-            appids = str((params or {}).get("appids"))
+            appids = _appids_from_url(url)
             if appids == "100":
                 return Resp(
                     {
@@ -69,21 +80,9 @@ def test_steam_search_prefers_release_year_via_appdetails(tmp_path, monkeypatch)
 
 
 def test_steam_search_skips_non_game_types(tmp_path, monkeypatch):
-    import json
-
     from game_catalog_builder.clients.steam_client import SteamClient
 
     def fake_get(url, params=None, timeout=None):
-        class Resp:
-            def __init__(self, payload):
-                self._payload = payload
-
-            def raise_for_status(self):
-                return None
-
-            def json(self):
-                return json.loads(json.dumps(self._payload))
-
         if "storesearch" in url:
             return Resp(
                 {
@@ -95,7 +94,7 @@ def test_steam_search_skips_non_game_types(tmp_path, monkeypatch):
                 }
             )
         if "appdetails" in url:
-            appids = str((params or {}).get("appids"))
+            appids = _appids_from_url(url)
             if appids == "111":
                 return Resp(
                     {
@@ -137,21 +136,9 @@ def test_steam_search_skips_non_game_types(tmp_path, monkeypatch):
 def test_steam_search_prefers_base_or_edition_over_sequel_when_query_has_no_number(
     tmp_path, monkeypatch
 ):
-    import json
-
     from game_catalog_builder.clients.steam_client import SteamClient
 
     def fake_get(url, params=None, timeout=None):
-        class Resp:
-            def __init__(self, payload):
-                self._payload = payload
-
-            def raise_for_status(self):
-                return None
-
-            def json(self):
-                return json.loads(json.dumps(self._payload))
-
         if "storesearch" in url:
             return Resp(
                 {
@@ -166,7 +153,7 @@ def test_steam_search_prefers_base_or_edition_over_sequel_when_query_has_no_numb
             )
 
         if "appdetails" in url:
-            appids = str((params or {}).get("appids"))
+            appids = _appids_from_url(url)
             names = {
                 "100": ("Borderlands Game of the Year Enhanced", "20 Sep, 2019"),
                 "200": ("Borderlands 2", "18 Sep, 2012"),
@@ -193,3 +180,83 @@ def test_steam_search_prefers_base_or_edition_over_sequel_when_query_has_no_numb
     best = client.search_appid("Borderlands")
     assert best is not None
     assert best["id"] == 100
+
+
+def test_steam_search_prefers_game_over_soundtrack_via_details(monkeypatch, tmp_path):
+    from game_catalog_builder.clients.steam_client import SteamClient
+
+    # storesearch returns a soundtrack-ish item and the real game.
+    def fake_get(url, params=None, timeout=None):
+        assert "storesearch" in url or "appdetails" in url
+
+        if "storesearch" in url:
+            return Resp(
+                {
+                    "items": [
+                        {"id": 1, "name": "Half-Life 2: Episode Two Soundtrack", "type": "app"},
+                        {"id": 2, "name": "Half-Life 2: Episode Two", "type": "app"},
+                    ]
+                }
+            )
+
+        appid = _appids_from_url(url)
+        if appid == "1":
+            return Resp(
+                {
+                    "1": {
+                        "success": True,
+                        "data": {
+                            "type": "music",
+                            "name": "Half-Life 2: Episode Two Soundtrack",
+                        },
+                    }
+                }
+            )
+        if appid == "2":
+            return Resp(
+                {
+                    "2": {
+                        "success": True,
+                        "data": {"type": "game", "name": "Half-Life 2: Episode Two"},
+                    }
+                }
+            )
+        return Resp({appid: {"success": False}})
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
+    best = client.search_appid("Half-Life 2: Episode Two")
+    assert best is not None
+    assert best["id"] == 2
+
+
+def test_steam_rejects_dlc_type_when_appdetails_type_is_not_game(tmp_path, monkeypatch):
+    from game_catalog_builder.clients.steam_client import SteamClient
+
+    def fake_get(url, params=None, timeout=None):
+        if "storesearch" in url:
+            return Resp(
+                {"items": [{"id": 2112230, "name": "Car Mechanic Simulator 2021: Aston Martin"}]}
+            )
+
+        if "appdetails" in url:
+            appids = _appids_from_url(url)
+            return Resp(
+                {
+                    appids: {
+                        "success": True,
+                        "data": {
+                            "name": "Car Mechanic Simulator 2021 - Aston Martin DLC",
+                            "type": "dlc",
+                        },
+                    }
+                }
+            )
+
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
+    assert client.search_appid("Car Mechanic Simulator 2021") is None
