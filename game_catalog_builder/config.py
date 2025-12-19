@@ -55,6 +55,12 @@ class SteamSpyConfig:
 
 
 @dataclass(frozen=True)
+class HLTBConfig:
+    # Stop trying additional query variants once we have a high-confidence match.
+    early_stop_score: int = 95
+
+
+@dataclass(frozen=True)
 class CLIConfig:
     igdb_flush_batch_size: int = 50
     steam_flush_batch_size: int = 25
@@ -69,4 +75,5 @@ STEAM = SteamConfig()
 IGDB = IGDBConfig()
 RAWG = RAWGConfig()
 STEAMSPY = SteamSpyConfig()
+HLTB = HLTBConfig()
 CLI = CLIConfig()

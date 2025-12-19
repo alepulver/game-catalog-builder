@@ -125,6 +125,11 @@ RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must 
   - `ReviewTags` (compact reasons to review)
   - `MatchConfidence` (`HIGH` / `MEDIUM` / `LOW`)
 
+`ReviewTags` includes a small set of high-signal tags to make review actionable without adding lots of columns:
+- Consensus/outliers: `provider_consensus:*`, `provider_outlier:*`, `provider_no_consensus`
+- Metadata outliers: `year_outlier:*`, `platform_outlier:*` (and `*_no_consensus`)
+- Actionable rollups: `likely_wrong:*`, `ambiguous_title_year`
+
 It refreshes match diagnostics by fetching the provider name for any pinned IDs. Evaluation columns
 are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without evaluation
 columns.

@@ -157,8 +157,6 @@ class RAWGClient:
                         "released": r.get("released", ""),
                     }
                 )
-                # Cache the raw payload by id so selection doesn't need to store duplicates.
-                self._by_id[self._id_key(rid)] = r
             return out
 
         def _fetch(query_key: str, params: dict[str, Any]) -> list[dict[str, Any]] | None:
@@ -301,10 +299,9 @@ class RAWGClient:
 
         rawg_id = best.get("id")
         if rawg_id is not None:
-            cached = self._by_id.get(self._id_key(rawg_id))
-            if isinstance(cached, dict):
-                return cached
-            # Fallback: fetch details if the raw payload isn't available (e.g. partial migrations).
+            # Always go through get_by_id() so the cache is populated with the full RAWG game
+            # detail payload (search results are partial and omit fields like descriptions and
+            # alternative_names).
             return self.get_by_id(rawg_id)
         return None
 

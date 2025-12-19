@@ -43,6 +43,10 @@ def test_hltb_caches_empty_query_response(tmp_path, monkeypatch):
     client = HLTBClient(cache_path=tmp_path / "hltb_cache.json")
     monkeypatch.setattr(client.client, "search", fake_search)
 
+    # HLTB also tries lower/upper-case fallbacks if all variants return no candidates.
+    expected_first_calls = len(client._query_variants("No Such Game")) + 2
     assert client.search("No Such Game") is None
+    assert calls["search"] == expected_first_calls
     assert client.search("No Such Game") is None
-    assert calls["search"] == 1
+    # Second run must not hit the network again (negative cache).
+    assert calls["search"] == expected_first_calls

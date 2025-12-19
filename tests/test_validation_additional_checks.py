@@ -103,7 +103,7 @@ def test_validation_ignores_warhammer_40000_as_series_number() -> None:
     assert "series_disagree" not in row["ValidationTags"]
 
 
-def test_validation_flags_hltb_year_and_platform_disagreement() -> None:
+def test_validation_flags_year_and_platform_outliers() -> None:
     from game_catalog_builder.utils.validation import generate_validation_report
 
     df = pd.DataFrame(
@@ -127,5 +127,51 @@ def test_validation_flags_hltb_year_and_platform_disagreement() -> None:
     )
     report = generate_validation_report(df)
     row = report.iloc[0].to_dict()
-    assert "year_disagree_hltb" in row["ValidationTags"]
-    assert "platform_disagree_hltb" in row["ValidationTags"]
+    assert "year_outlier:hltb" in row["ValidationTags"]
+    assert "platform_outlier:hltb" in row["ValidationTags"]
+
+
+def test_validation_tags_include_provider_outlier_when_two_agree() -> None:
+    from game_catalog_builder.utils.validation import generate_validation_report
+
+    df = pd.DataFrame(
+        [
+            {
+                "Name": "Operation Flashpoint: Cold War Crisis",
+                "RAWG_Name": "Operation Flashpoint: Cold War Crisis",
+                "RAWG_Year": "2001",
+                "IGDB_Name": "Operation Flashpoint: Cold War Crisis",
+                "IGDB_Year": "2001",
+                "HLTB_Name": "Operation Flashpoint: Dragon Rising",
+                "HLTB_ReleaseYear": "2009",
+            }
+        ]
+    )
+    report = generate_validation_report(df)
+    tags = report.iloc[0]["ValidationTags"]
+    assert "provider_consensus:igdb+rawg" in tags
+    assert "provider_outlier:hltb" in tags
+    assert "likely_wrong:hltb" in tags
+
+
+def test_validation_tags_include_ambiguous_title_year_when_years_split() -> None:
+    from game_catalog_builder.utils.validation import generate_validation_report
+
+    df = pd.DataFrame(
+        [
+            {
+                "Name": "Doom",
+                "RAWG_Name": "Doom",
+                "IGDB_Name": "Doom",
+                "Steam_Name": "Doom",
+                "HLTB_Name": "Doom",
+                "RAWG_Year": "1993",
+                "IGDB_Year": "1993",
+                "Steam_ReleaseYear": "2016",
+                "HLTB_ReleaseYear": "2016",
+            }
+        ]
+    )
+    report = generate_validation_report(df)
+    tags = report.iloc[0]["ValidationTags"]
+    assert "ambiguous_title_year" in tags

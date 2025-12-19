@@ -328,6 +328,7 @@ Docs:
 | `website` | Official website | `string` | `"https://bethesda.net/game/doom"` | `doom-2016/rawg.detail.json` |
 | `description_raw` | Plain-text description | `string` | `"Return of the classic FPS, Doom (2016) acts as a reboot of the series and brings back the Doomslayer, protagonist of the original Doom games. In order to solve the energy crisi...` | `doom-2016/rawg.detail.json` |
 | `description` | HTML description | `string` | `"<p>Return of the classic FPS, Doom (2016) acts as a reboot of the series and brings back the Doomslayer, protagonist of the original Doom games. In order to solve the energy cr...` | `doom-2016/rawg.detail.json` |
+| `alternative_names` | Alternate/alias titles (array) | `array` | `[]` | `doom-2016/rawg.detail.json` |
 | `metacritic` | Metacritic score | `number` | `85` | `doom-2016/rawg.detail.json` |
 | `metacritic_url` | Metacritic URL | `string` | `""` | `doom-2016/rawg.detail.json` |
 | `rating` | RAWG rating | `number` | `4.38` | `doom-2016/rawg.detail.json` |
@@ -358,7 +359,6 @@ Docs:
 | `added_by_status.toplay` | `number` | `527` | `doom-2016/rawg.detail.json` |
 | `added_by_status.yet` | `number` | `602` | `doom-2016/rawg.detail.json` |
 | `additions_count` | `number` | `1` | `doom-2016/rawg.detail.json` |
-| `alternative_names` | `array` | `[]` | `doom-2016/rawg.detail.json` |
 | `background_image` | `string` | `"https://media.rawg.io/media/games/587/587588c64afbff80e6f444eb2e46f9da.jpg"` | `doom-2016/rawg.detail.json` |
 | `background_image_additional` | `string` | `"https://media.rawg.io/media/screenshots/d3b/d3b881ae214f9ad14724afc41b49dcea.jpg"` | `doom-2016/rawg.detail.json` |
 | `clip` | `null` | `null` | `doom-2016/rawg.detail.json` |
@@ -483,6 +483,7 @@ Docs:
 | `$[].total_rating` | Combined rating (0-100) when present | `number` | `86.13900362824366` | `doom-2016/igdb.games.search.json` |
 | `$[].total_rating_count` | Combined rating count when present | `number` | `1823` | `doom-2016/igdb.games.search.json` |
 | `$[].first_release_date` | First release date as unix timestamp (seconds) | `number` | `1463011200` | `doom-2016/igdb.games.search.json` |
+| `$[].alternative_names[].name` | Alternate/alias titles (when requested as alternative_names.name) | `` | `` | `` |
 | `$[].genres[]` | Genre ids (use genres.name to expand in-query) | `number` | `5` | `doom-2016/igdb.games.search.json` |
 | `$[].themes[]` | Theme ids (use themes.name to expand in-query) | `number` | `1` | `doom-2016/igdb.games.search.json` |
 | `$[].game_modes[]` | Game mode ids (use game_modes.name to expand in-query) | `number` | `1` | `doom-2016/igdb.games.search.json` |
@@ -869,7 +870,10 @@ Docs:
 | `main_extra` | Main + extras time (hours) | `number` | `16.44` | `doom-2016/hltb.best.json` |
 | `completionist` | Completionist time (hours) | `number` | `27.09` | `doom-2016/hltb.best.json` |
 | `profile_platform` | Platform string (sometimes present) | `` | `` | `` |
+| `profile_platforms` | Platform list (sometimes present) | `array` | `["Google Stadia", "Nintendo Switch", "PC", "PlayStation 4", "Xbox One"]` | `doom-2016/hltb.best.json` |
 | `release_world` | Release year (sometimes present) | `number` | `2016` | `doom-2016/hltb.best.json` |
+| `game_alias` | Alternate/alias title string (when present) | `string` | `"Doom, Doom 4, Doom 2016"` | `doom-2016/hltb.best.json` |
+| `game_web_link` | HLTB game URL (when present) | `string` | `"https://howlongtobeat.com/game/2708"` | `doom-2016/hltb.best.json` |
 
 #### Observed in examples (not yet described)
 
@@ -942,10 +946,8 @@ Docs:
 | `complexity_lvl_mp` | `boolean` | `true` | `doom-2016/hltb.best.json` |
 | `complexity_lvl_sp` | `boolean` | `true` | `doom-2016/hltb.best.json` |
 | `coop_time` | `number` | `4.59` | `doom-2016/hltb.best.json` |
-| `game_alias` | `string` | `"Doom, Doom 4, Doom 2016"` | `doom-2016/hltb.best.json` |
 | `game_image_url` | `string` | `"https://howlongtobeat.com/games/doom_2016.jpg"` | `doom-2016/hltb.best.json` |
 | `game_type` | `string` | `"game"` | `doom-2016/hltb.best.json` |
-| `game_web_link` | `string` | `"https://howlongtobeat.com/game/2708"` | `doom-2016/hltb.best.json` |
 | `json_content` | `object` | `{"game_id": 2708, "game_name": "Doom", "game_name_date": 1, "game_alias": "Doom, Doom 4, Doom 2016", "game_type": "game", "game_image": "doom_2016.jpg", "comp_lvl_combine": 0, "...` | `doom-2016/hltb.best.json` |
 | `json_content.comp_100` | `number` | `97528` | `doom-2016/hltb.best.json` |
 | `json_content.comp_100_count` | `number` | `670` | `doom-2016/hltb.best.json` |
@@ -981,7 +983,6 @@ Docs:
 | `json_content.review_score` | `number` | `84` | `doom-2016/hltb.best.json` |
 | `mp_time` | `number` | `8.17` | `doom-2016/hltb.best.json` |
 | `profile_dev` | `null` | `null` | `doom-2016/hltb.best.json` |
-| `profile_platforms` | `array` | `["Google Stadia", "Nintendo Switch", "PC", "PlayStation 4", "Xbox One"]` | `doom-2016/hltb.best.json` |
 | `profile_platforms[]` | `string` | `"Google Stadia"` | `doom-2016/hltb.best.json` |
 | `review_score` | `number` | `84` | `doom-2016/hltb.best.json` |
 | `similarity` | `number` | `1.0` | `doom-2016/hltb.best.json` |

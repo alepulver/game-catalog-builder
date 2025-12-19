@@ -56,7 +56,12 @@ def test_generate_validation_report_flags_mismatches():
     ok = report.iloc[0].to_dict()
     # Even when providers agree, we may still ask for review if the personal title differs from a
     # strong canonical suggestion (e.g. extra year tokens in the personal title).
-    assert ok["ValidationTags"] in ("", "needs_review", "suggest_rename, needs_review")
+    ok_tags = ok["ValidationTags"]
+    # Consensus tags may be present, but the "ok" row should not contain mismatch flags.
+    assert "title_mismatch" not in ok_tags
+    assert "year_disagree" not in ok_tags
+    assert "platform_disagree" not in ok_tags
+    assert "steam_appid_mismatch" not in ok_tags
     assert ok["SuggestedCulprit"] == ""
 
     bad = report.iloc[1].to_dict()

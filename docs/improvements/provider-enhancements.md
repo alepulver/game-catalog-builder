@@ -1,4 +1,4 @@
-# Provider Enhancements Proposal
+# Provider Enhancements Proposal (Future Work)
 
 This proposal summarizes high-value enhancements based on:
 
@@ -8,42 +8,17 @@ This proposal summarizes high-value enhancements based on:
 
 The goal is to improve: (1) match review speed, (2) mismatch detection quality, and (3) usefulness of the enriched CSV—while keeping transforms minimal and avoiding column clutter.
 
-## Prioritized (implement first)
+This doc is intentionally “action-first”: it prioritizes signals that help you decide whether a provider match is correct, and how to fix it (pin an ID vs rename vs add a YearHint).
 
-### 1) Use cross-provider IDs (highest ROI, low complexity)
+This file is only for **not-yet-implemented** improvements. Current behavior and the current tag
+vocabulary are documented in:
 
-Steam is currently the biggest source of ambiguity because store search doesn’t provide enough metadata to reliably disambiguate editions/demos/DLC/soundtracks without fetching details.
+- `docs/how-it-works.md`
+- `docs/matching.md`
 
-Proposal (already partially implemented):
-- When `Steam_AppID` is empty, infer it from other providers when possible:
-  - IGDB: `external_games` can include Steam as either:
-    - `external_games: [{ external_game_source: 1, uid: "620" }]`, or
-    - `external_games: [{ category: "steam", uid: "620" }]`
-  - RAWG: `stores[].url` often contains `https://store.steampowered.com/app/<appid>/...`
-- Use inferred IDs as:
-  - a way to pin `Steam_AppID` without another fuzzy search, and/or
-  - a cross-check that a chosen Steam app really corresponds to the same item.
+## Prioritized (implement next)
 
-Observed signal:
-- `steam_appid_disagree:igdb` shows up frequently and is a strong “needs review” signal, but it also catches legitimate edition/port/VR cases. Treat it as `LOW` confidence by default, and consider downgrading it to `MEDIUM` when the titles are clearly the same game identity (edition tokens only).
-
-### 2) Steam “wrong app type” guard (demo/DLC/soundtrack)
-
-Problem:
-- Steam `storesearch` can return entries that are not the base game (DLC, soundtrack, demo), and they can have a deceptively close name.
-- We sometimes end up picking:
-  - DLC packs instead of the game,
-  - soundtracks (`... Soundtrack`),
-  - demos (`... Demo`),
-  - VR variants (e.g. `Bulletstorm VR`) when you wanted the original.
-
-Proposal:
-- When the chosen Steam candidate is suspicious (low match score, series mismatch, or appid disagreement with IGDB):
-  - Fetch `appdetails` for a small set of top candidates and **filter out non-`type=="game"`** items.
-  - Prefer candidates whose `appdetails.name` is a clean match (edition tokens allowed), and penalize obvious DLC-like tokens (`demo`, `soundtrack`, `season pass`, etc.).
-- This does not require new Steam endpoints (still `appdetails`), just smarter selection.
-
-### 3) Series-number detection: refine only if false positives show up
+### 1) Series-number detection: refine only if false positives show up
 
 Series/roman numerals are already a high-signal mismatch detector.
 
@@ -52,7 +27,7 @@ If false positives appear, add guards in series-number extraction to ignore “n
 - `2K`/`2k` patterns (including `2k23`-style)
 - Similar non-sequel numeric brands
 
-### 4) Developer/publisher extraction + cross-checks
+### 2) Developer/publisher extraction + cross-checks
 
 No new endpoints needed: Steam provides developer/publisher lists in `appdetails`.
 
@@ -64,15 +39,6 @@ Add validation:
 - `developer_disagree`, `publisher_disagree` tags based on normalized set overlap.
 
 Outcome: dev/pub agreement becomes a strong identity signal when titles/years are ambiguous.
-
-### 5) Keep diagnostics compact
-
-Principle:
-- Prefer a compact tag list (`ReviewTags`) + a confidence field (`MatchConfidence`) over dozens of boolean columns.
-
-Notes:
-- “Missing provider” should not automatically mean “bad match” (e.g. `missing_steam` is common and often expected).
-- Cross-provider disagreements (`year_disagree`, `steam_series_mismatch`, `steam_appid_disagree:*`) are higher signal and should drive `LOW` confidence.
 
 ## High-value next-wave enhancements (minimal transforms)
 
@@ -92,6 +58,12 @@ Add fields that let a user quickly confirm “is this the right game?” without
   - Steam: `developers[]`, `publishers[]`
   - IGDB: `involved_companies.company.name` + `involved_companies.developer/publisher`
   - RAWG: `developers[].name`, `publishers[].name`
+
+Implementation note:
+- The IGDB client already requests most of these (e.g. `summary`, `storyline`, `alternative_names.name`,
+  `websites.url`, `parent_game.name`, `version_parent.name`, `involved_companies.*`, `age_ratings.*`) via
+  field expansion in the single `games` request. Adding them to CSV outputs should not require extra IGDB API
+  calls—just extracting and selecting additional `IGDB_*` columns.
 
 ### B) Better edition / DLC / bundle handling
 
@@ -144,6 +116,17 @@ Add tags (to `ReviewTags`) without creating many new columns:
 
 Also improve culprit inference:
 - When title/year disagree, dev/pub agreement can better identify which provider match is likely wrong than fuzzy score alone.
+
+## What’s missing right now (from this proposal)
+
+The following items are not currently extracted into `Provider_*.csv` / `Games_Enriched.csv`, and therefore can’t yet drive review/validation tags:
+
+- **Steam dev/pub fields**: `Steam_Developers`, `Steam_Publishers` (available from `appdetails`, no new endpoint)
+- **Steam/RAWG/IGDB “review aid” text**: short description / summary and provider URLs
+- **IGDB relationship context** for editions/ports: `parent_game`, `version_parent`, `expansions`, `ports` (still single-call via field expansion)
+- **RAWG richer metadata**: full `genres[]` (not just first two), plus `esrb_rating.name`
+- **Stronger cross-provider validation tags** based on dev/pub or store type:
+  - `developer_disagree`, `publisher_disagree`, `store_type_not_game`
 
 ## Optional improvement: missing-provider severity
 

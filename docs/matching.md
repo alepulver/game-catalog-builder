@@ -110,8 +110,10 @@ HLTB searches are slow relative to other providers, so the cache is designed to 
 - When a match is wrong or ambiguous, pin the provider ID in `data/input/Games_Catalog.csv` rather than changing your original `Name` unless the rename is truly canonical for you.
 - Import diagnostics (`ReviewTags`) also include a few conservative cross-provider checks when cached details are available:
   - `year_disagree` (RAWG vs IGDB)
-  - `year_disagree_hltb` (HLTB vs RAWG/IGDB)
-  - `platform_disagree_hltb` (HLTB vs RAWG/IGDB)
+  - `year_outlier:<provider>` (one provider’s year disagrees with the majority, e.g. `year_outlier:hltb`)
+  - `platform_outlier:<provider>` (one provider’s platforms disagree with the majority, e.g. `platform_outlier:hltb`)
+  - `likely_wrong:<provider>` (high-signal: title outlier + year/platform outlier)
+  - `ambiguous_title_year` (titles agree but years split widely; reboot/remaster/edition under same name)
   - `genre_disagree` (RAWG vs IGDB)
 
 ## Known issues / limitations

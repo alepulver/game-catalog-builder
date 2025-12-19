@@ -37,6 +37,8 @@ In practice, providers react differently to years embedded in the search string:
 - IGDB: searches tend to work better without a trailing `"(YYYY)"`. When `YearHint` is present, the client first tries a narrow release-date window (±1 year), then falls back to an unfiltered search.
 - RAWG: generally tolerant, but year tokens can still skew fuzzy scoring; `YearHint` helps break ties when multiple candidates share a similar name.
 - HLTB: uses `HLTB_ID` when pinned; otherwise it searches by query and strips a trailing `"(YYYY)"` when needed.
+  - HLTB only uses a small set of query variants and stops early on a high-confidence match.
+  - As a last resort (only if all other variants return no candidates), it tries lower/upper-case variants for stylized titles.
 
 ### Base game vs editions
 
@@ -55,7 +57,9 @@ Implementation notes:
 - Steam selection uses appdetails (`type` + release date) to avoid DLC/music and to break ties; when the query has no sequel number, it strongly prefers a base/edition match over a sequel match when possible.
 - Fuzzy matching treats common edition tokens (e.g. “GOTY”, “Enhanced”, “Complete”) as ignorable when one title is a strict superset of the other.
 - If `Steam_AppID` is empty but `IGDB_ID` (or `RAWG_ID`) is pinned, the importer may infer a Steam AppID from:
-  - IGDB `external_games` (Steam uid), or
+  - IGDB `external_games` (Steam uid), e.g.:
+    - `external_games: [{ external_game_source: 1, uid: "620" }]`, or
+    - `external_games: [{ category: "steam", uid: "620" }]`
   - RAWG store URLs containing `/app/<appid>`.
   Inferred Steam AppIDs are validated via Steam appdetails: if the inferred appid is not `type=game`,
   it is ignored and the importer falls back to name-based Steam search.
@@ -77,9 +81,8 @@ Most “magic numbers” (match thresholds, rate limits, batch sizes, retry sett
 `game_catalog_builder/config.py`. They are currently static constants but are grouped so we can
 later make them configurable without chasing scattered literals.
 
-Providers that don’t expose stable IDs (or where the library doesn’t provide one) fall back to
-caching raw data under a synthetic key (e.g. `name:<normalized>`), but the search results are still
-cached by query.
+All current providers in this project expose a stable ID that is used for `by_id` caching:
+`RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_ID` (and SteamSpy uses `Steam_AppID`).
 
 ## Persistence (CSV + cache writes)
 
@@ -101,8 +104,11 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - During import, HLTB matching progress is also checkpointed every 25 processed rows because HLTB
     can be slow.
 - When diagnostics are enabled, the import also writes:
-    - `ReviewTags`: compact tags (missing providers, low fuzzy scores, year/platform drift, and a few high-signal Steam-specific checks like `steam_series_mismatch` and `steam_appid_disagree:*`).
-    - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW` (missing providers are typically `MEDIUM`; strong drift signals like year/platform disagreements are `LOW`).
+    - `ReviewTags`: compact tags (missing providers, low fuzzy scores, cross-provider outliers, plus a few high-signal Steam-specific checks like `steam_series_mismatch` and `steam_appid_disagree:*`).
+      - Consensus/outliers: `provider_consensus:*`, `provider_outlier:*`, `provider_no_consensus`
+      - Metadata outliers: `year_outlier:*`, `platform_outlier:*` (and `*_no_consensus`)
+      - Actionable rollups: `likely_wrong:*`, `ambiguous_title_year`
+    - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW` (missing providers are typically `MEDIUM`; strong disagreement signals are `LOW`).
 
 - Merge output (`data/output/Games_Enriched.csv`)
   - Written after all selected providers finish.
@@ -171,3 +177,6 @@ In addition, you can generate a read-only **validation report** after enrichment
 - `validate` can generate the same report from an existing enriched CSV
 
 Validation focuses on cross-provider consistency checks and is not treated as a source of truth.
+The report uses a `ValidationTags` column that largely mirrors the same tagging vocabulary as
+`ReviewTags` (consensus/outliers and actionable rollups), plus some enrichment-only tags (e.g.
+`steam_dlc_like`).

@@ -40,7 +40,7 @@ class _HLTBStub:
         return {"HLTB_ReleaseYear": self._year, "HLTB_Platforms": self._platforms}
 
 
-def test_fill_eval_tags_flags_year_disagree_hltb_when_rawg_igdb_agree() -> None:
+def test_fill_eval_tags_flags_year_outlier_when_rawg_igdb_agree() -> None:
     from game_catalog_builder.cli import fill_eval_tags
 
     df = pd.DataFrame(
@@ -71,11 +71,12 @@ def test_fill_eval_tags_flags_year_disagree_hltb_when_rawg_igdb_agree() -> None:
         },
     )
     tags = out.iloc[0]["ReviewTags"]
-    assert "year_disagree_hltb" in tags
+    assert "year_outlier:hltb" in tags
+    assert "likely_wrong:hltb" in tags
     assert out.iloc[0]["MatchConfidence"] == "LOW"
 
 
-def test_fill_eval_tags_flags_platform_disagree_hltb() -> None:
+def test_fill_eval_tags_flags_platform_outlier() -> None:
     from game_catalog_builder.cli import fill_eval_tags
 
     df = pd.DataFrame(
@@ -106,7 +107,7 @@ def test_fill_eval_tags_flags_platform_disagree_hltb() -> None:
         },
     )
     tags = out.iloc[0]["ReviewTags"]
-    assert "platform_disagree_hltb" in tags
+    assert "platform_outlier:hltb" in tags
     assert out.iloc[0]["MatchConfidence"] == "LOW"
 
 
@@ -139,3 +140,67 @@ def test_fill_eval_tags_flags_genre_disagree_rawg_igdb() -> None:
     tags = out.iloc[0]["ReviewTags"]
     assert "genre_disagree" in tags
     assert out.iloc[0]["MatchConfidence"] == "MEDIUM"
+
+
+def test_fill_eval_tags_adds_provider_outlier_when_two_agree() -> None:
+    from game_catalog_builder.cli import fill_eval_tags
+
+    df = pd.DataFrame(
+        [
+            {
+                "RowId": "rid:1",
+                "Name": "Operation Flashpoint: Cold War Crisis",
+                "RAWG_ID": "1",
+                "IGDB_ID": "2",
+                "HLTB_ID": "3",
+                "RAWG_MatchedName": "Operation Flashpoint: Cold War Crisis",
+                "RAWG_MatchScore": "100",
+                "IGDB_MatchedName": "Operation Flashpoint: Cold War Crisis",
+                "IGDB_MatchScore": "100",
+                "HLTB_MatchedName": "Operation Flashpoint: Dragon Rising",
+                "HLTB_MatchScore": "71",
+            }
+        ]
+    )
+
+    out = fill_eval_tags(
+        df,
+        sources={"rawg", "igdb", "hltb"},
+        clients={
+            "rawg": _RAWGStub(released="2001-06-22", platforms=["PC"], genres=["Shooter"]),
+            "igdb": _IGDBStub(year="2001", platforms="PC", genres="Shooter"),
+            "hltb": _HLTBStub(year="2009", platforms="PC"),
+        },
+    )
+    tags = out.iloc[0]["ReviewTags"]
+    assert "provider_consensus:igdb+rawg" in tags
+    assert "provider_outlier:hltb" in tags
+
+
+def test_fill_eval_tags_adds_provider_no_consensus_when_all_disagree() -> None:
+    from game_catalog_builder.cli import fill_eval_tags
+
+    df = pd.DataFrame(
+        [
+            {
+                "RowId": "rid:1",
+                "Name": "Doom",
+                "RAWG_ID": "1",
+                "IGDB_ID": "2",
+                "Steam_AppID": "10",
+                "HLTB_ID": "3",
+                "RAWG_MatchedName": "Doom 3",
+                "RAWG_MatchScore": "80",
+                "IGDB_MatchedName": "Doom (2016)",
+                "IGDB_MatchScore": "80",
+                "Steam_MatchedName": "Doom Eternal",
+                "Steam_MatchScore": "80",
+                "HLTB_MatchedName": "Doom 64",
+                "HLTB_MatchScore": "80",
+            }
+        ]
+    )
+
+    out = fill_eval_tags(df, sources={"rawg", "igdb", "steam", "hltb"}, clients={})
+    tags = out.iloc[0]["ReviewTags"]
+    assert "provider_no_consensus" in tags

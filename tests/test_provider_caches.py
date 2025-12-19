@@ -81,6 +81,16 @@ def test_rawg_cache_is_id_based(tmp_path, monkeypatch):
                 return None
 
             def json(self):
+                # Detail endpoint (by id).
+                if str(url).rstrip("/").endswith("/999"):
+                    return {
+                        "id": 999,
+                        "name": "Example Game",
+                        "released": "2019-01-01",
+                        "description": "<p>Example</p>",
+                        "description_raw": "Example",
+                        "alternative_names": ["Example Alt"],
+                    }
                 # Simulate strict search returning no results, then fallback returning results.
                 if params and params.get("search_exact") == 1:
                     return {"results": []}
@@ -114,6 +124,16 @@ def test_rawg_falls_back_to_loose_when_strict_matches_are_irrelevant(tmp_path, m
                 return None
 
             def json(self):
+                # Detail endpoint (by id).
+                if str(url).rstrip("/").endswith("/2"):
+                    return {
+                        "id": 2,
+                        "name": "Quake II",
+                        "released": "1997-12-09",
+                        "description": "<p>Example</p>",
+                        "description_raw": "Example",
+                        "alternative_names": [],
+                    }
                 calls["loose"] += 1
                 return {"results": [{"id": 2, "name": "Quake II", "released": "1997-12-09"}]}
 
@@ -195,7 +215,7 @@ def test_igdb_cache_is_id_based(tmp_path, monkeypatch):
     assert len(raw.get("by_query", {})) >= 1
 
 
-def test_hltb_cache_falls_back_to_name_id_when_missing_game_id(tmp_path, monkeypatch):
+def test_hltb_requires_stable_id(tmp_path, monkeypatch):
     from game_catalog_builder.clients.hltb_client import HLTBClient
 
     class FakeResult:
@@ -209,4 +229,4 @@ def test_hltb_cache_falls_back_to_name_id_when_missing_game_id(tmp_path, monkeyp
     monkeypatch.setattr(client.client, "search", lambda name: [FakeResult()])
 
     data = client.search("Example Game")
-    assert data["HLTB_Name"] == "Example Game"
+    assert data is None

@@ -5,6 +5,12 @@ from dataclasses import dataclass
 import pandas as pd
 
 from ..config import VALIDATION
+from .consistency import (
+    actionable_mismatch_tags,
+    compute_provider_consensus,
+    platform_outlier_tags,
+    year_outlier_tags,
+)
 from .utilities import fuzzy_score, normalize_game_name
 
 
@@ -308,12 +314,6 @@ def generate_validation_report(
             if abs(rawg_year - igdb_year) > thresholds.year_max_diff:
                 year_disagree_rawg_igdb = "YES"
 
-        year_disagree_hltb = ""
-        if hltb_year is not None:
-            anchor = igdb_year if igdb_year is not None else rawg_year
-            if anchor is not None and abs(hltb_year - anchor) > thresholds.year_max_diff:
-                year_disagree_hltb = "YES"
-
         steam_year_disagree = ""
         steam_year_diff_vs_rawg = _year_diff(steam_year, rawg_year)
         steam_year_diff_vs_igdb = _year_diff(steam_year, igdb_year)
@@ -338,23 +338,6 @@ def generate_validation_report(
             platform_intersection = ", ".join(sorted(inter))
             if not inter:
                 platform_disagree = "YES"
-
-        platform_disagree_hltb = ""
-        hltb_plat = _normalize_platforms(str(r.get("HLTB_Platforms", "") or ""))
-        if hltb_plat:
-            # Compare HLTB to a stable anchor set to avoid shrinking intersections too aggressively.
-            anchor = None
-            rawg_plat = _normalize_platforms(str(r.get("RAWG_Platforms", "") or ""))
-            igdb_plat = _normalize_platforms(str(r.get("IGDB_Platforms", "") or ""))
-            steam_plat = _normalize_platforms(str(r.get("Steam_Platforms", "") or ""))
-            if rawg_plat and igdb_plat:
-                inter = rawg_plat & igdb_plat
-                if inter:
-                    anchor = inter
-            if anchor is None:
-                anchor = igdb_plat or rawg_plat or steam_plat
-            if anchor and not (anchor & hltb_plat):
-                platform_disagree_hltb = "YES"
 
         steam_appid = str(r.get("Steam_AppID", "") or "").strip()
         igdb_steam_appid = str(r.get("IGDB_SteamAppID", "") or "").strip()
@@ -549,12 +532,8 @@ def generate_validation_report(
             validation_tags.append("year_disagree_rawg_igdb")
         if steam_year_disagree == "YES":
             validation_tags.append("steam_year_disagree")
-        if year_disagree_hltb == "YES":
-            validation_tags.append("year_disagree_hltb")
         if platform_disagree == "YES":
             validation_tags.append("platform_disagree")
-        if platform_disagree_hltb == "YES":
-            validation_tags.append("platform_disagree_hltb")
         if steam_appid_mismatch == "YES":
             validation_tags.append("steam_appid_mismatch")
         if edition_disagree == "YES":
@@ -569,6 +548,45 @@ def generate_validation_report(
             validation_tags.append("suggest_rename")
         if review_title == "YES":
             validation_tags.append("needs_review")
+
+        provider_titles: dict[str, str] = {
+            "rawg": rawg_name,
+            "igdb": igdb_name,
+            "steam": steam_name,
+            "hltb": hltb_name,
+        }
+        years_map: dict[str, int] = {}
+        for k, v in (
+            ("rawg", rawg_year),
+            ("igdb", igdb_year),
+            ("steam", steam_year),
+            ("hltb", hltb_year),
+        ):
+            if v is not None:
+                years_map[k] = v
+        consensus = compute_provider_consensus(provider_titles, years=years_map)
+        if consensus:
+            validation_tags.extend(consensus.tags())
+
+        year_tags = year_outlier_tags(years_map, max_diff=thresholds.year_max_diff)
+        validation_tags.extend(year_tags)
+        platform_sets = {
+            "rawg": _normalize_platforms(str(r.get("RAWG_Platforms", "") or "")),
+            "igdb": _normalize_platforms(str(r.get("IGDB_Platforms", "") or "")),
+            "steam": _normalize_platforms(str(r.get("Steam_Platforms", "") or "")),
+            "hltb": _normalize_platforms(str(r.get("HLTB_Platforms", "") or "")),
+        }
+        platform_tags = platform_outlier_tags(platform_sets)
+        validation_tags.extend(platform_tags)
+
+        validation_tags.extend(
+            actionable_mismatch_tags(
+                provider_consensus=consensus,
+                years=years_map,
+                year_tags=year_tags,
+                platform_tags=platform_tags,
+            )
+        )
 
         steam_year_diff_vs_primary = ""
         if steam_year is not None:

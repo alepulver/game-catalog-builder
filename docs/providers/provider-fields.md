@@ -13,6 +13,7 @@ For a generated “catalog + observed examples” reference, see `docs/providers
 - **Details**: the richer document used to extract metadata (if applicable).
 - **CSV column**: the column name in `Provider_<Provider>.csv` / `Games_Enriched.csv`.
 - **Path**: a representative JSON path (or object attribute for HLTB).
+- **Caching**: caches store a mapping of request query → candidates (`by_query`), and provider id → full raw payload (`by_id`).
 
 ## RAWG
 
@@ -20,7 +21,11 @@ For a generated “catalog + observed examples” reference, see `docs/providers
 
 - **ID**: `RAWG_ID`
 - **Search**: `GET /api/games?search=<name>&page_size=10&lang=en`
-- **Details (optional)**: `GET /api/games/{id}` (not required by current pipeline)
+- **Details**: `GET /api/games/{id}` (fetched/cached so we retain the full payload for future fields)
+
+Caching notes:
+- Search responses (`/api/games?search=...`) are cached under `by_query`.
+- The cache `by_id` stores the full `/api/games/{id}` detail payload (not the search stub), so fields like `description_raw` and `alternative_names` remain available later.
 
 Current output columns:
 
@@ -41,7 +46,8 @@ Current output columns:
 
 Other useful fields available (typically richer in `/games/{id}`):
 
-- `description_raw`, `website`
+- `description_raw`, `description`, `website`
+- `alternative_names` (aliases)
 - `developers[].name`, `publishers[].name`
 - `stores[]` (store links/ids)
 - `esrb_rating.name`
@@ -56,6 +62,10 @@ Other useful fields available (typically richer in `/games/{id}`):
 - **OAuth**: `POST https://id.twitch.tv/oauth2/token`
 - **Query**: `POST /v4/games` with `search "<name>"; fields ...;`
 - **Details**: same `/v4/games` call (field expansion) — one request per game (excluding OAuth).
+
+Caching notes:
+- The IGDB cache stores the raw `/v4/games` objects keyed by `language:id` in `by_id`.
+- Name search queries are cached under `by_query` as lightweight candidates; `by_id` is the authoritative raw payload.
 
 Current output columns (from the `/v4/games` object returned by the query):
 
@@ -79,6 +89,7 @@ Current output columns (from the `/v4/games` object returned by the query):
 Other useful fields you can request via `fields` (still in the same call):
 
 - `summary`, `storyline`
+- `alternative_names.name` (aliases)
 - `rating`, `rating_count`
 - `involved_companies.company.name` (developers/publishers), `involved_companies.developer`, `involved_companies.publisher`
 - `collections.name`, `dlcs.name`, `expansions.name`
@@ -93,6 +104,10 @@ Other useful fields you can request via `fields` (still in the same call):
 - **ID**: `Steam_AppID`
 - **Search**: `GET /api/storesearch?term=<name>&l=english&cc=US`
 - **Details**: `GET /api/appdetails?appids=<appid>&l=english`
+
+Caching notes:
+- Store search results are cached under `by_query`.
+- Full appdetails payloads are cached under `by_id` keyed by appid.
 
 Current output columns (from the `data` object inside appdetails):
 
@@ -123,6 +138,9 @@ Other useful fields available in appdetails:
 - **ID**: `Steam_AppID` (same as Steam)
 - **Details**: `GET https://steamspy.com/api.php?request=appdetails&appid=<appid>`
 
+Caching notes:
+- SteamSpy is keyed by `Steam_AppID` and caches raw responses by id.
+
 Current output columns:
 
 | CSV column | Path | Description |
@@ -149,6 +167,10 @@ Other useful fields available:
 - **Search**: `howlongtobeatpy.HowLongToBeat().search(<name>)`
 - **Details**: same search result object (library wraps HTTP calls).
 
+Caching notes:
+- HLTB search result lists are cached under `by_query` keyed by the *actual query sent* (the `term` value).
+- The cache `by_id` stores the full dumped result object payload keyed by numeric `HLTB_ID`, including alias fields like `game_alias` and the embedded `json_content` when present.
+
 Current output columns (from the best match object):
 
 | CSV column | Attribute | Description |
@@ -164,6 +186,7 @@ Current output columns (from the best match object):
 Other useful attributes commonly present:
 
 - `profile_dev`, `profile_platform`, `release_world`, `rating` (varies by library version/data)
+- `game_alias` (aliases), `game_web_link` (URL), `profile_platforms` (platform list)
 
 Note: the project caches the full HLTB result object payload (JSON-serialized) under `data/cache/`
 even though only a small subset is written to CSV. This lets you add new derived fields later

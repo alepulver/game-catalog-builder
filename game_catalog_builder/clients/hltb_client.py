@@ -7,13 +7,8 @@ from typing import Any
 
 from howlongtobeatpy import HowLongToBeat
 
-from ..utils.utilities import (
-    extract_year_hint,
-    fuzzy_score,
-    load_json_cache,
-    normalize_game_name,
-    save_json_cache,
-)
+from ..config import HLTB
+from ..utils.utilities import extract_year_hint, fuzzy_score, load_json_cache, save_json_cache
 
 
 class HLTBClient:
@@ -192,17 +187,59 @@ class HLTBClient:
         if not base:
             return []
 
-        variants = [base]
+        variants: list[str] = []
+
+        def _add(v: str) -> None:
+            s = str(v or "").strip()
+            if not s or s in variants:
+                return
+            variants.append(s)
+
+        _add(base)
 
         # If the title contains a 4-digit year, try stripping a trailing "(YYYY)" or " YYYY".
         year = extract_year_hint(base)
         if year is not None:
             stripped = re.sub(r"\s*\(\s*(19\d{2}|20\d{2})\s*\)\s*$", "", base).strip()
-            if stripped and stripped not in variants:
-                variants.append(stripped)
+            _add(stripped)
             stripped2 = re.sub(r"\s+(19\d{2}|20\d{2})\s*$", "", base).strip()
-            if stripped2 and stripped2 not in variants:
-                variants.append(stripped2)
+            _add(stripped2)
+
+        # Normalize unicode dashes to a plain hyphen.
+        dash_norm = base.replace("–", "-").replace("—", "-").replace("−", "-")
+        _add(dash_norm)
+
+        # Strip trailing punctuation that often differs between catalogs and HLTB.
+        _add(re.sub(r"[!?\.]+$", "", base).strip())
+
+        # Simplify common suffixes that can hurt HLTB recall.
+        # Example observed: "Galaxy on Fire 2 Full HD" matches as "Galaxy on Fire 2 HD".
+        _add(re.sub(r"\bFull\s+HD\b", "HD", base, flags=re.IGNORECASE).strip())
+
+        # Subtitle fallbacks: try the base title before separators.
+        for sep in (":", " - ", " – ", " — "):
+            if sep in base:
+                _add(base.split(sep, 1)[0].strip())
+
+        # Roman numeral normalization helps cases like "Unreal Tournament III" -> "... 3".
+        roman_token_map = {
+            "I": "1",
+            "II": "2",
+            "III": "3",
+            "IV": "4",
+            "V": "5",
+            "VI": "6",
+            "VII": "7",
+            "VIII": "8",
+            "IX": "9",
+            "X": "10",
+        }
+
+        def _roman_repl(m: re.Match[str]) -> str:
+            return roman_token_map.get(m.group(0).upper(), m.group(0))
+
+        roman_preserve = re.sub(r"\b(I|II|III|IV|V|VI|VII|VIII|IX|X)\b", _roman_repl, base)
+        _add(roman_preserve)
 
         return variants
 
@@ -225,10 +262,19 @@ class HLTBClient:
             )
 
         try:
-            candidates: list[dict[str, Any]] = []
-            used_query = query or game_name
-            for q in self._query_variants(used_query):
-                used_query = q
+            best_score = -1
+            best_query: str | None = None
+            best_candidate: dict[str, Any] | None = None
+
+            attempted: set[str] = set()
+
+            def _try_query(q: str) -> None:
+                nonlocal best_score, best_query, best_candidate
+
+                q = str(q or "").strip()
+                if not q or q in attempted:
+                    return
+                attempted.add(q)
                 qkey = f"q:{q}"
                 cached = self._by_query.get(qkey)
                 if cached is not None:
@@ -251,53 +297,83 @@ class HLTBClient:
                     self.stats["by_query_fetch"] += 1
                     if not candidates:
                         self.stats["by_query_negative_fetch"] += 1
-                if candidates:
+
+                if not candidates:
+                    return
+
+                # Choose the best match by similarity against the original title; the query can be
+                # a heuristic variant and should not affect the score.
+                scored = [
+                    (fuzzy_score(game_name, str(r.get("game_name", "") or "")), r)
+                    for r in candidates
+                ]
+                scored.sort(key=lambda x: x[0], reverse=True)
+                score, candidate = scored[0]
+                if score > best_score:
+                    best_score = score
+                    best_query = q
+                    best_candidate = candidate
+
+                # Exact match: stop early to avoid extra calls.
+                if best_score >= 100:
+                    return
+                # High-confidence match: don't spend extra queries trying to reach 100%.
+                if best_score >= HLTB.early_stop_score:
+                    return
+
+            base_query = str(query or game_name).strip()
+            for q in self._query_variants(base_query):
+                _try_query(q)
+                if best_score >= HLTB.early_stop_score:
                     break
-            if not candidates:
+
+            # Last-resort case variants: keep match quality for a small number of stylized titles
+            # that appear to be case-sensitive in HLTB search, without paying the cost for every
+            # row.
+            if best_candidate is None:
+                _try_query(base_query.lower())
+                _try_query(base_query.upper())
+
+            if best_candidate is None:
                 logging.warning(f"Not found in HLTB: '{game_name}'. No results from API.")
                 return None
 
-            # Choose the best match by similarity
-            score_target = used_query
-            scored = [
-                (fuzzy_score(score_target, str(r.get("game_name", "") or "")), r)
-                for r in candidates
-            ]
-            scored.sort(key=lambda x: x[0], reverse=True)
-            best_score, best = scored[0]
+            # Avoid pinning clearly wrong matches; let the user override the HLTB_Query instead.
+            candidate_name = str(best_candidate.get("game_name", "") or "")
+            if best_score < 65:
+                logging.warning(
+                    f"Close match for '{game_name}': Best candidate '{candidate_name}' "
+                    f"(score: {best_score}%, query={best_query!r}); not pinning."
+                )
+                return None
+
             if best_score < 100:
                 logging.warning(
-                    f"Close match for '{game_name}': Selected '{best.get('game_name', '')}' "
-                    f"(score: {best_score}%)"
+                    f"Close match for '{game_name}': Selected '{candidate_name}' "
+                    f"(score: {best_score}%, query={best_query!r})"
                 )
 
-            best_id = best.get("game_id", None) if isinstance(best, dict) else None
+            best_id = (
+                best_candidate.get("game_id", None) if isinstance(best_candidate, dict) else None
+            )
             best_id_str = str(best_id) if best_id is not None else ""
             if best_id_str:
                 cached = self._by_id.get(best_id_str)
                 if isinstance(cached, dict):
                     return self.extract_fields(cached)
-                # Partial migration: fetch by id to populate by_id.
-                return self.get_by_id(best_id_str)
+                logging.warning(
+                    f"HLTB cache missing by_id payload for '{game_name}': id={best_id_str}. "
+                    "Delete cache to rebuild."
+                )
+                return None
 
-            # No stable id: store a minimal raw payload under a synthetic key.
-            name_id = f"name:{normalize_game_name(game_name)}"
-            cached = self._by_id.get(name_id)
-            if isinstance(cached, dict):
-                return self.extract_fields(cached)
-            raw = {
-                "game_id": None,
-                "game_name": str(best.get("game_name", "") or ""),
-                "main_story": "",
-                "main_extra": "",
-                "completionist": "",
-                "release_world": None,
-                "profile_platforms": None,
-                "game_web_link": "",
-            }
-            self._by_id[name_id] = raw
-            self._save_cache()
-            return self.extract_fields(raw)
+            # No stable id in the candidate list (unexpected for HLTB); do not cache synthetic
+            # entries.
+            logging.warning(
+                f"HLTB candidate missing a stable id for '{game_name}': "
+                f"name={best_candidate.get('game_name', '')!r}. Not caching."
+            )
+            return None
 
         except Exception:
             logging.warning(

@@ -40,6 +40,12 @@ from .utils import (
     read_csv,
     write_csv,
 )
+from .utils.consistency import (
+    actionable_mismatch_tags,
+    compute_provider_consensus,
+    platform_outlier_tags,
+    year_outlier_tags,
+)
 
 
 def clear_prefixed_columns(df: pd.DataFrame, idx: int, prefix: str) -> None:
@@ -454,43 +460,49 @@ def fill_eval_tags(
                 tags.append("genre_disagree")
                 has_medium_issue = True
 
-        if "hltb" in years and ("rawg" in years or "igdb" in years):
-            # HLTB can occasionally use a re-release year; treat disagreement as strong only when
-            # RAWG/IGDB agree with each other.
-            disagree_rawg = "rawg" in years and abs(years["hltb"] - years["rawg"]) >= 2
-            disagree_igdb = "igdb" in years and abs(years["hltb"] - years["igdb"]) >= 2
-            if disagree_rawg or disagree_igdb:
-                tags.append("year_disagree_hltb")
-                if "rawg" in years and "igdb" in years and abs(years["rawg"] - years["igdb"]) < 2:
-                    if disagree_rawg and disagree_igdb:
-                        has_low_issue = True
-                    else:
-                        has_medium_issue = True
-                else:
-                    has_medium_issue = True
+        # Symmetric year outlier tags relative to a strict-majority consensus year.
+        year_tags = year_outlier_tags(years, max_diff=1)
+        if year_tags:
+            tags.extend(year_tags)
+            if "year_no_consensus" in year_tags:
+                has_low_issue = True
+            else:
+                has_low_issue = True
 
-        if "steam" in platforms:
-            for other in ("rawg", "igdb"):
-                if other in platforms and platforms["steam"] and platforms[other]:
-                    if platforms["steam"].isdisjoint(platforms[other]):
-                        tags.append(f"platform_disagree:steam_{other}")
-                        has_low_issue = True
+        # Symmetric platform outlier tags relative to strict-majority platform consensus.
+        plat_tags = platform_outlier_tags(platforms)
+        if plat_tags:
+            tags.extend(plat_tags)
+            if "platform_no_consensus" in plat_tags:
+                has_low_issue = True
+            else:
+                has_low_issue = True
 
-        if "hltb" in platforms and platforms["hltb"]:
-            disagrees: list[str] = []
-            for other in ("rawg", "igdb"):
-                if (
-                    other in platforms
-                    and platforms[other]
-                    and platforms["hltb"].isdisjoint(platforms[other])
-                ):
-                    disagrees.append(other)
-            if disagrees:
-                tags.append("platform_disagree_hltb")
-                if "rawg" in disagrees and "igdb" in disagrees:
-                    has_low_issue = True
-                else:
-                    has_medium_issue = True
+        provider_titles: dict[str, str] = {
+            "rawg": str(row.get("RAWG_MatchedName", "") or "").strip() if include_rawg else "",
+            "igdb": str(row.get("IGDB_MatchedName", "") or "").strip() if include_igdb else "",
+            "steam": str(row.get("Steam_MatchedName", "") or "").strip() if include_steam else "",
+            "hltb": str(row.get("HLTB_MatchedName", "") or "").strip() if include_hltb else "",
+        }
+        consensus = compute_provider_consensus(provider_titles, years=years)
+        if consensus:
+            tags.extend(consensus.tags())
+            if not consensus.has_majority:
+                has_low_issue = True
+            elif consensus.outliers:
+                has_medium_issue = True
+
+        actionable = actionable_mismatch_tags(
+            provider_consensus=consensus,
+            years=years,
+            year_tags=year_tags,
+            platform_tags=plat_tags,
+        )
+        if actionable:
+            tags.extend(actionable)
+            has_low_issue = True
+
+        # (platform outliers are handled above via platform_outlier_tags)
 
         if include_steam:
             steam_name = str(row.get("Steam_MatchedName", "") or "").strip()

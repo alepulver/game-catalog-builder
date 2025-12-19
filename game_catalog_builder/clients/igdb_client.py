@@ -192,6 +192,7 @@ class IGDBClient:
                summary,storyline,
                rating,rating_count,
                category,status,
+               alternative_names.name,
                websites.url,
                platforms.name,
                genres.name,
@@ -279,6 +280,7 @@ class IGDBClient:
                summary,storyline,
                rating,rating_count,
                category,status,
+               alternative_names.name,
                websites.url,
                platforms.name,
                genres.name,
@@ -379,10 +381,13 @@ class IGDBClient:
         igdb_id = str(best.get("id") or "").strip()
         if igdb_id:
             raw = self._by_id.get(f"{self.language}:{igdb_id}")
-            if not isinstance(raw, dict):
-                # Partial migration case: fetch raw by id.
-                return self.get_by_id(igdb_id)
-            return self._extract_fields(raw)
+            if isinstance(raw, dict):
+                return self._extract_fields(raw)
+            logging.warning(
+                f"IGDB cache missing by_id payload for '{game_name}': id={igdb_id}. "
+                "Delete cache to rebuild."
+            )
+            return None
         return None
 
     def format_cache_stats(self) -> str:

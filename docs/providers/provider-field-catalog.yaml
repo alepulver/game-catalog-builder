@@ -62,6 +62,8 @@ providers:
             description: Plain-text description
           - path: description
             description: HTML description
+          - path: alternative_names
+            description: Alternate/alias titles (array)
           - path: metacritic
             description: Metacritic score
           - path: metacritic_url
@@ -133,6 +135,8 @@ providers:
             description: Combined rating count when present
           - path: $[].first_release_date
             description: First release date as unix timestamp (seconds)
+          - path: $[].alternative_names[].name
+            description: Alternate/alias titles (when requested as alternative_names.name)
 
           # Relationships: ids (default) vs expanded objects (when requested).
           # For expansions, request `fields <rel>.name;` (or `<rel>.*` where applicable).
@@ -317,6 +321,11 @@ providers:
             description: Completionist time (hours)
           - path: profile_platform
             description: Platform string (sometimes present)
+          - path: profile_platforms
+            description: Platform list (sometimes present)
           - path: release_world
             description: Release year (sometimes present)
-
+          - path: game_alias
+            description: Alternate/alias title string (when present)
+          - path: game_web_link
+            description: HLTB game URL (when present)
