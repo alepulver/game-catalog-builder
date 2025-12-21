@@ -1,14 +1,16 @@
 # Game Catalog Builder
 
-A Python tool for enriching video game catalogs with metadata from multiple APIs including IGDB, RAWG, Steam, SteamSpy, and HowLongToBeat.
+A Python tool for enriching video game catalogs with metadata from multiple providers including IGDB, RAWG, Steam, SteamSpy, HowLongToBeat, and Wikidata.
 
 ## Features
 
 - **IGDB Integration**: Fetch game metadata from IGDB (genres, themes, game modes, perspectives, franchises, engines, companies)
 - **RAWG Integration**: Get game information including year, genres, platforms, tags, ratings, and Metacritic scores
-- **Steam Integration**: Retrieve Steam App IDs, tags, reviews, prices, and categories
+- **Steam Integration**: Retrieve Steam App IDs, tags, reviews, prices, categories, developers, and publishers
 - **SteamSpy Integration**: Fetch ownership statistics, player counts, and playtime data
 - **HowLongToBeat Integration**: Get completion time estimates (main story, extra content, completionist)
+- **Wikidata Integration**: Fetch cross-platform identity metadata (release year, platforms, developer/publisher, genres/series)
+- **Wikipedia signals (official APIs)**: Pageviews (30/90/365d + launch-window proxies) and a short summary extract for faster “is this the right game?” review
 - **Fuzzy Matching**: Intelligent game name matching across different APIs
 - **Caching**: Built-in caching to avoid redundant API calls
 - **Rate Limiting**: Automatic rate limiting to respect API limits
@@ -30,21 +32,21 @@ A Python tool for enriching video game catalogs with metadata from multiple APIs
 
 2. Create and activate a virtual environment:
    ```bash
-   python -m venv .venv
+   python3 -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
    ```
 
 3. Install dependencies:
    ```bash
-   pip install -e .
+   python -m pip install -e .
    # or:
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
    ```
 
 For local development tools (linting/type-checking/tests):
 
 ```bash
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
@@ -64,6 +66,7 @@ python -m pytest
 
    rawg:
      api_key: "YOUR_RAWG_API_KEY"
+
    ```
 
 2. **IGDB Credentials**: 
@@ -81,7 +84,7 @@ python -m pytest
 To capture full provider responses (useful for deciding what additional fields to extract), run:
 
 ```bash
-python -m game_catalog_builder.fetch_provider_examples "Doom (2016)"
+python -m game_catalog_builder.tools.fetch_provider_examples "Doom (2016)"
 ```
 
 This writes example files under `docs/examples/doom-2016/` (slugified from the input name).
@@ -115,7 +118,7 @@ Your original export does not need a `RowId` column. If it’s missing, `import`
 RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must be unique.
 
 `import` also adds:
-- Provider ID columns (`RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_ID`) so you can pin matches.
+- Provider ID columns (`RAWG_ID`, `IGDB_ID`, `Steam_AppID`, `HLTB_ID`, `Wikidata_QID`) so you can pin matches.
 - An optional `HLTB_Query` override (used only when `HLTB_ID` is empty) for tricky HLTB searches.
 - A `YearHint` column you can fill (e.g. `1999`) to disambiguate titles like reboots/remakes.
 - A small set of diagnostic columns so you can adjust IDs before enrichment:
@@ -129,6 +132,11 @@ RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must 
 - Consensus/outliers: `provider_consensus:*`, `provider_outlier:*`, `provider_no_consensus`
 - Metadata outliers: `year_outlier:*`, `platform_outlier:*` (and `*_no_consensus`)
 - Actionable rollups: `likely_wrong:*`, `ambiguous_title_year`
+
+Import safety:
+- If import diagnostics identify a provider as `likely_wrong:<provider>` and there is a strict-majority
+  provider consensus (and the provider is the outlier), the importer clears that provider ID so
+  enrichment won’t silently use a wrong pin.
 
 It refreshes match diagnostics by fetching the provider name for any pinned IDs. Evaluation columns
 are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without evaluation
@@ -156,7 +164,34 @@ python run.py import data/input/Games_User.csv --out data/input/Games_Catalog.cs
 
 # explicit list
 python run.py import data/input/Games_User.csv --out data/input/Games_Catalog.csv --source igdb,rawg,steam
+
+# optional sources
+python run.py enrich data/input/Games_Catalog.csv --source wikidata
 ```
+
+### Production tiers (AAA/AA/Indie)
+
+If `data/production_tiers.yaml` contains a mapping for a game’s `Steam_Publishers` or `Steam_Developers`,
+the enriched output includes `Production_Tier` and `Production_TierReason`.
+
+To extend that mapping from your current enriched file using Wikipedia lookups:
+
+```bash
+# dry-run (logs suggestions)
+python run.py production-tiers data/output/Games_Enriched.csv
+
+# apply suggestions into data/production_tiers.yaml
+python run.py production-tiers data/output/Games_Enriched.csv --apply
+```
+
+By default it only adds missing entries; use `--update-existing` to allow changes to already-mapped tiers.
+
+By default the tool also ensures completeness: after attempting Wikipedia for the most frequent unknowns,
+it fills any remaining publishers/developers from the CSV with default tiers so `Production_Tier` can be
+computed for every Steam publisher/developer string.
+
+Note: `Steam_Publishers` / `Steam_Developers` are stored as JSON arrays in a CSV cell (e.g.
+`["Company, Inc."]`), so publisher names like `"Company, Inc."` remain intact.
 
 Steam notes:
 - Steam `appdetails` requests use `l=english&cc=us` (some AppIDs return `success=false` without a country code).
@@ -224,10 +259,15 @@ game-catalog-builder/
 │   │   ├── igdb_client.py
 │   │   ├── rawg_client.py
 │   │   ├── steam_client.py
-│   │   └── steamspy_client.py
+│   │   ├── steamspy_client.py
+│   │   ├── wikidata_client.py
+│   │   ├── wikipedia_pageviews_client.py
+│   │   └── wikipedia_summary_client.py
+│   ├── tools/                # Maintenance tools (examples, schemas, production tiers)
 │   └── utils/                # Utilities
 │       ├── __init__.py
 │       ├── merger.py
+│       ├── signals.py
 │       └── utilities.py
 ├── data/
 │   ├── input/                 # Main catalog inputs (ignored; keep folder)
@@ -302,7 +342,7 @@ See `requirements.txt` for the complete list. Main dependencies include:
 
 ```bash
 # Create and use a local venv (recommended)
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 
 # Install in editable mode, including dev tools (ruff/pytest/mypy)

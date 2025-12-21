@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -191,6 +192,7 @@ class IGDBClient:
         fields id,name,first_release_date,
                summary,storyline,
                rating,rating_count,
+               aggregated_rating,aggregated_rating_count,
                category,status,
                alternative_names.name,
                websites.url,
@@ -279,6 +281,7 @@ class IGDBClient:
         fields id,name,first_release_date,
                summary,storyline,
                rating,rating_count,
+               aggregated_rating,aggregated_rating_count,
                category,status,
                alternative_names.name,
                websites.url,
@@ -417,6 +420,26 @@ class IGDBClient:
             return ", ".join(names)
 
         steam_appid = self._steam_appid_from_external_games(game.get("external_games", []) or [])
+        involved = game.get("involved_companies", []) or []
+        dev_list: list[str] = []
+        pub_list: list[str] = []
+        if isinstance(involved, list):
+            for ic in involved:
+                if not isinstance(ic, dict):
+                    continue
+                company = ic.get("company") or {}
+                cname = str((company.get("name") if isinstance(company, dict) else "") or "").strip()
+                if not cname:
+                    continue
+                if ic.get("developer") is True:
+                    dev_list.append(cname)
+                if ic.get("publisher") is True:
+                    pub_list.append(cname)
+        # de-dup preserving order
+        seen: set[str] = set()
+        dev_list = [x for x in dev_list if not (x.casefold() in seen or seen.add(x.casefold()))]
+        seen = set()
+        pub_list = [x for x in pub_list if not (x.casefold() in seen or seen.add(x.casefold()))]
         year = ""
         ts = game.get("first_release_date")
         if isinstance(ts, (int, float)) and ts > 0:
@@ -434,6 +457,15 @@ class IGDBClient:
             except Exception:
                 score_100 = ""
 
+        agg = game.get("aggregated_rating", None)
+        agg_count = game.get("aggregated_rating_count", None)
+        agg_100 = ""
+        if isinstance(agg, (int, float)):
+            try:
+                agg_100 = str(int(round(float(agg))))
+            except Exception:
+                agg_100 = ""
+
         return {
             "IGDB_ID": str(game.get("id", "") or ""),
             "IGDB_Name": str(game.get("name", "") or ""),
@@ -446,9 +478,14 @@ class IGDBClient:
             "IGDB_Franchise": join_names(game.get("franchises")),
             "IGDB_Engine": join_names(game.get("game_engines")),
             "IGDB_SteamAppID": steam_appid,
+            "IGDB_Developers": json.dumps(dev_list, ensure_ascii=False),
+            "IGDB_Publishers": json.dumps(pub_list, ensure_ascii=False),
             "IGDB_Rating": str(rating if rating is not None else ""),
             "IGDB_RatingCount": str(rating_count if rating_count is not None else ""),
+            "IGDB_AggregatedRating": str(agg if agg is not None else ""),
+            "IGDB_AggregatedRatingCount": str(agg_count if agg_count is not None else ""),
             "Score_IGDB_100": score_100,
+            "Score_IGDBCritic_100": agg_100,
         }
 
     def _steam_appid_from_external_games(self, external_games: list[Any]) -> str:

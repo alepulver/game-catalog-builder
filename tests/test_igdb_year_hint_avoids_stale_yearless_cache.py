@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-def test_igdb_year_hint_does_not_use_yearless_cache_when_year_mismatches(tmp_path, monkeypatch):
+def test_igdb_year_hint_uses_year_window_query_first(tmp_path, monkeypatch):
     from game_catalog_builder.clients.igdb_client import IGDBClient
 
     monkeypatch.setattr(
@@ -18,14 +18,12 @@ def test_igdb_year_hint_does_not_use_yearless_cache_when_year_mismatches(tmp_pat
     )
     client._token = "t"
 
-    # Seed a stale yearless mapping "en:fallout" -> 76 (2018), but request year_hint=1997.
-    client._by_name = {"en:fallout": "en:999"}
-    client._by_id = {"en:999": {"IGDB_ID": "999", "IGDB_Name": "Fallout 76", "IGDB_Year": "2018"}}
-
     calls = {"post": 0}
+    queries: list[str] = []
 
     def fake_post(endpoint: str, query: str):
         calls["post"] += 1
+        queries.append(query)
         return [
             {
                 "id": 1,
@@ -47,3 +45,4 @@ def test_igdb_year_hint_does_not_use_yearless_cache_when_year_mismatches(tmp_pat
     assert out is not None
     assert out["IGDB_Name"] == "Fallout"
     assert calls["post"] == 1
+    assert any("first_release_date >=" in q for q in queries)

@@ -13,6 +13,8 @@ def test_rawg_extract_fields_fixture():
         "genres": [{"name": "Action"}, {"name": "Shooter"}],
         "platforms": [{"platform": {"name": "PC"}}, {"platform": {"name": "PlayStation 4"}}],
         "tags": [{"name": "Singleplayer"}, {"name": "Atmospheric"}],
+        "developers": [{"name": "id Software"}],
+        "publishers": [{"name": "Bethesda Softworks"}],
         "rating": 4.2,
         "ratings_count": 1234,
         "metacritic": 85,
@@ -30,6 +32,8 @@ def test_rawg_extract_fields_fixture():
     assert fields["RAWG_Rating"] == "4.2"
     assert fields["RAWG_RatingsCount"] == "1234"
     assert fields["RAWG_Metacritic"] == "85"
+    assert fields["RAWG_Developers"] == json.dumps(["id Software"], ensure_ascii=False)
+    assert fields["RAWG_Publishers"] == json.dumps(["Bethesda Softworks"], ensure_ascii=False)
 
 
 def test_rawg_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
@@ -144,8 +148,11 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
     assert data == {
         "SteamSpy_Owners": "10,000 .. 20,000",
         "SteamSpy_Players": "1234",
+        "SteamSpy_Players2Weeks": "",
         "SteamSpy_CCU": "12",
         "SteamSpy_PlaytimeAvg": "56",
+        "SteamSpy_PlaytimeAvg2Weeks": "",
+        "SteamSpy_PlaytimeMedian2Weeks": "",
         "SteamSpy_Positive": "",
         "SteamSpy_Negative": "",
         "Score_SteamSpy_100": "",
@@ -178,6 +185,10 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
                 "player_perspectives": [{"name": "First person"}],
                 "franchises": [{"name": "Doom"}],
                 "game_engines": [{"name": "id Tech 6"}],
+                "involved_companies": [
+                    {"company": {"name": "id Software"}, "developer": True, "publisher": False},
+                    {"company": {"name": "Bethesda Softworks"}, "developer": False, "publisher": True},
+                ],
                 "external_games": [{"external_game_source": 1, "uid": "379720"}],
             }
         ]
@@ -205,6 +216,8 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
     assert enriched["IGDB_Franchise"] == "Doom"
     assert enriched["IGDB_Engine"] == "id Tech 6"
     assert enriched["IGDB_SteamAppID"] == "379720"
+    assert enriched["IGDB_Developers"] == json.dumps(["id Software"], ensure_ascii=False)
+    assert enriched["IGDB_Publishers"] == json.dumps(["Bethesda Softworks"], ensure_ascii=False)
 
 
 def test_igdb_similarity_threshold_negative_cache(tmp_path, monkeypatch):
@@ -232,6 +245,88 @@ def test_igdb_similarity_threshold_negative_cache(tmp_path, monkeypatch):
     assert client.search("Example Game") is None
     assert client.search("Example Game") is None
     assert calls["games"] == 1
+
+
+def test_wikidata_extract_fields_fixture(tmp_path, monkeypatch) -> None:
+    from game_catalog_builder.clients.wikidata_client import WikidataClient
+
+    client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
+
+    def fake_get_entities(qids, *, props):
+        assert props == "labels"
+        return {
+            "QDEV": {"labels": {"en": {"value": "id Software"}}},
+            "QPUB": {"labels": {"en": {"value": "GT Interactive"}}},
+            "QPLAT": {"labels": {"en": {"value": "PC (MS-DOS)"}}},
+            "QGENRE": {"labels": {"en": {"value": "first-person shooter"}}},
+            "QSER": {"labels": {"en": {"value": "Doom"}}},
+        }
+
+    monkeypatch.setattr(client, "_get_entities", fake_get_entities)
+
+    entity = {
+        "id": "Q123",
+        "labels": {"en": {"value": "Doom"}},
+        "descriptions": {"en": {"value": "1993 video game"}},
+        "claims": {
+            "P577": [
+                {
+                    "mainsnak": {
+                        "datavalue": {"value": {"time": "+1993-12-10T00:00:00Z"}}
+                    }
+                }
+            ],
+            "P178": [{"mainsnak": {"datavalue": {"value": {"id": "QDEV"}}}}],
+            "P123": [{"mainsnak": {"datavalue": {"value": {"id": "QPUB"}}}}],
+            "P400": [{"mainsnak": {"datavalue": {"value": {"id": "QPLAT"}}}}],
+            "P136": [{"mainsnak": {"datavalue": {"value": {"id": "QGENRE"}}}}],
+            "P179": [{"mainsnak": {"datavalue": {"value": {"id": "QSER"}}}}],
+        },
+        "sitelinks": {"enwiki": {"title": "Doom (1993 video game)"}},
+    }
+
+    fields = client._extract_fields(entity)
+    assert fields["Wikidata_QID"] == "Q123"
+    assert fields["Wikidata_Label"] == "Doom"
+    assert fields["Wikidata_Description"] == "1993 video game"
+    assert fields["Wikidata_ReleaseYear"] == "1993"
+    assert fields["Wikidata_Developers"] == "id Software"
+    assert fields["Wikidata_Publishers"] == "GT Interactive"
+    assert fields["Wikidata_Platforms"] == "PC (MS-DOS)"
+    assert fields["Wikidata_Series"] == "Doom"
+    assert fields["Wikidata_Genres"] == "first-person shooter"
+    assert fields["Wikidata_Wikipedia"].endswith("/Doom_(1993_video_game)")
+
+
+def test_wikidata_extract_fields_falls_back_to_non_en_label(tmp_path) -> None:
+    from game_catalog_builder.clients.wikidata_client import WikidataClient
+
+    client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
+    entity = {
+        "id": "Q1",
+        "labels": {"en-gb": {"value": "Example Label"}},
+        "descriptions": {"en-gb": {"value": "Example description"}},
+        "claims": {},
+        "sitelinks": {},
+    }
+    fields = client._extract_fields(entity)
+    assert fields["Wikidata_Label"] == "Example Label"
+    assert fields["Wikidata_Description"] == "Example description"
+
+
+def test_wikidata_extract_fields_falls_back_to_enwiki_title(tmp_path) -> None:
+    from game_catalog_builder.clients.wikidata_client import WikidataClient
+
+    client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
+    entity = {
+        "id": "Q2",
+        "labels": {},
+        "descriptions": {"en": {"value": "Example description"}},
+        "claims": {},
+        "sitelinks": {"enwiki": {"title": "Left 4 Dead"}},
+    }
+    fields = client._extract_fields(entity)
+    assert fields["Wikidata_Label"] == "Left 4 Dead"
 
 
 def test_hltb_caches_by_id_or_name_fallback(tmp_path):
@@ -281,9 +376,15 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
 
     input_csv = tmp_path / "in.csv"
     with input_csv.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["Name"])
+        w = csv.DictWriter(f, fieldnames=["RowId", "Name"])
         w.writeheader()
-        w.writerows([{"Name": "Game A"}, {"Name": "Game B"}, {"Name": "Game C"}])
+        w.writerows(
+            [
+                {"RowId": "rid:1", "Name": "Game A"},
+                {"RowId": "rid:2", "Name": "Game B"},
+                {"RowId": "rid:3", "Name": "Game C"},
+            ]
+        )
 
     steam_out = tmp_path / "Provider_Steam.csv"
     steamspy_out = tmp_path / "Provider_SteamSpy.csv"

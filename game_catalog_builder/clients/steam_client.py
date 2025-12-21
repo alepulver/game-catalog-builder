@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -360,6 +361,22 @@ class SteamClient:
                 return None
             logging.warning(f"Not found on Steam: '{game_name}'. No results from API.")
             return None
+
+        # Prefer exact normalized title matches when present. This avoids common traps like:
+        # - "Diablo" -> "Diablo IV"
+        # - "Assassin's Creed" -> "Assassin's Creed Unity"
+        def _norm(s: str) -> str:
+            return normalize_game_name(str(s or "")).strip()
+
+        query_norm = _norm(stripped_name or str(game_name or "").strip())
+        exact = [it for it in results if _norm(str(it.get("name", "") or "")) == query_norm]
+        if exact and len(exact) < len(results):
+            results = exact
+        elif base_name:
+            base_norm = _norm(base_name)
+            exact_base = [it for it in results if _norm(str(it.get("name", "") or "")) == base_norm]
+            if exact_base and len(exact_base) < len(results):
+                results = exact_base
 
         # If the query has no sequel number, prefer candidates that are the same base game name
         # plus "edition" tokens (GOTY/Complete/etc) over candidates with explicit sequel numbers.
@@ -801,6 +818,22 @@ class SteamClient:
         if platforms.get("linux"):
             platform_names.append("Linux")
 
+        developers = details.get("developers", []) or []
+        publishers = details.get("publishers", []) or []
+        if isinstance(developers, str):
+            developers = [developers]
+        if isinstance(publishers, str):
+            publishers = [publishers]
+
+        dev_list = [str(x).strip() for x in (developers or []) if str(x).strip()] if isinstance(
+            developers, list
+        ) else []
+        pub_list = [str(x).strip() for x in (publishers or []) if str(x).strip()] if isinstance(
+            publishers, list
+        ) else []
+        dev_str = json.dumps(dev_list, ensure_ascii=False)
+        pub_str = json.dumps(pub_list, ensure_ascii=False)
+
         return {
             "Steam_AppID": str(appid),
             "Steam_Name": str(details.get("name", "") or ""),
@@ -812,4 +845,6 @@ class SteamClient:
             "Steam_Price": price,
             "Steam_Categories": ", ".join(categories),
             "Steam_Metacritic": str(metacritic_score),
+            "Steam_Developers": dev_str,
+            "Steam_Publishers": pub_str,
         }

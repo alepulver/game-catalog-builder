@@ -8,6 +8,5 @@
 Generate/refresh the reference:
 
 ```bash
-python -m game_catalog_builder.generate_provider_field_reference
+python -m game_catalog_builder.tools.generate_provider_field_reference
 ```
-

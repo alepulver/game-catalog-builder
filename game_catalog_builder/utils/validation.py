@@ -18,6 +18,92 @@ def _split_csv_list(s: str) -> list[str]:
     return [p.strip() for p in (s or "").split(",") if p.strip()]
 
 
+def _split_json_array_cell(s: str) -> list[str]:
+    """
+    Parse a JSON array serialized into a CSV cell (e.g. ["id Software","Bethesda"]).
+    """
+    import json
+
+    raw = str(s or "").strip()
+    if not raw:
+        return []
+    if not raw.startswith("["):
+        return []
+    try:
+        val = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(val, list):
+        return []
+    out: list[str] = []
+    for x in val:
+        t = str(x or "").strip()
+        if t:
+            out.append(t)
+    return out
+
+
+_LEGAL_SUFFIXES = (
+    "inc",
+    "inc.",
+    "incorporated",
+    "llc",
+    "l.l.c.",
+    "ltd",
+    "ltd.",
+    "limited",
+    "corp",
+    "corp.",
+    "corporation",
+    "co",
+    "co.",
+    "company",
+    "gmbh",
+    "s.a.",
+    "s.a",
+    "s.r.l.",
+    "s.r.l",
+    "ag",
+    "bv",
+    "oy",
+    "oyj",
+)
+
+
+def _normalize_company_name(value: str) -> str:
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    # strip trailing parentheticals (often porting/platform labels)
+    if s.endswith(")") and "(" in s:
+        s = s.rsplit("(", 1)[0].strip()
+    s2 = s.strip().rstrip(",").strip()
+    parts = s2.split()
+    while parts and parts[-1].strip().casefold() in {x.casefold() for x in _LEGAL_SUFFIXES}:
+        parts = parts[:-1]
+    s3 = " ".join(parts).strip().strip(",").strip()
+    return s3.casefold()
+
+
+def _company_set_from_row(row: dict[str, str], *, col: str) -> set[str]:
+    raw = str(row.get(col, "") or "").strip()
+    items = _split_json_array_cell(raw)
+    out = {_normalize_company_name(x) for x in items}
+    return {x for x in out if x}
+
+
+def _has_any_disagree(sets: list[set[str]]) -> bool:
+    present = [s for s in sets if s]
+    if len(present) < 2:
+        return False
+    # Disagree if any pair has empty intersection.
+    for i in range(len(present)):
+        for j in range(i + 1, len(present)):
+            if present[i].isdisjoint(present[j]):
+                return True
+    return False
+
+
 def _normalize_platform_token(token: str) -> str:
     t = (token or "").strip().lower()
     if not t:
@@ -413,6 +499,9 @@ def generate_validation_report(
                 continue
             if col not in df.columns:
                 continue
+            # SteamSpy only applies when we have a Steam AppID.
+            if prov == "SteamSpy" and not steam_appid:
+                continue
             if not str(r.get(col, "") or "").strip():
                 not_found.append(prov)
 
@@ -548,6 +637,22 @@ def generate_validation_report(
             validation_tags.append("suggest_rename")
         if review_title == "YES":
             validation_tags.append("needs_review")
+
+        # Developer/publisher cross-checks (high-signal when available).
+        dev_sets = [
+            _company_set_from_row(r, col="Steam_Developers"),
+            _company_set_from_row(r, col="RAWG_Developers"),
+            _company_set_from_row(r, col="IGDB_Developers"),
+        ]
+        pub_sets = [
+            _company_set_from_row(r, col="Steam_Publishers"),
+            _company_set_from_row(r, col="RAWG_Publishers"),
+            _company_set_from_row(r, col="IGDB_Publishers"),
+        ]
+        if _has_any_disagree(dev_sets):
+            validation_tags.append("developer_disagree")
+        if _has_any_disagree(pub_sets):
+            validation_tags.append("publisher_disagree")
 
         provider_titles: dict[str, str] = {
             "rawg": rawg_name,

@@ -27,18 +27,14 @@ If false positives appear, add guards in series-number extraction to ignore “n
 - `2K`/`2k` patterns (including `2k23`-style)
 - Similar non-sequel numeric brands
 
-### 2) Developer/publisher extraction + cross-checks
+### 2) Developer/publisher cross-checks (validation tags)
 
-No new endpoints needed: Steam provides developer/publisher lists in `appdetails`.
+Steam developer/publisher extraction is already implemented (`Steam_Developers`, `Steam_Publishers`
+as JSON arrays in CSV cells). The next step is to use comparable dev/pub data from other providers
+to add high-signal validation tags:
 
-Add extraction:
-- `Steam_Developers` from `developers[]` (comma-separated)
-- `Steam_Publishers` from `publishers[]` (comma-separated)
-
-Add validation:
-- `developer_disagree`, `publisher_disagree` tags based on normalized set overlap.
-
-Outcome: dev/pub agreement becomes a strong identity signal when titles/years are ambiguous.
+- `developer_disagree`
+- `publisher_disagree`
 
 ## High-value next-wave enhancements (minimal transforms)
 
@@ -121,7 +117,6 @@ Also improve culprit inference:
 
 The following items are not currently extracted into `Provider_*.csv` / `Games_Enriched.csv`, and therefore can’t yet drive review/validation tags:
 
-- **Steam dev/pub fields**: `Steam_Developers`, `Steam_Publishers` (available from `appdetails`, no new endpoint)
 - **Steam/RAWG/IGDB “review aid” text**: short description / summary and provider URLs
 - **IGDB relationship context** for editions/ports: `parent_game`, `version_parent`, `expansions`, `ports` (still single-call via field expansion)
 - **RAWG richer metadata**: full `genres[]` (not just first two), plus `esrb_rating.name`

@@ -137,21 +137,6 @@ def ensure_row_ids(df: pd.DataFrame, *, col: str = "RowId") -> tuple[pd.DataFram
     return out, created
 
 
-def ensure_row_ids_in_input(path: str | Path, *, col: str = "RowId") -> pd.DataFrame:
-    """
-    Backwards-compatible helper: ensure RowId exists and persist to the same CSV path.
-
-    Prefer using ensure_row_ids(df) and writing to a new file when you don't want to modify the
-    original input.
-    """
-    p = Path(path)
-    df = read_csv(p)
-    out, created = ensure_row_ids(df, col=col)
-    if created > 0 or col not in df.columns:
-        write_csv(out, p)
-    return out
-
-
 def load_identity_overrides(path: str | Path) -> dict[str, dict[str, str]]:
     """
     Load per-row provider IDs (and HLTB query overrides) from a CSV.
@@ -159,7 +144,8 @@ def load_identity_overrides(path: str | Path) -> dict[str, dict[str, str]]:
     Returns:
         Mapping:
             {RowId: {"RAWG_ID": "...", "IGDB_ID": "...", "Steam_AppID": "...",
-                     "HLTB_ID": "...", "HLTB_Query": "..."}}
+                     "HLTB_ID": "...", "HLTB_Query": "...",
+                     "Wikidata_QID": "..."}}
 
     Uses the ID columns directly. If a value is empty, the provider will fall back to searching.
     """
@@ -180,15 +166,19 @@ def load_identity_overrides(path: str | Path) -> dict[str, dict[str, str]]:
     steam = col("Steam_AppID")
     hltb_id = col("HLTB_ID") if "HLTB_ID" in df.columns else pd.Series([""] * len(df))
     hltb_query = col("HLTB_Query") if "HLTB_Query" in df.columns else pd.Series([""] * len(df))
+    wikidata = (
+        col("Wikidata_QID") if "Wikidata_QID" in df.columns else pd.Series([""] * len(df))
+    )
 
     out: dict[str, dict[str, str]] = {}
-    for rid, rawg_id, igdb_id, steam_id, hltb_id_val, hltb_q in zip(
+    for rid, rawg_id, igdb_id, steam_id, hltb_id_val, hltb_q, qid in zip(
         rowids.tolist(),
         rawg.tolist(),
         igdb.tolist(),
         steam.tolist(),
         hltb_id.astype(str).str.strip().tolist(),
         hltb_query.astype(str).str.strip().tolist(),
+        wikidata.astype(str).str.strip().tolist(),
     ):
         if not rid:
             continue
@@ -198,6 +188,7 @@ def load_identity_overrides(path: str | Path) -> dict[str, dict[str, str]]:
             "Steam_AppID": steam_id,
             "HLTB_ID": hltb_id_val,
             "HLTB_Query": hltb_q,
+            "Wikidata_QID": qid,
         }
     return out
 
@@ -708,6 +699,9 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "IGDB_Rating": "",
     "IGDB_RatingCount": "",
     "Score_IGDB_100": "",
+    "IGDB_AggregatedRating": "",
+    "IGDB_AggregatedRatingCount": "",
+    "Score_IGDBCritic_100": "",
     # Steam
     "Steam_AppID": "",
     "Steam_Name": "",
@@ -722,8 +716,11 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     # SteamSpy
     "SteamSpy_Owners": "",
     "SteamSpy_Players": "",
+    "SteamSpy_Players2Weeks": "",
     "SteamSpy_CCU": "",
     "SteamSpy_PlaytimeAvg": "",
+    "SteamSpy_PlaytimeAvg2Weeks": "",
+    "SteamSpy_PlaytimeMedian2Weeks": "",
     "SteamSpy_Positive": "",
     "SteamSpy_Negative": "",
     "Score_SteamSpy_100": "",
@@ -733,4 +730,15 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "HLTB_Extra": "",
     "HLTB_Completionist": "",
     "Score_HLTB_100": "",
+    # Wikidata
+    "Wikidata_QID": "",
+    "Wikidata_Label": "",
+    "Wikidata_Description": "",
+    "Wikidata_ReleaseYear": "",
+    "Wikidata_Developers": "",
+    "Wikidata_Publishers": "",
+    "Wikidata_Platforms": "",
+    "Wikidata_Series": "",
+    "Wikidata_Genres": "",
+    "Wikidata_Wikipedia": "",
 }

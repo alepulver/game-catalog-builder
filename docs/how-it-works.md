@@ -5,7 +5,7 @@ This project enriches a “personal catalog” CSV (from MyVideoGameList) with m
 ## Overview
 
 1. Read the input CSV (must contain a `Name` column).
-2. Run providers (RAWG, IGDB, Steam→SteamSpy, HLTB).
+2. Run providers (RAWG, IGDB, Steam→SteamSpy, HLTB, Wikidata).
 3. Each provider:
    - searches by name (fuzzy match),
    - optionally fetches details by ID (provider-specific),
@@ -28,6 +28,15 @@ When a provider does not already have a cached ID for a given `Name`, it perform
 - Request failures (no response) are not negative-cached, to avoid poisoning the cache when offline.
 
 Because MyVideoGameList titles can be non-standard, the search step is treated as “best effort”; import diagnostics are the main tool for spotting when providers returned different games for the same row.
+
+## Import safety (avoid wrong pins)
+
+The importer is conservative about pins:
+
+- Any non-100% match emits a `WARNING`.
+- If diagnostics identify a provider as `likely_wrong:<provider>` **and** there is a strict-majority
+  provider consensus (and the provider is tagged as the consensus outlier), the importer clears
+  that provider ID instead of keeping a likely-wrong pin.
 
 ## Provider-specific search notes
 
@@ -108,6 +117,7 @@ The tool is designed to be resumable, so it persists both caches and intermediat
       - Consensus/outliers: `provider_consensus:*`, `provider_outlier:*`, `provider_no_consensus`
       - Metadata outliers: `year_outlier:*`, `platform_outlier:*` (and `*_no_consensus`)
       - Actionable rollups: `likely_wrong:*`, `ambiguous_title_year`
+      - Dev/pub checks: `developer_disagree`, `publisher_disagree` (when Steam/RAWG/IGDB dev/pub data is available)
     - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW` (missing providers are typically `MEDIUM`; strong disagreement signals are `LOW`).
 
 - Merge output (`data/output/Games_Enriched.csv`)
@@ -116,6 +126,34 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   user-editable fields + provider enrichment fields.
 - Enriched outputs include a small set of provider score fields normalized to 0–100 where possible:
   - `Score_RAWG_100`, `Score_IGDB_100`, `Score_SteamSpy_100`, `Score_HLTB_100`
+- Enriched outputs also include a small set of computed “signals” (Phase 1):
+  - Reach: `Reach_SteamSpyOwners_*` (parsed from SteamSpy owners ranges)
+  - Reach (critics): `Reach_IGDBAggregatedRatingCount` (when IGDB aggregated ratings exist)
+  - Ratings: `CommunityRating_Composite_100`, `CriticRating_Composite_100` (uses Steam/RAWG Metacritic + IGDB aggregated rating when present)
+  - Production: `Production_Tier` (optional; driven by `data/production_tiers.yaml` when present)
+  - Now (current interest): `Now_SteamSpyPlayers2Weeks`, `Now_SteamSpyPlaytimeAvg2Weeks`, `Now_SteamSpyPlaytimeMedian2Weeks`
+
+## Production tier mapping (AAA/AA/Indie)
+
+`Production_Tier` is driven by a simple, project-specific mapping file:
+
+- `data/production_tiers.yaml` maps exact `Steam_Publishers` / `Steam_Developers` names to a coarse tier.
+- You can update/extend the mapping automatically from an existing enriched CSV using Wikipedia lookups:
+  - Dry-run (prints suggestions + logs details):
+    - `python run.py production-tiers data/output/Games_Enriched.csv`
+  - Apply updates (adds new entries; does not overwrite existing tiers by default):
+    - `python run.py production-tiers data/output/Games_Enriched.csv --apply`
+
+Notes:
+- This tool is intentionally conservative: if Wikipedia suggests a different tier for an existing entry,
+  it logs a conflict and keeps your YAML unless you pass `--update-existing`.
+- By default it also ensures completeness: after trying Wikipedia for the most frequent unknown entities,
+  it fills all remaining publishers/developers from the CSV with `Unknown` so nothing is blank.
+- Network access is required. Wikipedia responses are cached under:
+  - pageviews: `data/cache/wiki_pageviews_cache.json`
+  - summaries: `data/cache/wiki_summary_cache.json`
+- Steam publisher/developer lists are stored as JSON arrays in a CSV cell (e.g. `["Company, Inc."]`),
+  so company suffix punctuation remains intact.
 
 ## Logs (how to read them)
 
@@ -158,11 +196,16 @@ The tool is designed to be resumable, so it persists both caches and intermediat
 - The project caches the full HLTB result object payload (JSON-serialized) so additional derived
   fields can be added later without re-fetching.
 
-## Merge behavior (duplicate names)
+### Wikidata
 
-If the input contains duplicate `Name` values (e.g., the same game on two platforms), the merge step avoids cartesian growth by merging using `(Name, occurrence_index)` instead of `Name` alone.
+- Search: `GET https://www.wikidata.org/w/api.php?action=wbsearchentities&search=...`
+- Details: `GET https://www.wikidata.org/w/api.php?action=wbgetentities&ids=...`
+- ID: `Wikidata_QID`
+- Provides cross-platform identity context: canonical label/description, release year, developer/publisher, platforms, series, genres, and an English Wikipedia link.
 
-The occurrence index is the per-name row number within the file and is preserved across provider outputs because they originate from the same input ordering.
+## Merge behavior
+
+All merges are performed using `RowId`. Duplicate `Name` values are fine as long as `RowId` values are unique.
 
 ## Validation vs import diagnostics
 

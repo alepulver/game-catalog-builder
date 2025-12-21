@@ -4,43 +4,19 @@ from pathlib import Path
 
 import pandas as pd
 
+from .signals import apply_phase1_signals
 from .utilities import read_csv, write_csv
 
 
-def _merge_on_name_with_occurrence(
-    base: pd.DataFrame, other: pd.DataFrame, on: str
-) -> pd.DataFrame:
+def merge_left(base: pd.DataFrame, other: pd.DataFrame) -> pd.DataFrame:
     """
-    Merge on name + per-name occurrence index to avoid cartesian growth when names repeat.
-
-    Assumes both dataframes preserve the same row order per repeated name, which holds for our
-    provider outputs because they originate from the same base input ordering.
+    Left-join provider data onto the personal base using RowId.
     """
-    base2 = base.copy()
-    other2 = other.copy()
-    base2["__occ"] = base2.groupby(on).cumcount()
-    other2["__occ"] = other2.groupby(on).cumcount()
-    merged = base2.merge(other2, on=[on, "__occ"], how="left", suffixes=("", "_dup"))
-    return merged.drop(columns=["__occ"])
-
-
-def merge_left(base: pd.DataFrame, other: pd.DataFrame, on: str = "Name") -> pd.DataFrame:
-    """
-    Safe left-join: preserves all rows from base.
-    """
-    if on in base.columns and on in other.columns:
-        if base[on].duplicated().any() or other[on].duplicated().any():
-            return _merge_on_name_with_occurrence(base, other, on=on)
-        return base.merge(other, on=on, how="left", suffixes=("", "_dup"))
-
-    # Transitional fallback: if provider outputs don't yet have RowId, fall back to Name join.
-    if on == "RowId" and "Name" in base.columns and "Name" in other.columns:
-        if base["Name"].duplicated().any() or other["Name"].duplicated().any():
-            return _merge_on_name_with_occurrence(base, other, on="Name")
-        return base.merge(other, on="Name", how="left", suffixes=("", "_dup"))
-
-    # Last resort: no compatible join key; return base unchanged.
-    return base.copy()
+    if "RowId" not in base.columns or "RowId" not in other.columns:
+        raise ValueError(
+            "Missing RowId in base/provider CSV; run `import` and provider steps again."
+        )
+    return base.merge(other, on="RowId", how="left", suffixes=("", "_dup"))
 
 
 def drop_duplicate_suffixes(df: pd.DataFrame) -> pd.DataFrame:
@@ -53,7 +29,8 @@ def drop_duplicate_suffixes(df: pd.DataFrame) -> pd.DataFrame:
 
 def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Logical order: Personal → RAWG → IGDB → Steam → SteamSpy → HLTB
+    Logical order: Personal → Signals → Scores → RAWG → IGDB → Steam → SteamSpy → HLTB
+    → Wikidata
     """
     personal_cols = [
         "RowId",
@@ -66,15 +43,44 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
         "Notes",
     ]
 
+    signal_cols = [
+        "Reach_SteamSpyOwners_Low",
+        "Reach_SteamSpyOwners_High",
+        "Reach_SteamSpyOwners_Mid",
+        "Reach_Composite",
+        "Reach_SteamReviews",
+        "Reach_RAWGRatingsCount",
+        "Reach_IGDBRatingCount",
+        "Reach_IGDBAggregatedRatingCount",
+        "Launch_Interest_100",
+        "CommunityRating_Composite_100",
+        "CriticRating_Composite_100",
+        "Production_Tier",
+        "Production_TierReason",
+        "Now_SteamSpyPlayers2Weeks",
+        "Now_SteamSpyPlaytimeAvg2Weeks",
+        "Now_SteamSpyPlaytimeMedian2Weeks",
+        "Now_Composite",
+    ]
+
     rawg_cols = [c for c in df.columns if c.startswith("RAWG_")]
     igdb_cols = [c for c in df.columns if c.startswith("IGDB_")]
     steam_cols = [c for c in df.columns if c.startswith("Steam_")]
     steamspy_cols = [c for c in df.columns if c.startswith("SteamSpy_")]
     hltb_cols = [c for c in df.columns if c.startswith("HLTB_")]
+    wikidata_cols = [c for c in df.columns if c.startswith("Wikidata_")]
     score_cols = [c for c in df.columns if c.startswith("Score_")]
 
     ordered = (
-        personal_cols + score_cols + rawg_cols + igdb_cols + steam_cols + steamspy_cols + hltb_cols
+        personal_cols
+        + signal_cols
+        + score_cols
+        + rawg_cols
+        + igdb_cols
+        + steam_cols
+        + steamspy_cols
+        + hltb_cols
+        + wikidata_cols
     )
 
     existing = [c for c in ordered if c in df.columns]
@@ -91,31 +97,39 @@ def merge_all(
     steamspy_csv: Path,
     output_csv: Path,
     igdb_csv: Path,
+    wikidata_csv: Path | None = None,
 ):
     # Personal base (NEVER overwritten)
     df = read_csv(personal_csv)
-    on = "RowId" if "RowId" in df.columns else "Name"
+    if "RowId" not in df.columns:
+        raise ValueError("Missing RowId in personal CSV; run `import` first.")
 
     # Incremental merges
     if rawg_csv.exists():
-        df = merge_left(df, read_csv(rawg_csv), on=on)
+        df = merge_left(df, read_csv(rawg_csv))
         df = drop_duplicate_suffixes(df)
 
     if hltb_csv.exists():
-        df = merge_left(df, read_csv(hltb_csv), on=on)
+        df = merge_left(df, read_csv(hltb_csv))
         df = drop_duplicate_suffixes(df)
 
     if steam_csv.exists():
-        df = merge_left(df, read_csv(steam_csv), on=on)
+        df = merge_left(df, read_csv(steam_csv))
         df = drop_duplicate_suffixes(df)
 
     if steamspy_csv.exists():
-        df = merge_left(df, read_csv(steamspy_csv), on=on)
+        df = merge_left(df, read_csv(steamspy_csv))
         df = drop_duplicate_suffixes(df)
 
     if igdb_csv.exists():
-        df = merge_left(df, read_csv(igdb_csv), on=on)
+        df = merge_left(df, read_csv(igdb_csv))
         df = drop_duplicate_suffixes(df)
+
+    if wikidata_csv and wikidata_csv.exists():
+        df = merge_left(df, read_csv(wikidata_csv))
+        df = drop_duplicate_suffixes(df)
+
+    df = apply_phase1_signals(df)
 
     # Final order
     df = reorder_columns(df)

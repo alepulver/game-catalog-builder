@@ -1,0 +1,717 @@
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+from typing import Any
+
+import requests
+
+from ..config import MATCHING, REQUEST, RETRY, WIKIDATA
+from ..utils.utilities import (
+    RateLimiter,
+    fuzzy_score,
+    iter_chunks,
+    load_json_cache,
+    pick_best_match,
+    save_json_cache,
+    with_retries,
+)
+
+WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
+USER_AGENT = "game-catalog-builder/1.0 (contact: alepulver@protonmail.com)"
+
+
+class WikidataClient:
+    """
+    Wikidata enrichment via MediaWiki API.
+
+    Cache format:
+      - by_query: query_key -> list[search result dict] (from wbsearchentities)
+      - by_id: qid -> raw wbgetentities entity dict (English labels/claims/sitelinks)
+      - by_id_negative: list[str] of qids that failed
+    """
+
+    def __init__(self, cache_path: str | Path, min_interval_s: float = WIKIDATA.min_interval_s):
+        self.cache_path = Path(cache_path)
+        self.stats: dict[str, int] = {
+            "by_query_hit": 0,
+            "by_query_fetch": 0,
+            "by_query_negative_hit": 0,
+            "by_query_negative_fetch": 0,
+            "by_id_hit": 0,
+            "by_id_fetch": 0,
+            "by_id_negative_hit": 0,
+            "by_id_negative_fetch": 0,
+        }
+        self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
+        self._by_query: dict[str, list[dict[str, Any]]] = {}
+        self._by_id: dict[str, dict[str, Any]] = {}
+        self._labels: dict[str, str] = {}
+        self._by_id_negative: set[str] = set()
+        self._load_cache(load_json_cache(self.cache_path))
+
+    def _load_cache(self, raw: Any) -> None:
+        if not isinstance(raw, dict) or not raw:
+            return
+        if isinstance(raw.get("by_query"), dict):
+            self._by_query = {
+                str(k): [it for it in v if isinstance(it, dict)]
+                for k, v in raw["by_query"].items()
+                if isinstance(v, list)
+            }
+        if isinstance(raw.get("by_id"), dict):
+            self._by_id = {str(k): v for k, v in raw["by_id"].items() if isinstance(v, dict)}
+        if isinstance(raw.get("labels"), dict):
+            self._labels = {
+                str(k): str(v).strip()
+                for k, v in raw["labels"].items()
+                if str(k).strip() and str(v).strip()
+            }
+        if isinstance(raw.get("by_id_negative"), list):
+            self._by_id_negative = {str(x) for x in raw["by_id_negative"] if str(x).strip()}
+
+    def _save_cache(self) -> None:
+        save_json_cache(
+            {
+                "by_query": self._by_query,
+                "by_id": self._by_id,
+                "labels": self._labels,
+                "by_id_negative": sorted(self._by_id_negative),
+            },
+            self.cache_path,
+        )
+
+    def _search(self, query: str) -> list[dict[str, Any]]:
+        q = str(query or "").strip()
+        if not q:
+            return []
+        query_key = f"lang:en|search:{q}"
+        cached = self._by_query.get(query_key)
+        if cached is not None:
+            if cached:
+                self.stats["by_query_hit"] += 1
+            else:
+                self.stats["by_query_negative_hit"] += 1
+            return cached
+
+        def _request():
+            self.ratelimiter.wait()
+            r = requests.get(
+                WIKIDATA_API_URL,
+                params={
+                    "action": "wbsearchentities",
+                    "search": q,
+                    "language": "en",
+                    "limit": WIKIDATA.search_limit,
+                    "format": "json",
+                },
+                timeout=REQUEST.timeout_s,
+                headers={"User-Agent": USER_AGENT},
+            )
+            r.raise_for_status()
+            return r.json()
+
+        data = with_retries(
+            _request,
+            retries=RETRY.retries,
+            on_fail_return=None,
+            context="Wikidata search",
+        )
+        if data is None:
+            logging.warning(
+                f"Wikidata search request failed for '{q}' (no response); not caching as not-found."
+            )
+            return []
+        if not isinstance(data, dict):
+            self._by_query[query_key] = []
+            self._save_cache()
+            self.stats["by_query_negative_fetch"] += 1
+            return []
+        items = [it for it in (data.get("search") or []) if isinstance(it, dict)]
+        self._by_query[query_key] = items
+        self._save_cache()
+        self.stats["by_query_fetch"] += 1
+        return items
+
+    def _get_entities(self, qids: list[str], *, props: str) -> dict[str, dict[str, Any]]:
+        """
+        Fetch multiple entities in a single call.
+        """
+        ids = [q for q in qids if str(q).strip()]
+        if not ids:
+            return {}
+
+        def _request():
+            self.ratelimiter.wait()
+            r = requests.get(
+                WIKIDATA_API_URL,
+                params={
+                    "action": "wbgetentities",
+                    "ids": "|".join(ids),
+                    "props": props,
+                    "languages": "en",
+                    "format": "json",
+                },
+                timeout=REQUEST.timeout_s,
+                headers={"User-Agent": USER_AGENT},
+            )
+            r.raise_for_status()
+            return r.json()
+
+        data = with_retries(
+            _request,
+            retries=RETRY.retries,
+            on_fail_return=None,
+            context="Wikidata wbgetentities",
+        )
+        if not isinstance(data, dict):
+            return {}
+        entities = data.get("entities") or {}
+        if not isinstance(entities, dict):
+            return {}
+        return {str(k): v for k, v in entities.items() if isinstance(v, dict)}
+
+    def _is_complete_entity(self, entity: dict[str, Any]) -> bool:
+        """
+        Determine whether a cached entity is complete enough for current extraction.
+
+        We rely on sitelinks for Wikipedia titles and claims/labels for most fields.
+        Older caches may lack sitelinks; treat them as incomplete and refetch.
+        """
+        if not isinstance(entity, dict):
+            return False
+        if "claims" not in entity or "labels" not in entity:
+            return False
+        # Must include sitelinks so we can derive enwiki title reliably.
+        return "sitelinks" in entity
+
+    def get_by_id(self, qid: str) -> dict[str, str] | None:
+        q = str(qid or "").strip()
+        if not q:
+            return None
+        if q in self._by_id_negative:
+            self.stats["by_id_negative_hit"] += 1
+            return None
+        cached = self._by_id.get(q)
+        if isinstance(cached, dict) and self._is_complete_entity(cached):
+            self.stats["by_id_hit"] += 1
+            return self._extract_fields(cached)
+
+        entities = self._get_entities([q], props="labels|descriptions|aliases|claims|sitelinks")
+        ent = entities.get(q)
+        if not isinstance(ent, dict):
+            self._by_id_negative.add(q)
+            self._save_cache()
+            self.stats["by_id_negative_fetch"] += 1
+            return None
+        self._by_id[q] = ent
+        self._save_cache()
+        self.stats["by_id_fetch"] += 1
+        return self._extract_fields(ent)
+
+    def get_by_ids(self, qids: list[str]) -> dict[str, dict[str, str]]:
+        """
+        Fetch multiple Wikidata entities and return extracted fields for each.
+
+        Uses cache when available and batches wbgetentities calls for missing QIDs.
+        """
+        ids = [str(q).strip() for q in (qids or []) if str(q).strip()]
+        if not ids:
+            return {}
+
+        out: dict[str, dict[str, str]] = {}
+        missing: list[str] = []
+        for q in ids:
+            if q in self._by_id_negative:
+                self.stats["by_id_negative_hit"] += 1
+                continue
+            cached = self._by_id.get(q)
+            if isinstance(cached, dict) and self._is_complete_entity(cached):
+                self.stats["by_id_hit"] += 1
+                out[q] = self._extract_fields(cached)
+            else:
+                missing.append(q)
+
+        if missing:
+            for chunk in iter_chunks(missing, WIKIDATA.get_by_ids_batch_size):
+                entities = self._get_entities(
+                    chunk, props="labels|descriptions|aliases|claims|sitelinks"
+                )
+                for q in chunk:
+                    ent = entities.get(q)
+                    if not isinstance(ent, dict):
+                        self._by_id_negative.add(q)
+                        self.stats["by_id_negative_fetch"] += 1
+                        continue
+                    self._by_id[q] = ent
+                    self.stats["by_id_fetch"] += 1
+                    out[q] = self._extract_fields(ent)
+            self._save_cache()
+
+        return out
+
+    def search(self, game_name: str, year_hint: int | None = None) -> dict[str, str] | None:
+        name = str(game_name or "").strip()
+        if not name:
+            return None
+        items = self._search(name)
+        if not items:
+            return None
+
+        def _tokens(text: object) -> set[str]:
+            s = str(text or "").casefold()
+            return {t for t in re.findall(r"[a-z0-9]+", s) if t}
+
+        def _has_extra_tokens(candidate_label: object) -> bool:
+            # Prefer candidates that don't add new tokens beyond the personal title. This avoids
+            # pinning "edition-like" or unrelated longer titles when the base title is ambiguous.
+            in_tokens = _tokens(name)
+            cand_tokens = _tokens(candidate_label)
+            if not in_tokens or not cand_tokens:
+                return False
+            return bool(cand_tokens - in_tokens)
+
+        def _desc_is_video_game(desc: object) -> bool:
+            d = str(desc or "").strip().lower()
+            if not d:
+                return False
+            return "video game" in d or "computer game" in d
+
+        def _desc_is_unwanted_game_kind(desc: object) -> bool:
+            d = str(desc or "").strip().lower()
+            if not d:
+                return False
+            # Avoid selecting non-game pages that can still mention "video game" in their
+            # description (e.g., ESRB descriptors) or demos.
+            return any(
+                k in d
+                for k in (
+                    "demo",
+                    "esrb",
+                    "content descriptor",
+                )
+            )
+
+        def _desc_is_non_game(desc: object) -> bool:
+            d = str(desc or "").strip().lower()
+            if not d:
+                return False
+            # Strongly non-game media types.
+            return any(
+                k in d
+                for k in (
+                    "film",
+                    "movie",
+                    "television",
+                    "tv series",
+                    "anime",
+                    "manga",
+                    "comic",
+                    "soundtrack",
+                    "album",
+                    "song",
+                    "novel",
+                    "book",
+                )
+            )
+
+        def _is_valid_game_instance(inst: str) -> bool:
+            s = str(inst or "").strip().lower()
+            if not s:
+                return False
+            # Hard rejects even if they contain the word "game".
+            if any(k in s for k in ("game demo", "content descriptor", "esrb content descriptor")):
+                return False
+            # Allow expansions/DLC/episodes as acceptable "game" items for now; they are still
+            # useful identity hubs and often the closest Wikidata entry for an edition-like title.
+            if any(
+                k in s
+                for k in (
+                    "video game",
+                    "computer game",
+                    "expansion pack",
+                    "downloadable content",
+                    "dlc",
+                )
+            ):
+                return True
+            return False
+
+        def _year_getter(obj: dict[str, Any]) -> int | None:
+            desc = str(obj.get("description") or "").strip()
+            m = re.search(r"\b(19\d{2}|20\d{2})\b", desc) if desc else None
+            if m:
+                try:
+                    return int(m.group(1))
+                except Exception:
+                    return None
+            return None
+
+        def _retry_disambiguation() -> dict[str, str] | None:
+            # Wikidata has many short/ambiguous titles; try a conservative disambiguation
+            # suffix that often surfaces the correct video game entry.
+            if "video game" in name.lower():
+                return None
+            for alt in (f"{name} video game", f"{name} (video game)"):
+                got = self.search(alt, year_hint=year_hint)
+                if got:
+                    return got
+            return None
+
+        def _try_instance_of_filtered_choice() -> tuple[
+            dict[str, Any] | None, int, list[tuple[str, int]]
+        ]:
+            # If search descriptions are unhelpful (or misleading), validate a small set of top
+            # candidates by checking Wikidata "instance of" (P31) from cached/batched entity
+            # details. This avoids selecting films/albums/demos with the same label.
+            scored_items = sorted(
+                items,
+                key=lambda it: fuzzy_score(name, str(it.get("label") or "")),
+                reverse=True,
+            )[:10]
+            qids: list[str] = []
+            for it in scored_items:
+                q = str(it.get("id") or "").strip()
+                if q:
+                    qids.append(q)
+            if not qids:
+                return (None, -1, [])
+            details_by_id = self.get_by_ids(qids)
+            valid_qids = {
+                qid
+                for qid, det in details_by_id.items()
+                if _is_valid_game_instance(str(det.get("Wikidata_InstanceOf", "")))
+            }
+            if not valid_qids:
+                return (None, -1, [])
+            valid_items = [it for it in items if str(it.get("id") or "").strip() in valid_qids]
+            return pick_best_match(
+                name,
+                valid_items,
+                name_key="label",
+                year_hint=year_hint,
+                year_getter=_year_getter,
+            )
+
+        # Prefer candidates whose *search result description* indicates they are a video game.
+        # This avoids common traps like films/albums sharing the same title.
+        preferred = [
+            it
+            for it in items
+            if _desc_is_video_game(it.get("description"))
+            and not _desc_is_unwanted_game_kind(it.get("description"))
+        ]
+        gameish = [it for it in items if _desc_is_video_game(it.get("description"))]
+        best = None
+        score = -1
+        top_matches: list[tuple[str, int]] = []
+        if preferred:
+            best, score, top_matches = pick_best_match(
+                name,
+                preferred,
+                name_key="label",
+                year_hint=year_hint,
+                year_getter=_year_getter,
+            )
+        if best is None or score < MATCHING.min_score:
+            if gameish:
+                best, score, top_matches = pick_best_match(
+                    name,
+                    gameish,
+                    name_key="label",
+                    year_hint=year_hint,
+                    year_getter=_year_getter,
+                )
+            else:
+                best, score, top_matches = pick_best_match(
+                    name,
+                    items,
+                    name_key="label",
+                    year_hint=year_hint,
+                    year_getter=_year_getter,
+                )
+
+        # If the best candidate adds extra tokens (usually a subtitle/edition), try to re-rank
+        # among "no-extra-token" candidates when the score is not very high.
+        if best and score < MATCHING.suspicious_score and _has_extra_tokens(best.get("label")):
+            safer = [it for it in items if not _has_extra_tokens(it.get("label"))]
+            if safer:
+                best2, score2, top2 = pick_best_match(
+                    name,
+                    safer,
+                    name_key="label",
+                    year_hint=year_hint,
+                    year_getter=_year_getter,
+                )
+                if best2 and score2 >= MATCHING.min_score:
+                    best, score, top_matches = best2, score2, top2
+        if not best or score < MATCHING.min_score:
+            if top_matches:
+                top = ", ".join(f"'{n}' ({s}%)" for n, s in top_matches[:5])
+                logging.warning(f"Not found in Wikidata: '{name}'. Closest matches: {top}")
+            else:
+                logging.warning(f"Not found in Wikidata: '{name}'. No matches found.")
+            retry = _retry_disambiguation()
+            if retry:
+                return retry
+            return None
+
+        if _desc_is_non_game(best.get("description")):
+            inst_best, inst_score, inst_top = _try_instance_of_filtered_choice()
+            if inst_best and inst_score >= MATCHING.min_score:
+                best, score, top_matches = inst_best, inst_score, inst_top
+            else:
+                # Try to recover by selecting another high-scoring candidate that looks like a video
+                # game. This is intentionally conservative: if Wikidata doesn't clearly indicate a
+                # video game, treat it as not found to avoid polluting the row with wrong metadata.
+                gameish2 = [it for it in items if _desc_is_video_game(it.get("description"))]
+                if gameish2:
+                    alt, alt_score, alt_top = pick_best_match(
+                        name,
+                        gameish2,
+                        name_key="label",
+                        year_hint=year_hint,
+                        year_getter=_year_getter,
+                    )
+                    if alt and alt_score >= MATCHING.min_score:
+                        best = alt
+                        score = alt_score
+                        top_matches = alt_top
+                    else:
+                        logging.warning(
+                            "Rejecting non-game Wikidata match for '%s' (picked '%s'); "
+                            "no suitable video game candidate found.",
+                            name,
+                            best.get("label", ""),
+                        )
+                        return None
+                else:
+                    logging.warning(
+                        "Rejecting non-game Wikidata match for '%s' (picked '%s'); "
+                        "no video game candidates in search results.",
+                        name,
+                        best.get("label", ""),
+                    )
+                    return None
+
+        if score < 100:
+            msg = (
+                f"Close match for '{name}': Selected '{best.get('label', '')}' (score: {score}%)"
+            )
+            if top_matches:
+                top = ", ".join(f"'{n}' ({s}%)" for n, s in top_matches[:5])
+                msg += f", alternatives: {top}"
+            logging.warning(msg)
+
+        qid = str(best.get("id") or "").strip()
+        if not qid:
+            return None
+        details = self.get_by_id(qid)
+        if not details:
+            return None
+        # Final guard: if "instance of" doesn't include "video game" and the description isn't
+        # gameish, reject as not found.
+        inst = str(details.get("Wikidata_InstanceOf", "") or "").strip().lower()
+        if any(k in inst for k in ("game demo", "content descriptor")):
+            logging.warning(
+                "Rejecting non-game Wikidata entity for '%s' (QID %s, instance_of='%s').",
+                name,
+                qid,
+                inst,
+            )
+            # Try to find another candidate that is a proper video game (not demo/descriptor).
+            inst_best, inst_score, inst_top = _try_instance_of_filtered_choice()
+            if inst_best and inst_score >= MATCHING.min_score:
+                qid2 = str(inst_best.get("id") or "").strip()
+                if qid2 and qid2 != qid:
+                    details2 = self.get_by_id(qid2)
+                    if details2:
+                        return details2
+            retry = _retry_disambiguation()
+            if retry:
+                return retry
+            return None
+        if (
+            not _is_valid_game_instance(inst)
+            and not _desc_is_video_game(best.get("description"))
+            and not _desc_is_video_game(details.get("Wikidata_Description", ""))
+        ):
+            logging.warning(
+                "Rejecting non-video-game Wikidata entity for '%s' (QID %s, instance_of='%s').",
+                name,
+                qid,
+                inst,
+            )
+            return None
+        return details
+
+    def _extract_fields(self, entity: dict[str, Any]) -> dict[str, str]:
+        qid = str(entity.get("id") or "").strip()
+
+        def _lang_value(obj: Any, preferred: tuple[str, ...] = ("en", "en-gb", "en-ca")) -> str:
+            if not isinstance(obj, dict):
+                return ""
+            for k in preferred:
+                v = obj.get(k)
+                if isinstance(v, dict):
+                    s = str(v.get("value") or "").strip()
+                    if s:
+                        return s
+            for v in obj.values():
+                if isinstance(v, dict):
+                    s = str(v.get("value") or "").strip()
+                    if s:
+                        return s
+            return ""
+
+        label = _lang_value(entity.get("labels") or {})
+        desc = _lang_value(entity.get("descriptions") or {})
+
+        # Claims helpers
+        claims = entity.get("claims") or {}
+
+        def _qids(prop: str) -> list[str]:
+            out: list[str] = []
+            if not isinstance(claims, dict):
+                return out
+            vals = claims.get(prop) or []
+            if not isinstance(vals, list):
+                return out
+            for st in vals:
+                m = (st or {}).get("mainsnak") or {}
+                dv = m.get("datavalue") or {}
+                v = dv.get("value")
+                if isinstance(v, dict) and v.get("id"):
+                    out.append(str(v.get("id")))
+            return out
+
+        def _quantity(prop: str) -> str:
+            vals = claims.get(prop) or []
+            if not isinstance(vals, list):
+                return ""
+            for st in vals:
+                m = (st or {}).get("mainsnak") or {}
+                dv = m.get("datavalue") or {}
+                v = dv.get("value")
+                if isinstance(v, dict) and "amount" in v:
+                    amount = str(v.get("amount") or "").strip()
+                    unit = str(v.get("unit") or "").strip()
+                    if amount:
+                        # Normalize "+1234" to "1234" where safe.
+                        if amount.startswith("+"):
+                            amount = amount[1:]
+                        if unit and unit != "1":
+                            return f"{amount} {unit}"
+                        return amount
+            return ""
+
+        def _time_date(prop: str) -> str:
+            vals = claims.get(prop) or []
+            if not isinstance(vals, list):
+                return ""
+            for st in vals:
+                m = (st or {}).get("mainsnak") or {}
+                dv = m.get("datavalue") or {}
+                v = dv.get("value")
+                if isinstance(v, dict) and v.get("time"):
+                    t = str(v.get("time") or "")
+                    # "+1996-07-31T00:00:00Z"
+                    if len(t) >= 11 and t[0] in {"+", "-"} and t[5] == "-" and t[8] == "-":
+                        y = t[1:5]
+                        m2 = t[6:8]
+                        d2 = t[9:11]
+                        if y.isdigit() and m2.isdigit() and d2.isdigit():
+                            return f"{y}-{m2}-{d2}"
+            return ""
+
+        def _time_year(prop: str) -> str:
+            vals = claims.get(prop) or []
+            if not isinstance(vals, list):
+                return ""
+            for st in vals:
+                m = (st or {}).get("mainsnak") or {}
+                dv = m.get("datavalue") or {}
+                v = dv.get("value")
+                if isinstance(v, dict) and v.get("time"):
+                    t = str(v.get("time") or "")
+                    # "+1996-07-31T00:00:00Z"
+                    if len(t) >= 5 and t[0] in {"+", "-"}:
+                        y = t[1:5]
+                        if y.isdigit():
+                            return y
+                    if len(t) >= 4 and t[:4].isdigit():
+                        return t[:4]
+            return ""
+
+        release_year = _time_year("P577")  # publication date (year)
+        release_date = _time_date("P577")  # publication date (YYYY-MM-DD when available)
+
+        # Resolve labels for linked entities (batch lookup per game).
+        linked_ids = list(
+            {
+                *_qids("P178"),  # developer
+                *_qids("P123"),  # publisher
+                *_qids("P400"),  # platform
+                *_qids("P179"),  # series
+                *_qids("P136"),  # genre
+                *_qids("P31"),  # instance of
+            }
+        )
+        label_map: dict[str, str] = {}
+        if linked_ids:
+            missing = [i for i in linked_ids if i not in self._labels]
+            if missing:
+                entities = self._get_entities(missing[: WIKIDATA.labels_batch_size], props="labels")
+                for k, v in entities.items():
+                    lbl = str((v.get("labels") or {}).get("en", {}).get("value") or "").strip()
+                    if lbl:
+                        self._labels[str(k)] = lbl
+                self._save_cache()
+            for i in linked_ids:
+                lbl = str(self._labels.get(i) or "").strip()
+                if lbl:
+                    label_map[i] = lbl
+
+        def _labels(prop: str) -> str:
+            ids = _qids(prop)
+            names = [label_map.get(i, "") for i in ids]
+            names = [n for n in names if n]
+            return ", ".join(sorted(dict.fromkeys(names)))
+
+        wikipedia = ""
+        enwiki_title = ""
+        sitelinks = entity.get("sitelinks") or {}
+        if isinstance(sitelinks, dict):
+            enwiki = sitelinks.get("enwiki") or {}
+            if isinstance(enwiki, dict) and enwiki.get("title"):
+                enwiki_title = str(enwiki.get("title"))
+                wikipedia = f"https://en.wikipedia.org/wiki/{enwiki_title.replace(' ', '_')}"
+
+        if not label and enwiki_title:
+            label = enwiki_title
+
+        return {
+            "Wikidata_QID": qid,
+            "Wikidata_Label": label,
+            "Wikidata_Description": desc,
+            "Wikidata_ReleaseYear": release_year,
+            "Wikidata_ReleaseDate": release_date,
+            "Wikidata_Developers": _labels("P178"),
+            "Wikidata_Publishers": _labels("P123"),
+            "Wikidata_Platforms": _labels("P400"),
+            "Wikidata_Series": _labels("P179"),
+            "Wikidata_Genres": _labels("P136"),
+            "Wikidata_InstanceOf": _labels("P31"),
+            "Wikidata_EnwikiTitle": enwiki_title,
+            "Wikidata_Wikipedia": wikipedia,
+        }
+
+    def format_cache_stats(self) -> str:
+        s = self.stats
+        return (
+            f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
+            f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
+            f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']})"
+        )

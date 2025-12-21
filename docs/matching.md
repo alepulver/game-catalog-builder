@@ -78,6 +78,11 @@ Example: `Postal 4` → `POSTAL 4: No Regerts`.
   - filter out non-`game` types (reject demos/DLC/soundtracks)
   - use Steam release date as an additional tie-breaker (note: Steam “release year” can be a port/re-release year).
 
+### Wikidata
+
+- Uses Wikidata `wbsearchentities` and then applies the shared scoring against the English label.
+- Uses `YearHint` as a soft hint from the search result description when available (no extra requests).
+
 ## Caching (important)
 
 Caches are intentionally **not** “name → chosen ID”.
@@ -107,6 +112,7 @@ HLTB searches are slow relative to other providers, so the cache is designed to 
 ## Warnings and manual pinning
 
 - Any non-100% match emits a `WARNING` with alternatives.
+- Import safety: if diagnostics mark a provider as `likely_wrong:<provider>` and there is a strict-majority provider consensus (and the provider is tagged as the outlier), the importer clears that provider ID so enrichment won’t silently use a wrong pin.
 - When a match is wrong or ambiguous, pin the provider ID in `data/input/Games_Catalog.csv` rather than changing your original `Name` unless the rename is truly canonical for you.
 - Import diagnostics (`ReviewTags`) also include a few conservative cross-provider checks when cached details are available:
   - `year_disagree` (RAWG vs IGDB)
@@ -115,6 +121,7 @@ HLTB searches are slow relative to other providers, so the cache is designed to 
   - `likely_wrong:<provider>` (high-signal: title outlier + year/platform outlier)
   - `ambiguous_title_year` (titles agree but years split widely; reboot/remaster/edition under same name)
   - `genre_disagree` (RAWG vs IGDB)
+  - `developer_disagree`, `publisher_disagree` (when Steam/RAWG/IGDB dev/pub data is available)
 
 ## Known issues / limitations
 

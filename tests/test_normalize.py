@@ -17,7 +17,14 @@ def test_normalize_catalog_adds_rowid_and_identity_columns(tmp_path: Path) -> No
     df = pd.read_csv(out).fillna("")
     assert "RowId" in df.columns
     assert df.iloc[0]["RowId"]
-    for c in ("RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_Query", "Disabled"):
+    for c in (
+        "RAWG_ID",
+        "IGDB_ID",
+        "Steam_AppID",
+        "HLTB_Query",
+        "Wikidata_QID",
+        "Disabled",
+    ):
         assert c in df.columns
     for c in (
         "RAWG_MatchedName",
@@ -28,6 +35,8 @@ def test_normalize_catalog_adds_rowid_and_identity_columns(tmp_path: Path) -> No
         "Steam_MatchScore",
         "HLTB_MatchedName",
         "HLTB_MatchScore",
+        "Wikidata_MatchedLabel",
+        "Wikidata_MatchScore",
         "ReviewTags",
         "MatchConfidence",
     ):
@@ -45,7 +54,14 @@ def test_normalize_catalog_can_skip_diagnostics_columns(tmp_path: Path) -> None:
 
     df = pd.read_csv(out).fillna("")
     assert "RowId" in df.columns
-    for c in ("RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_Query", "Disabled"):
+    for c in (
+        "RAWG_ID",
+        "IGDB_ID",
+        "Steam_AppID",
+        "HLTB_Query",
+        "Wikidata_QID",
+        "Disabled",
+    ):
         assert c in df.columns
     for c in (
         "RAWG_MatchedName",
@@ -56,6 +72,8 @@ def test_normalize_catalog_can_skip_diagnostics_columns(tmp_path: Path) -> None:
         "Steam_MatchScore",
         "HLTB_MatchedName",
         "HLTB_MatchScore",
+        "Wikidata_MatchedLabel",
+        "Wikidata_MatchScore",
         "ReviewTags",
         "MatchConfidence",
     ):

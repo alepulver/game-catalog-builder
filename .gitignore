@@ -23,6 +23,8 @@ ENV/
 !/data/**/
 !/data/**/.gitkeep
 !/data/credentials.example.yaml
+!/data/production_tiers.example.yaml
+!/data/production_tiers.yaml
 /output/
 
 # Old modules (replaced by package structure)

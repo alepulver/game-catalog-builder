@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -338,6 +339,11 @@ class RAWGClient:
         except Exception:
             score_100 = ""
 
+        devs = [d.get("name", "") for d in (rawg_obj.get("developers", []) or []) if isinstance(d, dict)]
+        pubs = [p.get("name", "") for p in (rawg_obj.get("publishers", []) or []) if isinstance(p, dict)]
+        dev_list = [str(x).strip() for x in devs if str(x).strip()]
+        pub_list = [str(x).strip() for x in pubs if str(x).strip()]
+
         return {
             "RAWG_ID": str(rawg_obj.get("id", "")),
             "RAWG_Name": str(rawg_obj.get("name", "") or ""),
@@ -351,4 +357,6 @@ class RAWGClient:
             "Score_RAWG_100": score_100,
             "RAWG_RatingsCount": str(rawg_obj.get("ratings_count", "")),
             "RAWG_Metacritic": str(rawg_obj.get("metacritic", "")),
+            "RAWG_Developers": json.dumps(dev_list, ensure_ascii=False),
+            "RAWG_Publishers": json.dumps(pub_list, ensure_ascii=False),
         }

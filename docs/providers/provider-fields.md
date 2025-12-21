@@ -39,6 +39,8 @@ Current output columns:
 | `RAWG_Genre2` | `genres[1].name` | Secondary genre |
 | `RAWG_Platforms` | `platforms[].platform.name` | Platform list |
 | `RAWG_Tags` | `tags[].name` | Tag list (project filters Cyrillic duplicates) |
+| `RAWG_Developers` | `developers[].name` | JSON array of developers |
+| `RAWG_Publishers` | `publishers[].name` | JSON array of publishers |
 | `RAWG_Rating` | `rating` | Average rating |
 | `Score_RAWG_100` | `rating` | Rating normalized to 0–100 |
 | `RAWG_RatingsCount` | `ratings_count` | Rating count |
@@ -82,9 +84,14 @@ Current output columns (from the `/v4/games` object returned by the query):
 | `IGDB_Franchise` | `franchises[].name` | Franchise(s) |
 | `IGDB_Engine` | `game_engines[].name` | Engine(s) |
 | `IGDB_SteamAppID` | `external_games[]` | Cross-check Steam uid when `external_game_source == 1` |
+| `IGDB_Developers` | `involved_companies[]` | JSON array of developer companies |
+| `IGDB_Publishers` | `involved_companies[]` | JSON array of publisher companies |
 | `IGDB_Rating` | `rating` | IGDB user rating (0–100, float) |
 | `IGDB_RatingCount` | `rating_count` | Rating count |
 | `Score_IGDB_100` | `rating` | Rating normalized to 0–100 (rounded) |
+| `IGDB_AggregatedRating` | `aggregated_rating` | Critic aggregated rating (0–100, float) |
+| `IGDB_AggregatedRatingCount` | `aggregated_rating_count` | Critic rating count |
+| `Score_IGDBCritic_100` | `aggregated_rating` | Critic rating normalized to 0–100 (rounded) |
 
 Other useful fields you can request via `fields` (still in the same call):
 
@@ -103,7 +110,7 @@ Other useful fields you can request via `fields` (still in the same call):
 
 - **ID**: `Steam_AppID`
 - **Search**: `GET /api/storesearch?term=<name>&l=english&cc=US`
-- **Details**: `GET /api/appdetails?appids=<appid>&l=english`
+- **Details**: `GET /api/appdetails?appids=<appid>&l=english&cc=us`
 
 Caching notes:
 - Store search results are cached under `by_query`.
@@ -122,6 +129,8 @@ Current output columns (from the `data` object inside appdetails):
 | `Steam_Price` | `is_free` / `price_overview.final_formatted` | Price string |
 | `Steam_Categories` | `categories[].description` | Category list |
 | `Steam_Metacritic` | `metacritic.score` | Metacritic score (Steam) |
+| `Steam_Developers` | `developers[]` | JSON array of developers |
+| `Steam_Publishers` | `publishers[]` | JSON array of publishers |
 
 Other useful fields available in appdetails:
 
@@ -147,8 +156,11 @@ Current output columns:
 |---|---|---|
 | `SteamSpy_Owners` | `owners` | Owner range string |
 | `SteamSpy_Players` | `players_forever` | Lifetime players |
+| `SteamSpy_Players2Weeks` | `players_2weeks` | Players in last ~2 weeks |
 | `SteamSpy_CCU` | `ccu` | Concurrent users |
 | `SteamSpy_PlaytimeAvg` | `average_forever` | Average playtime |
+| `SteamSpy_PlaytimeAvg2Weeks` | `average_2weeks` | Average playtime (2 weeks) |
+| `SteamSpy_PlaytimeMedian2Weeks` | `median_2weeks` | Median playtime (2 weeks) |
 | `SteamSpy_Positive` | `positive` | Positive reviews |
 | `SteamSpy_Negative` | `negative` | Negative reviews |
 | `Score_SteamSpy_100` | `positive/negative` | Positive ratio normalized to 0–100 |
@@ -191,3 +203,56 @@ Other useful attributes commonly present:
 Note: the project caches the full HLTB result object payload (JSON-serialized) under `data/cache/`
 even though only a small subset is written to CSV. This lets you add new derived fields later
 without re-fetching.
+
+## Wikidata
+
+- API docs: https://www.wikidata.org/w/api.php (MediaWiki API)
+
+- **ID**: `Wikidata_QID` (e.g. `Q123`)
+- **Search**: `wbsearchentities`
+- **Details**: `wbgetentities`
+
+Caching notes:
+- Search responses are cached under `by_query`.
+- Full entities are cached under `by_id` keyed by `Wikidata_QID`.
+- Linked-entity labels (developer/publisher/platform/etc) are cached under `labels`.
+
+Current output columns:
+
+| CSV column | Path | Description |
+|---|---|---|
+| `Wikidata_QID` | `id` | Wikidata entity id |
+| `Wikidata_Label` | `labels.en.value` | English label |
+| `Wikidata_Description` | `descriptions.en.value` | English description |
+| `Wikidata_ReleaseYear` | `claims.P577[*].time` | Publication date year (best effort) |
+| `Wikidata_ReleaseDate` | `claims.P577[*].time` | Publication date (best effort, YYYY-MM-DD) |
+| `Wikidata_Developers` | `claims.P178` | Developer(s) (labels resolved) |
+| `Wikidata_Publishers` | `claims.P123` | Publisher(s) (labels resolved) |
+| `Wikidata_Platforms` | `claims.P400` | Platforms (labels resolved) |
+| `Wikidata_Series` | `claims.P179` | Series/franchise (labels resolved) |
+| `Wikidata_Genres` | `claims.P136` | Genres (labels resolved) |
+| `Wikidata_InstanceOf` | `claims.P31` | Instance-of classes (labels resolved) |
+| `Wikidata_EnwikiTitle` | `sitelinks.enwiki.title` | English Wikipedia article title |
+| `Wikidata_Wikipedia` | `sitelinks.enwiki.title` | English Wikipedia URL |
+| `Wikidata_WikipediaPage` | Wikipedia summary API | Canonical enwiki page URL |
+| `Wikidata_WikipediaSummary` | Wikipedia summary API | Short summary extract (truncated for CSV readability) |
+| `Wikidata_WikipediaThumbnail` | Wikipedia summary API | Thumbnail URL (when present) |
+
+Additional derived-from-Wikidata columns (official Wikimedia APIs, cached):
+
+- **Wikipedia Pageviews API**: https://wikitech.wikimedia.org/wiki/Analytics/AQS/Pageviews
+  - This project fetches a single 365-day daily series per `Wikidata_EnwikiTitle` and derives the
+    30/90-day sums locally to reduce requests.
+  - When adding new output columns, regenerate provider outputs (default `enrich --clean-output`)
+    so derived columns are computed from cached provider payloads; the project does not try to
+    “backfill” older `Provider_*.csv` files in place.
+- **Wikipedia Summary API**: https://en.wikipedia.org/api/rest_v1/
+  - Used to fetch short extracts and canonical page URLs for quick manual verification.
+
+| CSV column | Source | Description |
+|---|---|---|
+| `Wikidata_Pageviews30d` | Pageviews API | Sum of pageviews over last 30 days (enwiki) |
+| `Wikidata_Pageviews90d` | Pageviews API | Sum of pageviews over last 90 days (enwiki) |
+| `Wikidata_Pageviews365d` | Pageviews API | Sum of pageviews over last 365 days (enwiki) |
+| `Wikidata_PageviewsFirst30d` | Pageviews API | Sum of pageviews over first 30 days since release (enwiki; usually post-2015 only) |
+| `Wikidata_PageviewsFirst90d` | Pageviews API | Sum of pageviews over first 90 days since release (enwiki; usually post-2015 only) |

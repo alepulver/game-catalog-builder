@@ -21,8 +21,11 @@ from .clients import (
     RAWGClient,
     SteamClient,
     SteamSpyClient,
+    WikidataClient,
+    WikipediaPageviewsClient,
+    WikipediaSummaryClient,
 )
-from .config import CLI, IGDB, MATCHING, RAWG, STEAM, STEAMSPY
+from .config import CLI, IGDB, RAWG, STEAM, STEAMSPY, WIKIDATA
 from .utils import (
     IDENTITY_NOT_FOUND,
     PUBLIC_DEFAULT_COLS,
@@ -35,6 +38,7 @@ from .utils import (
     is_row_processed,
     load_credentials,
     load_identity_overrides,
+    load_json_cache,
     merge_all,
     normalize_game_name,
     read_csv,
@@ -67,6 +71,9 @@ EVAL_COLUMNS = [
     "HLTB_MatchScore",
     "HLTB_MatchedYear",
     "HLTB_MatchedPlatforms",
+    "Wikidata_MatchedLabel",
+    "Wikidata_MatchScore",
+    "Wikidata_MatchedYear",
     "ReviewTags",
     "MatchConfidence",
     # Legacy column kept only so we can drop it from older CSVs.
@@ -81,8 +88,15 @@ def drop_eval_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.drop(columns=cols) if cols else df
 
 
-PROVIDER_PREFIXES = ("RAWG_", "IGDB_", "Steam_", "SteamSpy_", "HLTB_")
-PINNED_ID_COLS = {"RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_ID", "HLTB_Query"}
+PROVIDER_PREFIXES = ("RAWG_", "IGDB_", "Steam_", "SteamSpy_", "HLTB_", "Wikidata_")
+PINNED_ID_COLS = {
+    "RAWG_ID",
+    "IGDB_ID",
+    "Steam_AppID",
+    "HLTB_ID",
+    "HLTB_Query",
+    "Wikidata_QID",
+}
 
 
 def build_personal_base_for_enrich(df: pd.DataFrame) -> pd.DataFrame:
@@ -92,6 +106,14 @@ def build_personal_base_for_enrich(df: pd.DataFrame) -> pd.DataFrame:
     This is critical for "in-place" enrich (input == output) to avoid keeping stale provider
     columns: merge_all is a left-join and does not overwrite existing same-named columns.
     """
+    derived_prefixes = (
+        "Reach_",
+        "CommunityRating_",
+        "CriticRating_",
+        "Production_",
+        "Now_",
+    )
+
     keep: list[str] = []
     for c in df.columns:
         if c in {"RowId", "Name"}:
@@ -101,6 +123,10 @@ def build_personal_base_for_enrich(df: pd.DataFrame) -> pd.DataFrame:
             keep.append(c)
             continue
         if c in EVAL_COLUMNS:
+            continue
+        if c.startswith("Score_"):
+            continue
+        if c.startswith(derived_prefixes):
             continue
         if c.startswith(PROVIDER_PREFIXES):
             continue
@@ -259,6 +285,40 @@ def fill_eval_tags(
         for part in [p.strip() for p in str(s or "").split(",") if p.strip()]:
             out_set.add(normalize_game_name(part))
         return {x for x in out_set if x}
+
+    def _company_set_from_json_cell(s: object) -> set[str]:
+        import json
+
+        raw = str(s or "").strip()
+        if not raw or not raw.startswith("["):
+            return set()
+        try:
+            arr = json.loads(raw)
+        except Exception:
+            return set()
+        if not isinstance(arr, list):
+            return set()
+
+        def _norm(v: object) -> str:
+            t = str(v or "").strip()
+            if not t:
+                return ""
+            if t.endswith(")") and "(" in t:
+                t = t.rsplit("(", 1)[0].strip()
+            t = t.strip().rstrip(",").strip()
+            return t.casefold()
+
+        return {x for x in (_norm(v) for v in arr) if x}
+
+    def _has_any_disagree(sets: list[set[str]]) -> bool:
+        present = [s for s in sets if s]
+        if len(present) < 2:
+            return False
+        for i in range(len(present)):
+            for j in range(i + 1, len(present)):
+                if present[i].isdisjoint(present[j]):
+                    return True
+        return False
 
     def _platforms_from_steam(details: object) -> set[str]:
         if not isinstance(details, dict):
@@ -460,6 +520,24 @@ def fill_eval_tags(
                 tags.append("genre_disagree")
                 has_medium_issue = True
 
+        # Developer/publisher cross-checks (high-signal when present).
+        dev_sets = [
+            _company_set_from_json_cell(row.get("Steam_Developers", "")),
+            _company_set_from_json_cell(row.get("RAWG_Developers", "")),
+            _company_set_from_json_cell(row.get("IGDB_Developers", "")),
+        ]
+        pub_sets = [
+            _company_set_from_json_cell(row.get("Steam_Publishers", "")),
+            _company_set_from_json_cell(row.get("RAWG_Publishers", "")),
+            _company_set_from_json_cell(row.get("IGDB_Publishers", "")),
+        ]
+        if _has_any_disagree(dev_sets):
+            tags.append("developer_disagree")
+            has_medium_issue = True
+        if _has_any_disagree(pub_sets):
+            tags.append("publisher_disagree")
+            has_medium_issue = True
+
         # Symmetric year outlier tags relative to a strict-majority consensus year.
         year_tags = year_outlier_tags(years, max_diff=1)
         if year_tags:
@@ -579,6 +657,62 @@ def _parse_sources(
     return out
 
 
+def _auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """
+    If a provider was auto-pinned and diagnostics indicate it's likely wrong, clear the ID.
+
+    This keeps the catalog safer: wrong pins are worse than missing pins because they silently
+    propagate into enrichment.
+    """
+    out = df.copy()
+    changed = 0
+
+    rules: list[tuple[str, str, list[str]]] = [
+        ("steam", "Steam_AppID", ["Steam_MatchedName", "Steam_MatchScore", "Steam_MatchedYear"]),
+        ("rawg", "RAWG_ID", ["RAWG_MatchedName", "RAWG_MatchScore", "RAWG_MatchedYear"]),
+        ("igdb", "IGDB_ID", ["IGDB_MatchedName", "IGDB_MatchScore", "IGDB_MatchedYear"]),
+        ("hltb", "HLTB_ID", ["HLTB_MatchedName", "HLTB_MatchScore", "HLTB_MatchedYear"]),
+    ]
+
+    for idx, row in out.iterrows():
+        rowid = str(row.get("RowId", "") or "").strip()
+        if not rowid:
+            continue
+        tags = str(row.get("ReviewTags", "") or "").strip()
+        if not tags:
+            continue
+        for prov, id_col, diag_cols in rules:
+            id_val = str(row.get(id_col, "") or "").strip()
+            if not id_val or id_val == IDENTITY_NOT_FOUND:
+                continue
+            # Only auto-unpin when we have a strict-majority consensus AND this provider is
+            # explicitly tagged as the outlier. This prevents unpinning in cases where providers
+            # generally disagree and only a year/platform heuristic fired.
+            if f"likely_wrong:{prov}" not in tags:
+                continue
+            if "provider_consensus:" not in tags:
+                continue
+            if f"provider_outlier:{prov}" not in tags:
+                continue
+
+            out.at[idx, id_col] = ""
+            for c in diag_cols:
+                if c in out.columns:
+                    out.at[idx, c] = ""
+            new_tags = tags
+            if f"autounpinned:{prov}" not in new_tags:
+                new_tags = (new_tags + f", autounpinned:{prov}").strip(", ").strip()
+            out.at[idx, "ReviewTags"] = new_tags
+            out.at[idx, "MatchConfidence"] = "LOW"
+            logging.warning(
+                f"[IMPORT] Auto-unpinned likely-wrong {id_col} for '{row.get('Name','')}' "
+                f"(RowId={rowid})"
+            )
+            changed += 1
+
+    return out, changed
+
+
 def load_or_merge_dataframe(input_csv: Path, output_csv: Path) -> pd.DataFrame:
     """
     Load dataframe from input CSV, merging in existing data from output CSV if it exists.
@@ -586,30 +720,18 @@ def load_or_merge_dataframe(input_csv: Path, output_csv: Path) -> pd.DataFrame:
     This ensures we always process all games from the input, while preserving
     already-processed data from previous runs.
     """
-    # Always read from input_csv to get all games
     df = read_csv(input_csv)
+    if "RowId" not in df.columns:
+        raise SystemExit(f"Missing RowId in {input_csv}; run `import` first.")
 
     # If output_csv exists, merge its data to preserve already-processed games
     if output_csv.exists():
         df_output = read_csv(output_csv)
-        # Prefer stable RowId merges when available; fall back to Name.
-        if "RowId" in df.columns and "RowId" in df_output.columns:
-            df = df.merge(df_output, on="RowId", how="left", suffixes=("", "_existing"))
-        else:
-            # Merge on Name, keeping data from output_csv where it exists.
-            # If names repeat, merge using (Name, per-name occurrence) to avoid cartesian growth.
-            if "Name" in df.columns and "Name" in df_output.columns:
-                if df["Name"].duplicated().any() or df_output["Name"].duplicated().any():
-                    df["__occ"] = df.groupby("Name").cumcount()
-                    df_output["__occ"] = df_output.groupby("Name").cumcount()
-                    df = df.merge(
-                        df_output, on=["Name", "__occ"], how="left", suffixes=("", "_existing")
-                    )
-                    df = df.drop(columns=["__occ"])
-                else:
-                    df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
-            else:
-                df = df.merge(df_output, on="Name", how="left", suffixes=("", "_existing"))
+        if "RowId" not in df_output.columns:
+            raise SystemExit(
+                f"Missing RowId in {output_csv}; delete it and re-run, or regenerate outputs."
+            )
+        df = df.merge(df_output, on="RowId", how="left", suffixes=("", "_existing"))
         # Drop duplicate columns from merge
         for col in df.columns:
             if col.endswith("_existing"):
@@ -877,16 +999,24 @@ def process_igdb(
             # Save only Name + IGDB columns
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
-            if "Score_IGDB_100" in df.columns:
-                igdb_cols.append("Score_IGDB_100")
+            score_cols = [
+                c
+                for c in ("Score_IGDB_100", "Score_IGDBCritic_100")
+                if c in df.columns and c not in igdb_cols
+            ]
+            igdb_cols.extend(score_cols)
             write_csv(df[igdb_cols], output_csv)
 
         if len(pending_by_id) >= CLI.igdb_flush_batch_size:
             _flush_pending()
             base_cols = [c for c in ("RowId", "Name") if c in df.columns]
             igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
-            if "Score_IGDB_100" in df.columns:
-                igdb_cols.append("Score_IGDB_100")
+            score_cols = [
+                c
+                for c in ("Score_IGDB_100", "Score_IGDBCritic_100")
+                if c in df.columns and c not in igdb_cols
+            ]
+            igdb_cols.extend(score_cols)
             write_csv(df[igdb_cols], output_csv)
 
     _flush_pending()
@@ -894,8 +1024,12 @@ def process_igdb(
     # Save only Name + IGDB columns
     base_cols = [c for c in ("RowId", "Name") if c in df.columns]
     igdb_cols = base_cols + [c for c in df.columns if c.startswith("IGDB_")]
-    if "Score_IGDB_100" in df.columns:
-        igdb_cols.append("Score_IGDB_100")
+    score_cols = [
+        c
+        for c in ("Score_IGDB_100", "Score_IGDBCritic_100")
+        if c in df.columns and c not in igdb_cols
+    ]
+    igdb_cols.extend(score_cols)
     write_csv(df[igdb_cols], output_csv)
     logging.info(f"[IGDB] Cache stats: {client.format_cache_stats()}")
     logging.info(f"✔ IGDB completed: {output_csv}")
@@ -1188,6 +1322,255 @@ def process_hltb(
     logging.info(f"✔ HLTB completed: {output_csv}")
 
 
+def process_wikidata(
+    input_csv: Path,
+    output_csv: Path,
+    cache_path: Path,
+    required_cols: list[str],
+    identity_overrides: dict[str, dict[str, str]] | None = None,
+) -> None:
+    """Process games with Wikidata data."""
+    client = WikidataClient(cache_path=cache_path, min_interval_s=WIKIDATA.min_interval_s)
+    pageviews_client = WikipediaPageviewsClient(
+        cache_path=cache_path.parent / "wiki_pageviews_cache.json",
+        min_interval_s=0.15,
+    )
+    summary_client = WikipediaSummaryClient(
+        cache_path=cache_path.parent / "wiki_summary_cache.json",
+        min_interval_s=0.15,
+    )
+    # Optional: use cached provider titles as fallback search queries for Wikidata. This helps
+    # when Wikidata uses a different canonical punctuation (e.g. ":"), or when the personal
+    # title is ambiguous.
+    cache_dir = cache_path.parent
+    steam_cache = load_json_cache(cache_dir / "steam_cache.json")
+    rawg_cache = load_json_cache(cache_dir / "rawg_cache.json")
+    igdb_cache = load_json_cache(cache_dir / "igdb_cache.json")
+    steam_by_id = steam_cache.get("by_id") if isinstance(steam_cache, dict) else {}
+    rawg_by_id = rawg_cache.get("by_id") if isinstance(rawg_cache, dict) else {}
+    igdb_by_id = igdb_cache.get("by_id") if isinstance(igdb_cache, dict) else {}
+    df = load_or_merge_dataframe(input_csv, output_csv)
+
+    processed = 0
+    seen = 0
+    pending_by_id: dict[str, list[int]] = {}
+
+    def _flush_pending() -> None:
+        nonlocal processed
+        if not pending_by_id:
+            return
+        qids = list(pending_by_id.keys())
+        by_id = client.get_by_ids(qids)
+        for qid, indices in list(pending_by_id.items()):
+            data = by_id.get(str(qid))
+            if not data:
+                continue
+            enwiki_title = str(data.get("Wikidata_EnwikiTitle", "") or "").strip()
+            pageviews = None
+            launch_90 = None
+            launch_30 = None
+            if enwiki_title:
+                pageviews = pageviews_client.get_pageviews_summary_enwiki(enwiki_title)
+                release_date = str(data.get("Wikidata_ReleaseDate", "") or "").strip()
+                launch_90 = pageviews_client.get_pageviews_first_days_since_release_enwiki(
+                    enwiki_title=enwiki_title,
+                    release_date=release_date,
+                    days=90,
+                )
+                launch_30 = pageviews_client.get_pageviews_first_days_since_release_enwiki(
+                    enwiki_title=enwiki_title,
+                    release_date=release_date,
+                    days=30,
+                )
+                summary = summary_client.get_summary(enwiki_title)
+            else:
+                summary = None
+            for idx2 in indices:
+                for k, v in data.items():
+                    df.at[idx2, k] = v
+                if pageviews is not None:
+                    df.at[idx2, "Wikidata_Pageviews30d"] = (
+                        str(pageviews.days_30) if pageviews.days_30 is not None else ""
+                    )
+                    df.at[idx2, "Wikidata_Pageviews90d"] = (
+                        str(pageviews.days_90) if pageviews.days_90 is not None else ""
+                    )
+                    df.at[idx2, "Wikidata_Pageviews365d"] = (
+                        str(pageviews.days_365) if pageviews.days_365 is not None else ""
+                    )
+                df.at[idx2, "Wikidata_PageviewsFirst30d"] = str(launch_30) if launch_30 else ""
+                df.at[idx2, "Wikidata_PageviewsFirst90d"] = str(launch_90) if launch_90 else ""
+                if isinstance(summary, dict) and summary:
+                    extract = str(summary.get("extract") or "").strip()
+                    if len(extract) > 320:
+                        extract = extract[:317].rstrip() + "..."
+                    thumb = ""
+                    t = summary.get("thumbnail")
+                    if isinstance(t, dict):
+                        thumb = str(t.get("source") or "").strip()
+                    page_url = ""
+                    cu = summary.get("content_urls")
+                    if isinstance(cu, dict):
+                        desktop = cu.get("desktop")
+                        if isinstance(desktop, dict):
+                            page_url = str(desktop.get("page") or "").strip()
+                    df.at[idx2, "Wikidata_WikipediaSummary"] = extract
+                    df.at[idx2, "Wikidata_WikipediaThumbnail"] = thumb
+                    df.at[idx2, "Wikidata_WikipediaPage"] = page_url
+            processed += len(indices)
+        pending_by_id.clear()
+
+    def _year_hint(row: pd.Series) -> int | None:
+        yh = str(row.get("YearHint", "") or "").strip()
+        if yh.isdigit() and len(yh) == 4:
+            try:
+                return int(yh)
+            except ValueError:
+                return None
+        return None
+
+    def _derived_year_hint(row: pd.Series) -> int | None:
+        """
+        Prefer explicit YearHint, else derive from pinned provider IDs (if any).
+
+        This improves Wikidata matching on second runs after other providers have pinned IDs,
+        without risking incorrect matches on the first run.
+        """
+        yh = _year_hint(row)
+        if yh is not None:
+            return yh
+
+        rawg_id = str(row.get("RAWG_ID", "") or "").strip()
+        if rawg_id and isinstance(rawg_by_id, dict):
+            obj = rawg_by_id.get(f"en:{rawg_id}") or rawg_by_id.get(str(rawg_id))
+            if isinstance(obj, dict):
+                released = str(obj.get("released") or "").strip()
+                if len(released) >= 4 and released[:4].isdigit():
+                    return int(released[:4])
+
+        igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+        if igdb_id and isinstance(igdb_by_id, dict):
+            obj = igdb_by_id.get(f"en:{igdb_id}") or igdb_by_id.get(str(igdb_id))
+            if isinstance(obj, dict):
+                ts = obj.get("first_release_date")
+                if isinstance(ts, (int, float)) and ts > 0:
+                    try:
+                        return int(datetime.fromtimestamp(ts).year)
+                    except Exception:
+                        pass
+
+        appid = str(row.get("Steam_AppID", "") or "").strip()
+        if appid and isinstance(steam_by_id, dict):
+            obj = steam_by_id.get(appid)
+            if isinstance(obj, dict):
+                date_s = str((obj.get("release_date") or {}).get("date") or "").strip()
+                m = re.search(r"\b(19\\d{2}|20\\d{2})\\b", date_s)
+                if m:
+                    return int(m.group(1))
+
+        return None
+
+    def _fallback_titles(row: pd.Series) -> list[str]:
+        titles: list[str] = []
+        appid = str(row.get("Steam_AppID", "") or "").strip()
+        if appid and isinstance(steam_by_id, dict):
+            obj = steam_by_id.get(appid)
+            if isinstance(obj, dict):
+                t = str(obj.get("name") or "").strip()
+                if t:
+                    titles.append(t)
+
+        rawg_id = str(row.get("RAWG_ID", "") or "").strip()
+        if rawg_id and isinstance(rawg_by_id, dict):
+            obj = rawg_by_id.get(f"en:{rawg_id}") or rawg_by_id.get(str(rawg_id))
+            if isinstance(obj, dict):
+                t = str(obj.get("name") or "").strip()
+                if t:
+                    titles.append(t)
+
+        igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+        if igdb_id and isinstance(igdb_by_id, dict):
+            obj = igdb_by_id.get(f"en:{igdb_id}") or igdb_by_id.get(str(igdb_id))
+            if isinstance(obj, dict):
+                t = str(obj.get("name") or "").strip()
+                if t:
+                    titles.append(t)
+
+        out: list[str] = []
+        seen: set[str] = set()
+        for t in titles:
+            key = t.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(t)
+        return out
+
+    for idx, row in df.iterrows():
+        seen += 1
+        name = str(row.get("Name", "") or "").strip()
+        if not name:
+            continue
+
+        rowid = str(row.get("RowId", "") or "").strip()
+        override_qid = ""
+        if identity_overrides and rowid:
+            override_qid = str(
+                identity_overrides.get(rowid, {}).get("Wikidata_QID", "") or ""
+            ).strip()
+
+        if override_qid == IDENTITY_NOT_FOUND:
+            clear_prefixed_columns(df, int(idx), "Wikidata_")
+            continue
+
+        if is_row_processed(df, idx, required_cols):
+            if override_qid and str(df.at[idx, "Wikidata_QID"] or "").strip() != override_qid:
+                pass
+            else:
+                continue
+
+        qid = override_qid or str(row.get("Wikidata_QID", "") or "").strip()
+        if qid:
+            pending_by_id.setdefault(qid, []).append(int(idx))
+        else:
+            logging.info(f"[WIKIDATA] Processing: {name}")
+            yh = _derived_year_hint(row)
+            search = client.search(name, year_hint=yh)
+            if not search:
+                for alt in _fallback_titles(row):
+                    if alt.casefold() == name.casefold():
+                        continue
+                    search = client.search(alt, year_hint=yh)
+                    if search:
+                        break
+            qid = str((search or {}).get("Wikidata_QID") or "").strip()
+            if not qid:
+                continue
+            df.at[idx, "Wikidata_QID"] = qid
+            pending_by_id.setdefault(qid, []).append(int(idx))
+
+        if seen % 25 == 0:
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            cols = base_cols + [c for c in df.columns if c.startswith("Wikidata_")]
+            write_csv(df[cols], output_csv)
+
+        if len(pending_by_id) >= WIKIDATA.get_by_ids_batch_size:
+            _flush_pending()
+            base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+            cols = base_cols + [c for c in df.columns if c.startswith("Wikidata_")]
+            write_csv(df[cols], output_csv)
+
+    _flush_pending()
+
+    base_cols = [c for c in ("RowId", "Name") if c in df.columns]
+    cols = base_cols + [c for c in df.columns if c.startswith("Wikidata_")]
+    write_csv(df[cols], output_csv)
+    logging.info(f"[WIKIDATA] Cache stats: {client.format_cache_stats()}")
+    logging.info(f"[WIKIPEDIA] Cache stats: {pageviews_client.format_cache_stats()}")
+    logging.info(f"[WIKIPEDIA] Summary cache stats: {summary_client.format_cache_stats()}")
+    logging.info(f"✔ Wikidata completed: {output_csv}")
+
+
 def setup_logging(log_file: Path) -> None:
     """Configure logging to both console and file."""
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1326,6 +1709,7 @@ def _normalize_catalog(
                     "Steam_AppID",
                     "HLTB_ID",
                     "HLTB_Query",
+                    "Wikidata_QID",
                 )
                 if c in prev.columns
             ]
@@ -1364,6 +1748,7 @@ def _normalize_catalog(
         "Steam_AppID": "",
         "HLTB_ID": "",
         "HLTB_Query": "",
+        "Wikidata_QID": "",
     }
     if include_diagnostics:
         required_cols.update({c: "" for c in DIAGNOSTIC_COLUMNS})
@@ -1463,302 +1848,6 @@ def _sync_back_catalog(
     return output_csv
 
 
-def _legacy_enrich(argv: list[str]) -> None:
-    """Backward-compatible mode: `run.py <input.csv> [options]`."""
-    parser = argparse.ArgumentParser(
-        description="Enrich video game catalogs with metadata from multiple APIs"
-    )
-    parser.add_argument(
-        "input",
-        type=Path,
-        help="Input CSV file with game catalog",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        help="Output directory for generated files (default: data/output)",
-    )
-    parser.add_argument(
-        "--cache",
-        type=Path,
-        help="Cache directory for API responses (default: data/cache)",
-    )
-    parser.add_argument(
-        "--credentials",
-        type=Path,
-        help="Path to credentials.yaml file (default: data/credentials.yaml in project root)",
-    )
-    parser.add_argument(
-        "--source",
-        choices=["igdb", "rawg", "steam", "steamspy", "hltb", "all"],
-        default="all",
-        help="Which API source to process (default: all)",
-    )
-    parser.add_argument(
-        "--merge",
-        action="store_true",
-        help="Merge all processed files into a final CSV",
-    )
-    parser.add_argument(
-        "--merge-output",
-        type=Path,
-        help="Output file for merged results (default: data/output/Games_Enriched.csv)",
-    )
-    parser.add_argument(
-        "--log-file",
-        type=Path,
-        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable DEBUG logging (default: INFO)",
-    )
-    parser.add_argument(
-        "--validate",
-        action="store_true",
-        help="Generate a cross-provider validation report (default: off)",
-    )
-    parser.add_argument(
-        "--validate-output",
-        type=Path,
-        help="Output file for validation report (default: data/output/Validation_Report.csv)",
-    )
-
-    args = parser.parse_args(argv)
-
-    # Determine project root (parent of game_catalog_builder package)
-    project_root, paths = _common_paths()
-
-    # Set up logging (after paths are ensured)
-    _setup_logging_from_args(
-        paths, args.log_file, args.debug, command_name="legacy", input_path=args.input
-    )
-    logging.info("Starting game catalog enrichment")
-
-    # Set up paths
-    input_csv = args.input
-    if not input_csv.exists():
-        parser.error(f"Input file not found: {input_csv}")
-    is_experiment = _is_under_dir(input_csv, paths.data_experiments)
-    before = read_csv(input_csv)
-    with_ids, created = ensure_row_ids(before)
-    # If we had to create RowIds, avoid overwriting the user's original file: write a new input
-    # next to the identity map (under the output dir) and use it from now on.
-    if created > 0 or "RowId" not in before.columns:
-        default_out_dir = (
-            (paths.data_experiments / "output") if is_experiment else paths.data_output
-        )
-        safe_input = (
-            args.output or default_out_dir
-        ) / f"{input_csv.stem}_with_rowid{input_csv.suffix}"
-        write_csv(with_ids, safe_input)
-        logging.info(f"✔ RowId initialized: wrote new input CSV: {safe_input} (new ids: {created})")
-        logging.info(f"ℹ Use this input file going forward: {safe_input}")
-        input_csv = safe_input
-
-    output_dir = args.output or (
-        (paths.data_experiments / "output") if is_experiment else paths.data_output
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    cache_dir = args.cache or (
-        (paths.data_experiments / "cache") if is_experiment else paths.data_cache
-    )
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    # Read pinned IDs/queries directly from the input CSV when present.
-    identity_overrides = load_identity_overrides(input_csv)
-
-    # Load credentials
-    if args.credentials:
-        credentials_path = args.credentials
-    else:
-        # Default: look for data/credentials.yaml under project root
-        credentials_path = project_root / "data" / "credentials.yaml"
-
-    credentials = load_credentials(credentials_path)
-
-    # Process based on source
-    sources_to_process = (
-        ["igdb", "rawg", "steam", "steamspy", "hltb"] if args.source == "all" else [args.source]
-    )
-
-    def run_source(source: str) -> None:
-        if source == "igdb":
-            process_igdb(
-                input_csv=input_csv,
-                output_csv=output_dir / "Provider_IGDB.csv",
-                cache_path=cache_dir / "igdb_cache.json",
-                credentials=credentials,
-                required_cols=["IGDB_Name"],
-                identity_overrides=identity_overrides or None,
-            )
-            return
-
-        if source == "rawg":
-            process_rawg(
-                input_csv=input_csv,
-                output_csv=output_dir / "Provider_RAWG.csv",
-                cache_path=cache_dir / "rawg_cache.json",
-                credentials=credentials,
-                required_cols=["RAWG_ID", "RAWG_Year", "RAWG_Genre"],
-                identity_overrides=identity_overrides or None,
-            )
-            return
-
-        if source == "steam":
-            process_steam(
-                input_csv=input_csv,
-                output_csv=output_dir / "Provider_Steam.csv",
-                cache_path=cache_dir / "steam_cache.json",
-                required_cols=["Steam_Name"],
-                identity_overrides=identity_overrides or None,
-            )
-            return
-
-        if source == "steamspy":
-            process_steamspy(
-                input_csv=output_dir / "Provider_Steam.csv",
-                output_csv=output_dir / "Provider_SteamSpy.csv",
-                cache_path=cache_dir / "steamspy_cache.json",
-                required_cols=["SteamSpy_Owners"],
-            )
-            return
-
-        if source == "steam+steamspy":
-            process_steam_and_steamspy_streaming(
-                input_csv=input_csv,
-                steam_output_csv=output_dir / "Provider_Steam.csv",
-                steamspy_output_csv=output_dir / "Provider_SteamSpy.csv",
-                steam_cache_path=cache_dir / "steam_cache.json",
-                steamspy_cache_path=cache_dir / "steamspy_cache.json",
-                identity_overrides=identity_overrides or None,
-            )
-            return
-
-        if source == "hltb":
-            process_hltb(
-                input_csv=input_csv,
-                output_csv=output_dir / "Provider_HLTB.csv",
-                cache_path=cache_dir / "hltb_cache.json",
-                required_cols=["HLTB_Main"],
-                identity_overrides=identity_overrides or None,
-            )
-            return
-
-        raise ValueError(f"Unknown source: {source}")
-
-    # Run providers in parallel when we have multiple independent sources.
-    # SteamSpy can stream from discovered Steam appids; run via a combined pipeline when both are
-    # requested.
-    if len(sources_to_process) <= 1:
-        run_source(sources_to_process[0])
-    else:
-        sources = list(sources_to_process)
-        if "steam" in sources and "steamspy" in sources:
-            sources = [s for s in sources if s not in ("steam", "steamspy")] + ["steam+steamspy"]
-
-        parallel_sources = sources
-        max_workers = min(len(parallel_sources), (os.cpu_count() or 4))
-
-        futures = {}
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for src in parallel_sources:
-                futures[executor.submit(run_source, src)] = src
-
-            errors: list[tuple[str, BaseException]] = []
-            for future in as_completed(futures):
-                src = futures[future]
-                try:
-                    future.result()
-                except BaseException as e:
-                    errors.append((src, e))
-
-            if errors:
-                src, err = errors[0]
-                raise RuntimeError(f"Provider '{src}' failed") from err
-
-    # Merge if requested
-    if args.merge or args.source == "all":
-        merge_output = args.merge_output or (output_dir / "Games_Enriched.csv")
-        merge_all(
-            personal_csv=input_csv,
-            rawg_csv=output_dir / "Provider_RAWG.csv",
-            hltb_csv=output_dir / "Provider_HLTB.csv",
-            steam_csv=output_dir / "Provider_Steam.csv",
-            steamspy_csv=output_dir / "Provider_SteamSpy.csv",
-            output_csv=merge_output,
-            igdb_csv=output_dir / "Provider_IGDB.csv",
-        )
-        logging.info(f"✔ Games_Enriched.csv generated successfully: {merge_output}")
-
-        if args.validate:
-            validate_out = args.validate_output or (output_dir / "Validation_Report.csv")
-            merged = read_csv(merge_output)
-            report = generate_validation_report(merged)
-            write_csv(report, validate_out)
-
-            issues = report[report.get("ValidationTags", "").astype(str).str.strip().ne("")]
-
-            # Coverage stats from merged output (how many rows have data per provider).
-            def _count_non_empty(col: str) -> int:
-                if col not in merged.columns:
-                    return 0
-                return int(merged[col].astype(str).str.strip().ne("").sum())
-
-            def _count_any_prefix(prefix: str) -> int:
-                cols = [c for c in merged.columns if c.startswith(prefix)]
-                if not cols:
-                    return 0
-                any_non_empty = (
-                    merged[cols]
-                    .astype(str)
-                    .apply(lambda s: s.str.strip().ne(""), axis=0)
-                    .any(axis=1)
-                )
-                return int(any_non_empty.sum())
-
-            total_rows = len(merged)
-            logging.info(
-                "✔ Provider coverage: "
-                f"RAWG={_count_non_empty('RAWG_ID')}/{total_rows}, "
-                f"IGDB={_count_non_empty('IGDB_ID')}/{total_rows}, "
-                f"Steam={_count_non_empty('Steam_AppID')}/{total_rows}, "
-                f"SteamSpy={_count_any_prefix('SteamSpy_')}/{total_rows}, "
-                f"HLTB={_count_non_empty('HLTB_Main')}/{total_rows}"
-            )
-
-            logging.info(
-                f"✔ Validation report generated: {validate_out} "
-                f"(rows with issues: {len(issues)}/{len(report)})"
-            )
-            # Tag breakdown (compact) using ValidationTags.
-            tags_counter: dict[str, int] = {}
-            for t in report.get("ValidationTags", []).tolist():
-                for part in str(t or "").split(","):
-                    tag = part.strip()
-                    if not tag:
-                        continue
-                    key = tag.split(":", 1)[0].strip()
-                    tags_counter[key] = tags_counter.get(key, 0) + 1
-            top = sorted(tags_counter.items(), key=lambda kv: kv[1], reverse=True)[
-                : MATCHING.suggestions_limit
-            ]
-            if top:
-                logging.info("✔ Validation top tags: " + ", ".join(f"{k}={v}" for k, v in top))
-
-            for _, row in issues.head(20).iterrows():
-                logging.warning(
-                    f"[VALIDATE] {row.get('Name', '')}: "
-                    f"Tags={row.get('ValidationTags', '') or ''}, "
-                    f"Missing={row.get('MissingProviders', '') or ''}, "
-                    f"Culprit={row.get('SuggestedCulprit', '') or ''}, "
-                    f"Canonical={row.get('SuggestedCanonicalTitle', '') or ''} "
-                    f"({row.get('SuggestedCanonicalSource', '') or ''})"
-                )
-
-
 def _command_normalize(args: argparse.Namespace) -> None:
     project_root, paths = _common_paths()
     _setup_logging_from_args(
@@ -1789,7 +1878,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
     df = read_csv(out)
     sources = _parse_sources(
         args.source,
-        allowed={"igdb", "rawg", "steam", "hltb"},
+        allowed={"igdb", "rawg", "steam", "hltb", "wikidata"},
         aliases={"core": ["igdb", "rawg", "steam"]},
     )
     diag_clients: dict[str, object] = {}
@@ -2020,6 +2109,41 @@ def _command_normalize(args: argparse.Namespace) -> None:
                 df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
                 df.at[idx, "Steam_MatchedYear"] = matched_year
 
+    if "wikidata" in sources:
+        client = WikidataClient(
+            cache_path=cache_dir / "wikidata_cache.json",
+            min_interval_s=WIKIDATA.min_interval_s,
+        )
+        diag_clients["wikidata"] = client
+        for idx, row in df.iterrows():
+            if _is_yes(row.get("Disabled", "")):
+                continue
+            name = str(row.get("Name", "") or "").strip()
+            if not name:
+                continue
+            qid = str(row.get("Wikidata_QID", "") or "").strip()
+            if qid == IDENTITY_NOT_FOUND:
+                if include_diagnostics:
+                    df.at[idx, "Wikidata_MatchedLabel"] = ""
+                    df.at[idx, "Wikidata_MatchScore"] = ""
+                    df.at[idx, "Wikidata_MatchedYear"] = ""
+                continue
+            if qid and not include_diagnostics:
+                continue
+
+            data = client.get_by_id(qid) if qid else client.search(name, year_hint=_year_hint(row))
+            if data and str(data.get("Wikidata_QID", "") or "").strip() and not qid:
+                df.at[idx, "Wikidata_QID"] = str(data.get("Wikidata_QID") or "").strip()
+            if include_diagnostics:
+                matched = str((data or {}).get("Wikidata_Label") or "").strip()
+                df.at[idx, "Wikidata_MatchedLabel"] = matched
+                df.at[idx, "Wikidata_MatchScore"] = (
+                    str(fuzzy_score(name, matched)) if matched else ""
+                )
+                df.at[idx, "Wikidata_MatchedYear"] = str(
+                    (data or {}).get("Wikidata_ReleaseYear") or ""
+                ).strip()
+
     if "hltb" in sources:
         client = HLTBClient(cache_path=cache_dir / "hltb_cache.json")
         diag_clients["hltb"] = client
@@ -2066,6 +2190,9 @@ def _command_normalize(args: argparse.Namespace) -> None:
 
     if include_diagnostics:
         df = fill_eval_tags(df, sources=set(sources), clients=diag_clients)
+        df, unpinned = _auto_unpin_likely_wrong_provider_ids(df)
+        if unpinned:
+            logging.info(f"✔ Import safety: auto-unpinned {unpinned} likely-wrong provider IDs")
     else:
         df = drop_eval_columns(df)
 
@@ -2077,6 +2204,8 @@ def _command_normalize(args: argparse.Namespace) -> None:
         logging.info(f"[IGDB] Cache stats: {diag_clients['igdb'].format_cache_stats()}")
     if "steam" in diag_clients:
         logging.info(f"[STEAM] Cache stats: {diag_clients['steam'].format_cache_stats()}")
+    if "wikidata" in diag_clients:
+        logging.info(f"[WIKIDATA] Cache stats: {diag_clients['wikidata'].format_cache_stats()}")
     if "hltb" in diag_clients:
         logging.info(f"[HLTB] Cache stats: {diag_clients['hltb'].format_cache_stats()}")
 
@@ -2138,6 +2267,7 @@ def _command_enrich(args: argparse.Namespace) -> None:
             output_dir / "Provider_Steam.csv",
             output_dir / "Provider_SteamSpy.csv",
             output_dir / "Provider_HLTB.csv",
+            output_dir / "Provider_Wikidata.csv",
             output_dir / "Games_Enriched.csv",
             output_dir / "Validation_Report.csv",
         ):
@@ -2146,7 +2276,7 @@ def _command_enrich(args: argparse.Namespace) -> None:
 
     sources_to_process = _parse_sources(
         args.source,
-        allowed={"igdb", "rawg", "steam", "steamspy", "hltb"},
+        allowed={"igdb", "rawg", "steam", "steamspy", "hltb", "wikidata"},
         aliases={"core": ["igdb", "rawg", "steam"]},
     )
 
@@ -2213,6 +2343,16 @@ def _command_enrich(args: argparse.Namespace) -> None:
             )
             return
 
+        if source == "wikidata":
+            process_wikidata(
+                input_csv=input_csv,
+                output_csv=output_dir / "Provider_Wikidata.csv",
+                cache_path=cache_dir / "wikidata_cache.json",
+                required_cols=["Wikidata_Label"],
+                identity_overrides=identity_overrides or None,
+            )
+            return
+
         raise ValueError(f"Unknown source: {source}")
 
     # Run providers in parallel when we have multiple independent sources.
@@ -2248,6 +2388,7 @@ def _command_enrich(args: argparse.Namespace) -> None:
         steamspy_csv=output_dir / "Provider_SteamSpy.csv",
         output_csv=merge_output,
         igdb_csv=output_dir / "Provider_IGDB.csv",
+        wikidata_csv=output_dir / "Provider_Wikidata.csv",
     )
     merged_df = read_csv(merge_output)
     merged_df = drop_eval_columns(merged_df)
@@ -2258,6 +2399,28 @@ def _command_enrich(args: argparse.Namespace) -> None:
         validate_out = args.validate_output or (output_dir / "Validation_Report.csv")
         merged = read_csv(merge_output)
         enabled_for_validation = {s.strip().lower() for s in sources_to_process if s.strip()}
+
+        # If we didn't clean outputs, the merged CSV can contain provider data from previous runs
+        # (e.g. core providers + new Wikidata). Include any providers that clearly have data so
+        # validation isn't silently empty.
+        def _has_any(col: str) -> bool:
+            if col not in merged.columns:
+                return False
+            return bool(merged[col].astype(str).str.strip().ne("").any())
+
+        if _has_any("RAWG_ID"):
+            enabled_for_validation.add("rawg")
+        if _has_any("IGDB_ID"):
+            enabled_for_validation.add("igdb")
+        if _has_any("Steam_AppID"):
+            enabled_for_validation.add("steam")
+        if any(c.startswith("SteamSpy_") for c in merged.columns) and _has_any("SteamSpy_Owners"):
+            enabled_for_validation.add("steamspy")
+        if _has_any("HLTB_Main"):
+            enabled_for_validation.add("hltb")
+        if _has_any("Wikidata_QID"):
+            enabled_for_validation.add("wikidata")
+
         report = generate_validation_report(merged, enabled_providers=enabled_for_validation)
         write_csv(report, validate_out)
         logging.info(f"✔ Validation report generated: {validate_out}")
@@ -2304,142 +2467,254 @@ def _command_validate(args: argparse.Namespace) -> None:
     logging.info(f"✔ Validation report generated: {out}")
 
 
+def _command_production_tiers(args: argparse.Namespace) -> None:
+    from game_catalog_builder.tools.production_tiers_updater import (
+        suggest_and_update_production_tiers,
+    )
+
+    _, paths = _common_paths()
+    _setup_logging_from_args(
+        paths,
+        args.log_file,
+        args.debug,
+        command_name="production-tiers",
+        input_path=args.enriched,
+    )
+
+    res = suggest_and_update_production_tiers(
+        enriched_csv=args.enriched,
+        yaml_path=args.yaml,
+        wiki_cache_path=args.wiki_cache,
+        apply=args.apply,
+        max_items=args.max_items,
+        min_count=args.min_count,
+        update_existing=args.update_existing,
+        min_interval_s=args.min_interval_s,
+        ensure_complete=args.ensure_complete,
+        include_porting_labels=args.include_porting_labels,
+        unknown_tier=args.unknown_tier,
+    )
+    verb = "updated" if args.apply else "suggested"
+    logging.info(
+        f"✔ Production tiers {verb}: +{res.added_publishers} publishers, "
+        f"+{res.added_developers} developers; "
+        f"unknown={res.unknown_publishers + res.unknown_developers} "
+        f"(pub={res.unknown_publishers} dev={res.unknown_developers}); "
+        f"unresolved={res.unresolved} conflicts={res.conflicts}"
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in {"import", "enrich", "sync", "validate"}:
-        parser = argparse.ArgumentParser(description="Enrich video game catalogs with metadata")
-        sub = parser.add_subparsers(dest="command", required=True)
+    if not argv:
+        raise SystemExit(
+            "Missing command. Use one of: import, enrich, sync, validate, production-tiers. "
+            "Run `python run.py --help` for usage."
+        )
 
-        p_import = sub.add_parser(
-            "import", help="Normalize an exported user CSV into Games_Catalog.csv"
-        )
-        p_import.add_argument("input", type=Path, help="Input CSV (exported from spreadsheet)")
-        p_import.add_argument(
-            "--out",
-            type=Path,
-            help="Output catalog CSV (default: data/input/Games_Catalog.csv)",
-        )
-        p_import.add_argument(
-            "--log-file",
-            type=Path,
-            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
-        )
-        p_import.add_argument("--cache", type=Path, help="Cache directory (default: data/cache)")
-        p_import.add_argument(
-            "--credentials", type=Path, help="Credentials YAML (default: data/credentials.yaml)"
-        )
-        p_import.add_argument(
-            "--source",
-            type=str,
-            default="all",
-            help=(
-                "Which providers to match for IDs (e.g. 'core' or 'igdb,rawg,steam') (default: all)"
-            ),
-        )
-        p_import.add_argument(
-            "--diagnostics",
-            action=argparse.BooleanOptionalAction,
-            default=True,
-            help="Include match diagnostics columns in the output (default: true)",
-        )
-        p_import.add_argument(
-            "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-        )
-        p_import.set_defaults(_fn=_command_normalize)
+    parser = argparse.ArgumentParser(description="Enrich video game catalogs with metadata")
+    sub = parser.add_subparsers(dest="command", required=True)
 
-        p_enrich = sub.add_parser(
-            "enrich", help="Generate provider outputs + Games_Enriched.csv from Games_Catalog.csv"
-        )
-        p_enrich.add_argument("input", type=Path, help="Catalog CSV (source of truth)")
-        p_enrich.add_argument("--output", type=Path, help="Output directory (default: data/output)")
-        p_enrich.add_argument("--cache", type=Path, help="Cache directory (default: data/cache)")
-        p_enrich.add_argument(
-            "--credentials", type=Path, help="Credentials YAML (default: data/credentials.yaml)"
-        )
-        p_enrich.add_argument(
-            "--source",
-            type=str,
-            default="all",
-        )
-        p_enrich.add_argument(
-            "--clean-output",
-            action=argparse.BooleanOptionalAction,
-            default=True,
-            help="Delete and regenerate provider/output CSVs (default: true)",
-        )
-        p_enrich.add_argument(
-            "--merge-output",
-            type=Path,
-            help="Output file for merged results (default: data/output/Games_Enriched.csv)",
-        )
-        p_enrich.add_argument(
-            "--validate", action="store_true", help="Generate validation report (default: off)"
-        )
-        p_enrich.add_argument(
-            "--validate-output",
-            type=Path,
-            help="Output file for validation report (default: data/output/Validation_Report.csv)",
-        )
-        p_enrich.add_argument(
-            "--log-file",
-            type=Path,
-            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
-        )
-        p_enrich.add_argument(
-            "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-        )
-        p_enrich.set_defaults(_fn=_command_enrich)
+    p_import = sub.add_parser(
+        "import", help="Normalize an exported user CSV into Games_Catalog.csv"
+    )
+    p_import.add_argument("input", type=Path, help="Input CSV (exported from spreadsheet)")
+    p_import.add_argument(
+        "--out",
+        type=Path,
+        help="Output catalog CSV (default: data/input/Games_Catalog.csv)",
+    )
+    p_import.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_import.add_argument("--cache", type=Path, help="Cache directory (default: data/cache)")
+    p_import.add_argument(
+        "--credentials", type=Path, help="Credentials YAML (default: data/credentials.yaml)"
+    )
+    p_import.add_argument(
+        "--source",
+        type=str,
+        default="all",
+        help=(
+            "Which providers to match for IDs (e.g. 'core' or 'igdb,rawg,steam') (default: all)"
+        ),
+    )
+    p_import.add_argument(
+        "--diagnostics",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include match diagnostics columns in the output (default: true)",
+    )
+    p_import.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
+    )
+    p_import.set_defaults(_fn=_command_normalize)
 
-        p_sync = sub.add_parser(
-            "sync",
-            help="Sync user-editable fields from Games_Enriched.csv back into Games_Catalog.csv",
-        )
-        p_sync.add_argument("catalog", type=Path, help="Catalog CSV to update")
-        p_sync.add_argument("enriched", type=Path, help="Edited enriched CSV")
-        p_sync.add_argument(
-            "--out", type=Path, help="Output catalog CSV (default: overwrite catalog)"
-        )
-        p_sync.add_argument(
-            "--log-file",
-            type=Path,
-            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
-        )
-        p_sync.add_argument(
-            "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-        )
-        p_sync.set_defaults(_fn=_command_sync_back)
+    p_enrich = sub.add_parser(
+        "enrich", help="Generate provider outputs + Games_Enriched.csv from Games_Catalog.csv"
+    )
+    p_enrich.add_argument("input", type=Path, help="Catalog CSV (source of truth)")
+    p_enrich.add_argument("--output", type=Path, help="Output directory (default: data/output)")
+    p_enrich.add_argument("--cache", type=Path, help="Cache directory (default: data/cache)")
+    p_enrich.add_argument(
+        "--credentials", type=Path, help="Credentials YAML (default: data/credentials.yaml)"
+    )
+    p_enrich.add_argument("--source", type=str, default="all")
+    p_enrich.add_argument(
+        "--clean-output",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Delete and regenerate provider/output CSVs (default: true)",
+    )
+    p_enrich.add_argument(
+        "--merge-output",
+        type=Path,
+        help="Output file for merged results (default: data/output/Games_Enriched.csv)",
+    )
+    p_enrich.add_argument(
+        "--validate", action="store_true", help="Generate validation report (default: off)"
+    )
+    p_enrich.add_argument(
+        "--validate-output",
+        type=Path,
+        help="Output file for validation report (default: data/output/Validation_Report.csv)",
+    )
+    p_enrich.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_enrich.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
+    )
+    p_enrich.set_defaults(_fn=_command_enrich)
 
-        p_val = sub.add_parser(
-            "validate", help="Generate validation report from an enriched CSV (read-only)"
-        )
-        p_val.add_argument(
-            "--enriched",
-            type=Path,
-            help="Enriched CSV to validate (default: data/output/Games_Enriched.csv)",
-        )
-        p_val.add_argument(
-            "--output-dir", type=Path, help="Output directory (default: data/output)"
-        )
-        p_val.add_argument(
-            "--out",
-            type=Path,
-            help="Output validation report path (default: <output-dir>/Validation_Report.csv)",
-        )
-        p_val.add_argument(
-            "--log-file",
-            type=Path,
-            help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
-        )
-        p_val.add_argument(
-            "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-        )
-        p_val.set_defaults(_fn=_command_validate)
+    p_sync = sub.add_parser(
+        "sync", help="Sync user-editable fields from Games_Enriched.csv back into Games_Catalog.csv"
+    )
+    p_sync.add_argument("catalog", type=Path, help="Catalog CSV to update")
+    p_sync.add_argument("enriched", type=Path, help="Edited enriched CSV")
+    p_sync.add_argument("--out", type=Path, help="Output catalog CSV (default: overwrite catalog)")
+    p_sync.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_sync.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
+    p_sync.set_defaults(_fn=_command_sync_back)
 
-        ns = parser.parse_args(argv)
-        ns._fn(ns)
-        return
+    p_val = sub.add_parser(
+        "validate", help="Generate validation report from an enriched CSV (read-only)"
+    )
+    p_val.add_argument(
+        "--enriched",
+        type=Path,
+        help="Enriched CSV to validate (default: data/output/Games_Enriched.csv)",
+    )
+    p_val.add_argument("--output-dir", type=Path, help="Output directory (default: data/output)")
+    p_val.add_argument(
+        "--out",
+        type=Path,
+        help="Output validation report path (default: <output-dir>/Validation_Report.csv)",
+    )
+    p_val.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_val.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
+    p_val.set_defaults(_fn=_command_validate)
 
-    _legacy_enrich(argv)
+    p_tiers = sub.add_parser(
+        "production-tiers",
+        help="Suggest/update production tiers mapping from Steam publishers/developers",
+    )
+    p_tiers.add_argument(
+        "enriched",
+        type=Path,
+        help="Enriched CSV (must contain Steam_Publishers and Steam_Developers)",
+    )
+    p_tiers.add_argument(
+        "--yaml",
+        type=Path,
+        default=Path("data/production_tiers.yaml"),
+        help="Production tiers mapping YAML (default: data/production_tiers.yaml)",
+    )
+    p_tiers.add_argument(
+        "--wiki-cache",
+        type=Path,
+        default=Path("data/cache/wiki_cache.json"),
+        help="Wikipedia cache JSON (default: data/cache/wiki_cache.json)",
+    )
+    p_tiers.add_argument(
+        "--min-count",
+        type=int,
+        default=1,
+        help="Only consider entities appearing in >= N rows (default: 1)",
+    )
+    p_tiers.add_argument(
+        "--max-items",
+        type=int,
+        default=50,
+        help="Max entities to query and suggest per run (default: 50)",
+    )
+    p_tiers.add_argument(
+        "--min-interval-s",
+        type=float,
+        default=0.15,
+        help="Minimum delay between Wikipedia requests (default: 0.15)",
+    )
+    p_tiers.add_argument(
+        "--apply",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Write suggestions into the YAML (default: false)",
+    )
+    p_tiers.add_argument(
+        "--ensure-complete",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Ensure every publisher/developer in the CSV has a tier by filling remaining "
+            "unmapped entities with 'Unknown' (default: true)"
+        ),
+    )
+    p_tiers.add_argument(
+        "--unknown-tier",
+        type=str,
+        default="Unknown",
+        help="Tier value to write when unresolved (default: Unknown)",
+    )
+    p_tiers.add_argument(
+        "--include-porting-labels",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Include porting-label entities (e.g., Aspyr/Feral) in the YAML mapping "
+            "(default: true)"
+        ),
+    )
+    p_tiers.add_argument(
+        "--update-existing",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Allow updating existing YAML entries (default: false)",
+    )
+    p_tiers.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_tiers.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
+    )
+    p_tiers.set_defaults(_fn=_command_production_tiers)
+
+    ns = parser.parse_args(argv)
+    ns._fn(ns)
+    return
 
 
 if __name__ == "__main__":

@@ -1,0 +1,22 @@
+# Optional mapping for `Production_Tier` classification.
+#
+# Copy to `data/production_tiers.yaml` and edit as desired.
+# That file is intentionally git-ignored.
+#
+# Supported tiers are free-form strings, but recommended values are:
+#   - AAA
+#   - AA
+#   - Indie
+#
+# Matching is exact against extracted provider strings (currently Steam dev/pub):
+#   - `Steam_Publishers` (comma-separated)
+#   - `Steam_Developers` (comma-separated)
+#
+# Example:
+# publishers:
+#   "Bethesda Softworks": "AAA"
+# developers:
+#   "id Software": "AAA"
+
+publishers: {}
+developers: {}

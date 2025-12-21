@@ -61,10 +61,59 @@ class HLTBConfig:
 
 
 @dataclass(frozen=True)
+class WikidataConfig:
+    min_interval_s: float = 0.25
+    search_limit: int = 20
+    labels_batch_size: int = 50
+    get_by_ids_batch_size: int = 50
+
+
+@dataclass(frozen=True)
 class CLIConfig:
     igdb_flush_batch_size: int = 50
     steam_flush_batch_size: int = 25
     steam_streaming_flush_batch_size: int = 10
+
+
+@dataclass(frozen=True)
+class SignalsConfig:
+    """
+    Scaling constants for derived "composite" signals.
+
+    These are intentionally simple and monotonic (log-scaled counts -> 0..100) so that:
+    - values remain comparable across rows,
+    - we avoid fragile dataset-percentile normalization.
+    """
+
+    # log10 scale bounds for different reach proxies
+    reach_owners_log10_min: float = 3.0  # 1k
+    reach_owners_log10_max: float = 8.0  # 100M
+    reach_reviews_log10_min: float = 2.0  # 100
+    reach_reviews_log10_max: float = 7.0  # 10M
+    reach_votes_log10_min: float = 2.0  # 100
+    reach_votes_log10_max: float = 6.0  # 1M
+    reach_critic_votes_log10_min: float = 1.0  # 10
+    reach_critic_votes_log10_max: float = 5.0  # 100k
+    reach_pageviews_log10_min: float = 2.0  # 100
+    reach_pageviews_log10_max: float = 8.0  # 100M
+
+    # "Now" (recent activity) proxies
+    now_players2w_log10_min: float = 1.0  # 10
+    now_players2w_log10_max: float = 7.0  # 10M
+    now_ccu_log10_min: float = 0.0  # 1
+    now_ccu_log10_max: float = 6.0  # 1M
+    now_pageviews_log10_min: float = 1.0  # 10
+    now_pageviews_log10_max: float = 7.0  # 10M
+
+    # weights used for the composite blend
+    w_owners: float = 3.0
+    w_reviews: float = 2.0
+    w_votes: float = 1.0
+    w_critic_votes: float = 0.5
+    w_pageviews: float = 0.8
+    w_players2w: float = 2.0
+    w_ccu: float = 1.0
+    w_now_pageviews: float = 1.0
 
 
 RETRY = RetryConfig()
@@ -76,4 +125,6 @@ IGDB = IGDBConfig()
 RAWG = RAWGConfig()
 STEAMSPY = SteamSpyConfig()
 HLTB = HLTBConfig()
+WIKIDATA = WikidataConfig()
 CLI = CLIConfig()
+SIGNALS = SignalsConfig()

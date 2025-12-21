@@ -107,8 +107,11 @@ class SteamSpyClient:
         return {
             "SteamSpy_Owners": str(data.get("owners", "")),
             "SteamSpy_Players": str(data.get("players_forever", "")),
+            "SteamSpy_Players2Weeks": str(data.get("players_2weeks", "")),
             "SteamSpy_CCU": str(data.get("ccu", "")),
             "SteamSpy_PlaytimeAvg": str(data.get("average_forever", "")),
+            "SteamSpy_PlaytimeAvg2Weeks": str(data.get("average_2weeks", "")),
+            "SteamSpy_PlaytimeMedian2Weeks": str(data.get("median_2weeks", "")),
             "SteamSpy_Positive": str(positive),
             "SteamSpy_Negative": str(negative),
             "Score_SteamSpy_100": score_100,
