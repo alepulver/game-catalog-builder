@@ -8,7 +8,7 @@ def test_steam_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
 
     calls = {"appdetails": 0}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         assert "appdetails" in url
         calls["appdetails"] += 1
         appids = ""
@@ -39,23 +39,24 @@ def test_steam_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     cache_path = tmp_path / "steam_cache.json"
     c1 = SteamClient(cache_path=cache_path, min_interval_s=0.0)
     out = c1.get_app_details_many([1, 2, 3])
     assert out[1]["name"] == "Game 1"
     assert calls["appdetails"] == 1
+    c1._cache_io.flush()
 
     # Cache file should have by_id entries for all.
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
     assert "by_id" in raw and "1" in raw["by_id"] and "2" in raw["by_id"] and "3" in raw["by_id"]
 
     # New client should read cache and avoid any network calls.
-    def no_get(*_args, **_kwargs):
+    def no_get(_self, *_args, **_kwargs):
         raise AssertionError("unexpected requests.get call; should use cache")
 
-    monkeypatch.setattr("requests.get", no_get)
+    monkeypatch.setattr("requests.sessions.Session.get", no_get)
     c2 = SteamClient(cache_path=cache_path, min_interval_s=0.0)
     assert c2.get_app_details(2)["name"] == "Game 2"
 
@@ -65,7 +66,7 @@ def test_igdb_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
 
     calls = {"post": 0}
 
-    def fake_post(url, headers=None, data=None, timeout=None):
+    def fake_post(_self, url, headers=None, data=None, timeout=None):
         calls["post"] += 1
         assert url.endswith("/v4/games")
 
@@ -84,7 +85,7 @@ def test_igdb_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("requests.sessions.Session.post", fake_post)
 
     cache_path = tmp_path / "igdb_cache.json"
     c1 = IGDBClient(
@@ -98,6 +99,7 @@ def test_igdb_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
     out = c1.get_by_ids([1, 2])
     assert out["1"]["IGDB_Name"] == "One"
     assert calls["post"] == 1
+    c1._cache_io.flush()
 
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
     assert "by_id" in raw
@@ -105,10 +107,10 @@ def test_igdb_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
     assert "en:2" in raw["by_id"]
 
     # New client should read by_id cache and avoid POST calls.
-    def no_post(*_args, **_kwargs):
+    def no_post(_self, *_args, **_kwargs):
         raise AssertionError("unexpected requests.post call; should use cache")
 
-    monkeypatch.setattr("requests.post", no_post)
+    monkeypatch.setattr("requests.sessions.Session.post", no_post)
     c2 = IGDBClient(
         client_id="x",
         client_secret="y",

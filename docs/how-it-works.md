@@ -5,7 +5,9 @@ This project enriches a “personal catalog” CSV (from MyVideoGameList) with m
 ## Overview
 
 1. Read the input CSV (must contain a `Name` column).
-2. Run providers (RAWG, IGDB, Steam→SteamSpy, HLTB, Wikidata).
+2. Import (pin provider IDs + diagnostics) into `data/input/Games_Catalog.csv`.
+3. Optionally resolve (third pass): conservative auto-unpin + one-shot repin attempts.
+4. Run providers (RAWG, IGDB, Steam→SteamSpy, HLTB, Wikidata).
 3. Each provider:
    - searches by name (fuzzy match),
    - optionally fetches details by ID (provider-specific),
@@ -37,6 +39,29 @@ The importer is conservative about pins:
 - If diagnostics identify a provider as `likely_wrong:<provider>` **and** there is a strict-majority
   provider consensus (and the provider is tagged as the consensus outlier), the importer clears
   that provider ID instead of keeping a likely-wrong pin.
+
+## Optional resolve pass (auto-resolve, explicit)
+
+The `resolve` command is an explicit third pass (off by default) that can:
+
+- re-run diagnostics + auto-unpin,
+- attempt a single conservative repin per affected provider using the majority provider title and
+  cached aliases (Wikidata aliases + IGDB alternative names),
+
+This keeps the default `import` predictable and avoids extra provider requests unless you opt in.
+
+## What’s implemented (quick index)
+
+- Third pass auto-resolve: `python run.py resolve` (conservative repin after auto-unpin)
+- Wikidata provider-backed resolver: uses SPARQL external IDs (`data/cache/wikidata_cache.json:by_hint`)
+- Review-aid fields:
+  - Steam: `Steam_URL`, `Steam_Website`, `Steam_ShortDescription`, `Steam_StoreType`
+  - RAWG: `RAWG_Website`, `RAWG_DescriptionRaw`, `RAWG_Genres`, `RAWG_ESRB`
+  - IGDB: `IGDB_Summary`, `IGDB_Websites`, `IGDB_ParentGame`, `IGDB_VersionParent`, `IGDB_DLCs`, `IGDB_Expansions`, `IGDB_Ports`
+- Validation signals:
+  - `missing_ok:*` for expected Steam/SteamSpy misses (non-PC platform union)
+  - `store_type_not_game:<type>`
+  - `genre_outlier:<provider>` / `genre_no_consensus` + `Genres` / `GenreIntersection` columns
 
 ## Provider-specific search notes
 
@@ -112,12 +137,14 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - Written once at the end of the import command.
   - During import, HLTB matching progress is also checkpointed every 25 processed rows because HLTB
     can be slow.
+- Focused review list (`data/output/Review_TopRisk.csv`)
+  - Generated on-demand via `python run.py review` (uses `Games_Catalog.csv` and optionally `Games_Enriched.csv` for extra context like Wikipedia summaries/links).
 - When diagnostics are enabled, the import also writes:
     - `ReviewTags`: compact tags (missing providers, low fuzzy scores, cross-provider outliers, plus a few high-signal Steam-specific checks like `steam_series_mismatch` and `steam_appid_disagree:*`).
       - Consensus/outliers: `provider_consensus:*`, `provider_outlier:*`, `provider_no_consensus`
       - Metadata outliers: `year_outlier:*`, `platform_outlier:*` (and `*_no_consensus`)
       - Actionable rollups: `likely_wrong:*`, `ambiguous_title_year`
-      - Dev/pub checks: `developer_disagree`, `publisher_disagree` (when Steam/RAWG/IGDB dev/pub data is available)
+      - Dev/pub checks: `developer_disagree`, `publisher_disagree` (optionally with `<kind>_outlier:<provider>` when a strict-majority source disagrees)
     - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW` (missing providers are typically `MEDIUM`; strong disagreement signals are `LOW`).
 
 - Merge output (`data/output/Games_Enriched.csv`)
@@ -132,6 +159,10 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - Ratings: `CommunityRating_Composite_100`, `CriticRating_Composite_100` (uses Steam/RAWG Metacritic + IGDB aggregated rating when present)
   - Production: `Production_Tier` (optional; driven by `data/production_tiers.yaml` when present)
   - Now (current interest): `Now_SteamSpyPlayers2Weeks`, `Now_SteamSpyPlaytimeAvg2Weeks`, `Now_SteamSpyPlaytimeMedian2Weeks`
+  - Notes/limitations:
+    - These signals are best-effort and intentionally platform-biased toward Steam/PC and Wikipedia availability.
+    - We avoid scraping; “now” coverage for non-Steam games is limited.
+    - Wikidata numeric “facts” (sales/budget/awards) are too sparse/inconsistent to treat as first-class columns.
 
 ## Production tier mapping (AAA/AA/Indie)
 
@@ -163,6 +194,10 @@ Notes:
   - `[NETWORK] ...` (connection/timeout/SSL)
   - `[HTTP] ...` (non-2xx responses)
   - These are intentionally separate from provider “Not found ...” warnings.
+- When a provider needs network (cache miss) and the network is unavailable, the run fails fast with a clear error instead of silently turning the failure into “not found”.
+- When providers see `429 Too Many Requests`, retries honor `Retry-After` when available; cache stats append `429=... retries=... backoff_ms=...` only when it occurred.
+- Provider JSON cache writes are throttled to avoid repeatedly rewriting large files; caches are flushed at process exit. Large caches (Wikidata + Wikipedia pageviews) use a longer interval than smaller caches.
+- Provider HTTP clients reuse a persistent `requests.Session()` per provider instance (connection pooling / keep-alive). This is intended to improve performance; request retries handle stale connections.
 
 ## Per-provider flow
 
@@ -202,6 +237,8 @@ Notes:
 - Details: `GET https://www.wikidata.org/w/api.php?action=wbgetentities&ids=...`
 - ID: `Wikidata_QID`
 - Provides cross-platform identity context: canonical label/description, release year, developer/publisher, platforms, series, genres, and an English Wikipedia link.
+- Linked entity labels (developers/publishers/platforms/genres/etc) are fetched via `wbgetentities&props=labels` in batches and cached.
+  - During `import`, existing `Wikidata_QID` values are prefetched in bulk so warm-cache imports don’t do per-row Wikidata requests.
 
 ## Merge behavior
 
@@ -212,6 +249,13 @@ All merges are performed using `RowId`. Duplicate `Name` values are fine as long
 The primary review surface is **import diagnostics** in `data/input/Games_Catalog.csv`:
 
 - `ReviewTags`: compact tags describing why the row may need review.
+
+Validation (`python run.py enrich --validate` or `python run.py validate`) is read-only and adds
+additional cross-provider checks once provider metadata is available, including:
+
+- platform and year consensus/outliers
+- genre consensus/outliers (RAWG/IGDB/Steam)
+- missing-provider severity (`missing_ok:*` for expected misses)
 - `MatchConfidence`: `HIGH` / `MEDIUM` / `LOW`.
 
 In addition, you can generate a read-only **validation report** after enrichment:

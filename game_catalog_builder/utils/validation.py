@@ -5,8 +5,10 @@ from dataclasses import dataclass
 import pandas as pd
 
 from ..config import VALIDATION
+from .company import company_set_from_json_array_cell
 from .consistency import (
     actionable_mismatch_tags,
+    company_disagreement_tags,
     compute_provider_consensus,
     platform_outlier_tags,
     year_outlier_tags,
@@ -16,93 +18,6 @@ from .utilities import fuzzy_score, normalize_game_name
 
 def _split_csv_list(s: str) -> list[str]:
     return [p.strip() for p in (s or "").split(",") if p.strip()]
-
-
-def _split_json_array_cell(s: str) -> list[str]:
-    """
-    Parse a JSON array serialized into a CSV cell (e.g. ["id Software","Bethesda"]).
-    """
-    import json
-
-    raw = str(s or "").strip()
-    if not raw:
-        return []
-    if not raw.startswith("["):
-        return []
-    try:
-        val = json.loads(raw)
-    except Exception:
-        return []
-    if not isinstance(val, list):
-        return []
-    out: list[str] = []
-    for x in val:
-        t = str(x or "").strip()
-        if t:
-            out.append(t)
-    return out
-
-
-_LEGAL_SUFFIXES = (
-    "inc",
-    "inc.",
-    "incorporated",
-    "llc",
-    "l.l.c.",
-    "ltd",
-    "ltd.",
-    "limited",
-    "corp",
-    "corp.",
-    "corporation",
-    "co",
-    "co.",
-    "company",
-    "gmbh",
-    "s.a.",
-    "s.a",
-    "s.r.l.",
-    "s.r.l",
-    "ag",
-    "bv",
-    "oy",
-    "oyj",
-)
-
-
-def _normalize_company_name(value: str) -> str:
-    s = str(value or "").strip()
-    if not s:
-        return ""
-    # strip trailing parentheticals (often porting/platform labels)
-    if s.endswith(")") and "(" in s:
-        s = s.rsplit("(", 1)[0].strip()
-    s2 = s.strip().rstrip(",").strip()
-    parts = s2.split()
-    while parts and parts[-1].strip().casefold() in {x.casefold() for x in _LEGAL_SUFFIXES}:
-        parts = parts[:-1]
-    s3 = " ".join(parts).strip().strip(",").strip()
-    return s3.casefold()
-
-
-def _company_set_from_row(row: dict[str, str], *, col: str) -> set[str]:
-    raw = str(row.get(col, "") or "").strip()
-    items = _split_json_array_cell(raw)
-    out = {_normalize_company_name(x) for x in items}
-    return {x for x in out if x}
-
-
-def _has_any_disagree(sets: list[set[str]]) -> bool:
-    present = [s for s in sets if s]
-    if len(present) < 2:
-        return False
-    # Disagree if any pair has empty intersection.
-    for i in range(len(present)):
-        for j in range(i + 1, len(present)):
-            if present[i].isdisjoint(present[j]):
-                return True
-    return False
-
 
 def _normalize_platform_token(token: str) -> str:
     t = (token or "").strip().lower()
@@ -506,8 +421,28 @@ def generate_validation_report(
                 not_found.append(prov)
 
         validation_tags: list[str] = []
+        # Missing-provider severity: for clearly non-PC titles, treat missing Steam/SteamSpy as
+        # informational (still recorded in MissingProviders).
+        platforms_union = (
+            _normalize_platforms(str(r.get("RAWG_Platforms", "") or ""))
+            | _normalize_platforms(str(r.get("IGDB_Platforms", "") or ""))
+            | _normalize_platforms(str(r.get("Steam_Platforms", "") or ""))
+            | _normalize_platforms(str(r.get("HLTB_Platforms", "") or ""))
+        )
+        is_pc_like = "pc" in platforms_union
+
         for prov in not_found:
-            validation_tags.append(f"missing:{prov}")
+            if prov == "SteamSpy" and steam_appid:
+                validation_tags.append("missing:SteamSpy")
+                continue
+            if prov in {"Steam", "SteamSpy"} and not is_pc_like:
+                validation_tags.append(f"missing_ok:{prov}")
+            else:
+                validation_tags.append(f"missing:{prov}")
+
+        steam_store_type = str(r.get("Steam_StoreType", "") or "").strip().lower()
+        if steam_store_type and steam_store_type != "game":
+            validation_tags.append(f"store_type_not_game:{steam_store_type}")
 
         culprit = ""
         if steam_appid_mismatch == "YES":
@@ -639,20 +574,18 @@ def generate_validation_report(
             validation_tags.append("needs_review")
 
         # Developer/publisher cross-checks (high-signal when available).
-        dev_sets = [
-            _company_set_from_row(r, col="Steam_Developers"),
-            _company_set_from_row(r, col="RAWG_Developers"),
-            _company_set_from_row(r, col="IGDB_Developers"),
-        ]
-        pub_sets = [
-            _company_set_from_row(r, col="Steam_Publishers"),
-            _company_set_from_row(r, col="RAWG_Publishers"),
-            _company_set_from_row(r, col="IGDB_Publishers"),
-        ]
-        if _has_any_disagree(dev_sets):
-            validation_tags.append("developer_disagree")
-        if _has_any_disagree(pub_sets):
-            validation_tags.append("publisher_disagree")
+        dev_sets = {
+            "steam": company_set_from_json_array_cell(r.get("Steam_Developers", "")),
+            "rawg": company_set_from_json_array_cell(r.get("RAWG_Developers", "")),
+            "igdb": company_set_from_json_array_cell(r.get("IGDB_Developers", "")),
+        }
+        pub_sets = {
+            "steam": company_set_from_json_array_cell(r.get("Steam_Publishers", "")),
+            "rawg": company_set_from_json_array_cell(r.get("RAWG_Publishers", "")),
+            "igdb": company_set_from_json_array_cell(r.get("IGDB_Publishers", "")),
+        }
+        validation_tags.extend(company_disagreement_tags(dev_sets, kind="developer"))
+        validation_tags.extend(company_disagreement_tags(pub_sets, kind="publisher"))
 
         provider_titles: dict[str, str] = {
             "rawg": rawg_name,
@@ -683,6 +616,39 @@ def generate_validation_report(
         }
         platform_tags = platform_outlier_tags(platform_sets)
         validation_tags.extend(platform_tags)
+
+        def _normalize_genres(genres: str) -> set[str]:
+            out: set[str] = set()
+            for part in [p.strip() for p in str(genres or "").split(",") if p.strip()]:
+                out.add(normalize_game_name(part))
+            return {x for x in out if x}
+
+        genre_sets = {
+            "rawg": _normalize_genres(str(r.get("RAWG_Genres", "") or "")),
+            "igdb": _normalize_genres(str(r.get("IGDB_Genres", "") or "")),
+            "steam": _normalize_genres(str(r.get("Steam_Tags", "") or "")),
+        }
+        present_genre_providers = [p for p, s in genre_sets.items() if s]
+        genre_intersection = (
+            set.intersection(*(genre_sets[p] for p in present_genre_providers))
+            if len(present_genre_providers) >= 2
+            else set()
+        )
+        if len(present_genre_providers) >= 2:
+            # Compute a strict-majority "consensus genre set" by token frequency.
+            counts: dict[str, int] = {}
+            for p in present_genre_providers:
+                for g in genre_sets[p]:
+                    counts[g] = counts.get(g, 0) + 1
+            consensus_genres = {
+                g for g, c in counts.items() if c > len(present_genre_providers) / 2
+            }
+            if not consensus_genres:
+                validation_tags.append("genre_no_consensus")
+            else:
+                for p in present_genre_providers:
+                    if genre_sets[p].isdisjoint(consensus_genres):
+                        validation_tags.append(f"genre_outlier:{p}")
 
         validation_tags.extend(
             actionable_mismatch_tags(
@@ -715,6 +681,14 @@ def generate_validation_report(
                 "SeriesNumbers": series_summary,
                 "Platforms": "; ".join(f"{k}:{','.join(sorted(s))}" for k, s in non_empty),
                 "PlatformIntersection": platform_intersection,
+                "Genres": "; ".join(
+                    f"{k}:{','.join(sorted(genre_sets[k]))}"
+                    for k in ("rawg", "igdb", "steam")
+                    if genre_sets.get(k)
+                ),
+                "GenreIntersection": (
+                    ", ".join(sorted(genre_intersection)) if genre_intersection else ""
+                ),
                 "SteamAppID": steam_appid,
                 "IGDB_SteamAppID": igdb_steam_appid,
                 "SuggestedCulprit": culprit,

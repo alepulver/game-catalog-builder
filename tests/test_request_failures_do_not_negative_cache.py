@@ -6,13 +6,13 @@ def test_steam_request_failure_does_not_negative_cache(tmp_path, monkeypatch):
 
     calls = {"storesearch": 0}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         if "storesearch" in url:
             calls["storesearch"] += 1
             raise RuntimeError("network down")
         raise AssertionError(f"unexpected url {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     assert client.search_appid("Borderlands") is None

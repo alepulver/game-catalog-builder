@@ -10,7 +10,14 @@ from urllib.parse import quote
 import requests
 
 from ..config import REQUEST, RETRY
-from ..utils.utilities import RateLimiter, load_json_cache, save_json_cache, with_retries
+from ..utils.utilities import (
+    CacheIOTracker,
+    RateLimiter,
+    network_failures_count,
+    raise_on_new_network_failure,
+    with_retries,
+)
+from ..config import CACHE
 
 WIKIMEDIA_PAGEVIEWS_API = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
 USER_AGENT = "game-catalog-builder/1.0 (contact: alepulver@protonmail.com)"
@@ -40,6 +47,21 @@ def _parse_yyyy_mm_dd(s: str) -> date | None:
         return None
 
 
+def _parse_stamp_yyyymmdd00(s: str) -> date | None:
+    t = str(s or "").strip()
+    if len(t) != 10 or not t.endswith("00"):
+        return None
+    y = t[0:4]
+    m = t[4:6]
+    d = t[6:8]
+    if not (y.isdigit() and m.isdigit() and d.isdigit()):
+        return None
+    try:
+        return date(int(y), int(m), int(d))
+    except Exception:
+        return None
+
+
 class WikipediaPageviewsClient:
     """
     Wikipedia pageviews via Wikimedia REST API (official, no scraping).
@@ -52,6 +74,7 @@ class WikipediaPageviewsClient:
     """
 
     def __init__(self, cache_path: str | Path, min_interval_s: float = 0.15):
+        self._session = requests.Session()
         self.cache_path = Path(cache_path)
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
         self._by_query: dict[str, Any] = {}
@@ -60,8 +83,11 @@ class WikipediaPageviewsClient:
             "by_query_fetch": 0,
             "by_query_negative_hit": 0,
             "by_query_negative_fetch": 0,
+            # HTTP request counters (attempts, including retries).
+            "http_get": 0,
         }
-        self._load_cache(load_json_cache(self.cache_path))
+        self._cache_io = CacheIOTracker(self.stats, min_interval_s=CACHE.save_min_interval_large_s)
+        self._load_cache(self._cache_io.load_json(self.cache_path))
 
     def _load_cache(self, raw: Any) -> None:
         if not isinstance(raw, dict) or not raw:
@@ -71,7 +97,7 @@ class WikipediaPageviewsClient:
             self._by_query = {str(k): v for k, v in by_query.items()}
 
     def _save_cache(self) -> None:
-        save_json_cache({"by_query": self._by_query}, self.cache_path)
+        self._cache_io.save_json({"by_query": self._by_query}, self.cache_path)
 
     def _get_cached(self, request_key: str, url: str) -> Any | None:
         cached = self._by_query.get(request_key)
@@ -83,7 +109,8 @@ class WikipediaPageviewsClient:
 
         def _request():
             self.ratelimiter.wait()
-            r = requests.get(
+            self.stats["http_get"] += 1
+            r = self._session.get(
                 url,
                 timeout=REQUEST.timeout_s,
                 headers={"User-Agent": USER_AGENT},
@@ -93,16 +120,19 @@ class WikipediaPageviewsClient:
             r.raise_for_status()
             return r.json()
 
+        before_net = network_failures_count(self.stats)
         data = with_retries(
             _request,
             retries=RETRY.retries,
             on_fail_return=None,
             context="Wikipedia pageviews",
+            retry_stats=self.stats,
         )
         if data is None:
             logging.warning(
                 "Wikipedia pageviews request failed (no response); not caching as not-found."
             )
+            raise_on_new_network_failure(self.stats, before=before_net, context="Wikipedia pageviews")
             return None
 
         self._by_query[request_key] = data
@@ -112,22 +142,30 @@ class WikipediaPageviewsClient:
             self.stats["by_query_negative_fetch"] += 1
         return data
 
-    def _sorted_daily_views(self, payload: Any) -> list[int]:
+    def _daily_views_for_range(self, payload: Any, *, start: date, end: date) -> list[int]:
         if not isinstance(payload, dict):
             return []
         items = payload.get("items")
         if not isinstance(items, list):
             return []
-        pairs: list[tuple[str, int]] = []
+        by_day: dict[date, int] = {}
         for it in items:
             if not isinstance(it, dict):
                 continue
             v = it.get("views")
-            ts = str(it.get("timestamp") or "")
-            if isinstance(v, int) and v >= 0 and ts:
-                pairs.append((ts, v))
-        pairs.sort(key=lambda x: x[0])
-        return [v for _, v in pairs]
+            ts = str(it.get("timestamp") or "").strip()
+            d = _parse_stamp_yyyymmdd00(ts) if ts else None
+            if d is None:
+                continue
+            if isinstance(v, int) and v >= 0:
+                by_day[d] = v
+
+        out: list[int] = []
+        cur = start
+        while cur <= end:
+            out.append(int(by_day.get(cur, 0) or 0))
+            cur = cur + timedelta(days=1)
+        return out
 
     def get_pageviews_daily_series(
         self, *, project: str, article: str, days: int, access: str = "all-access"
@@ -157,7 +195,7 @@ class WikipediaPageviewsClient:
         payload = self._get_cached(request_key, url)
         if payload is None or payload == {}:
             return []
-        return self._sorted_daily_views(payload)
+        return self._daily_views_for_range(payload, start=start, end=end)
 
     def get_pageviews_daily_series_range(
         self,
@@ -191,7 +229,7 @@ class WikipediaPageviewsClient:
         payload = self._get_cached(request_key, url)
         if payload is None or payload == {}:
             return []
-        return self._sorted_daily_views(payload)
+        return self._daily_views_for_range(payload, start=start, end=end)
 
     def get_pageviews_summary_enwiki(self, enwiki_title: str) -> PageviewsSummary:
         title = str(enwiki_title or "").strip()
@@ -213,6 +251,67 @@ class WikipediaPageviewsClient:
         p30 = sum(daily[-30:]) if len(daily) >= 30 else sum(daily)
         return PageviewsSummary(p30, p90, p365)
 
+    def get_pageviews_launch_summary_enwiki(
+        self,
+        *,
+        enwiki_title: str,
+        release_date: str,
+        earliest_supported: date = date(2015, 7, 1),
+    ) -> PageviewsSummary:
+        """
+        Return the first-30 and first-90 day pageviews since release, when feasible.
+
+        Uses at most one HTTP request:
+          - If the release date is within the last 365 days, reuses the cached 365-day series.
+          - Otherwise fetches a single explicit range [release_date, release_date+89] (capped).
+        """
+        title = str(enwiki_title or "").strip()
+        if not title:
+            return PageviewsSummary(None, None, None)
+        d0 = _parse_yyyy_mm_dd(release_date)
+        if d0 is None:
+            return PageviewsSummary(None, None, None)
+
+        end_yesterday = date.today() - timedelta(days=1)
+        if d0 < earliest_supported:
+            return PageviewsSummary(None, None, None)
+        if d0 > end_yesterday:
+            return PageviewsSummary(None, None, None)
+
+        last_start = end_yesterday - timedelta(days=365 - 1)
+        if d0 >= last_start:
+            # Reuse the cached 365-day series to avoid extra API calls for recent releases.
+            daily = self.get_pageviews_daily_series(
+                project="en.wikipedia.org",
+                article=title,
+                days=365,
+            )
+            if not daily:
+                return PageviewsSummary(None, None, None)
+            offset = (d0 - last_start).days
+            if offset < 0 or offset >= len(daily):
+                return PageviewsSummary(None, None, None)
+            since = daily[offset:]
+            if not since:
+                return PageviewsSummary(None, None, None)
+            first90 = int(sum(since[:90]))
+            first30 = int(sum(since[:30]))
+            return PageviewsSummary(first30, first90, None)
+
+        # Older releases (but within Wikimedia coverage): fetch a single 90-day range and derive
+        # first-30 locally.
+        end = d0 + timedelta(days=90 - 1)
+        if end > end_yesterday:
+            end = end_yesterday
+        daily = self.get_pageviews_daily_series_range(
+            project="en.wikipedia.org", article=title, start=d0, end=end
+        )
+        if not daily:
+            return PageviewsSummary(None, None, None)
+        first90 = int(sum(daily))
+        first30 = int(sum(daily[:30])) if len(daily) >= 30 else int(sum(daily))
+        return PageviewsSummary(first30, first90, None)
+
     def get_pageviews_first_days_since_release_enwiki(
         self,
         *,
@@ -227,34 +326,33 @@ class WikipediaPageviewsClient:
         Note: Wikimedia Pageviews data is available starting mid-2015; for older releases,
         this returns None.
         """
-        title = str(enwiki_title or "").strip()
-        if not title:
-            return None
-        d0 = _parse_yyyy_mm_dd(release_date)
-        if d0 is None:
-            return None
-
-        end_yesterday = date.today() - timedelta(days=1)
-        if d0 < earliest_supported:
-            return None
-        if d0 > end_yesterday:
-            return None
         if days <= 0:
             return None
-
-        end = d0 + timedelta(days=days - 1)
-        if end > end_yesterday:
-            end = end_yesterday
-        daily = self.get_pageviews_daily_series_range(
-            project="en.wikipedia.org", article=title, start=d0, end=end
+        summary = self.get_pageviews_launch_summary_enwiki(
+            enwiki_title=enwiki_title, release_date=release_date, earliest_supported=earliest_supported
         )
-        if not daily:
-            return None
-        return int(sum(daily))
+        if days <= 30:
+            return summary.days_30
+        if days <= 90:
+            return summary.days_90
+        # For now, only expose first-30/first-90; larger windows would need a larger range.
+        return None
 
     def format_cache_stats(self) -> str:
         s = self.stats
-        return (
+        base = (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
-            f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']})"
+            f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
+            f"http get={s['http_get']}, "
+            f"cache load_ms={int(s.get('cache_load_ms', 0) or 0)} "
+            f"saves={int(s.get('cache_save_count', 0) or 0)} "
+            f"save_ms={int(s.get('cache_save_ms', 0) or 0)}"
         )
+        http_429 = int(s.get("http_429", 0) or 0)
+        if http_429:
+            return (
+                base
+                + f", 429={http_429} retries={int(s.get('http_429_retries', 0) or 0)}"
+                + f" backoff_ms={int(s.get('http_429_backoff_ms', 0) or 0)}"
+            )
+        return base

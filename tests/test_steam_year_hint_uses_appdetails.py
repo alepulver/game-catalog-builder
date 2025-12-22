@@ -27,7 +27,7 @@ class Resp:
 def test_steam_search_prefers_release_year_via_appdetails(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steam_client import SteamClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         if "storesearch" in url:
             return Resp(
                 {
@@ -71,7 +71,7 @@ def test_steam_search_prefers_release_year_via_appdetails(tmp_path, monkeypatch)
 
         raise AssertionError(f"unexpected url {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     best = client.search_appid("Doom", year_hint=1993)
@@ -82,7 +82,7 @@ def test_steam_search_prefers_release_year_via_appdetails(tmp_path, monkeypatch)
 def test_steam_search_skips_non_game_types(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steam_client import SteamClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         if "storesearch" in url:
             return Resp(
                 {
@@ -125,7 +125,7 @@ def test_steam_search_skips_non_game_types(tmp_path, monkeypatch):
 
         raise AssertionError(f"unexpected url {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     best = client.search_appid("Example Game", year_hint=2000)
@@ -138,7 +138,7 @@ def test_steam_search_prefers_base_or_edition_over_sequel_when_query_has_no_numb
 ):
     from game_catalog_builder.clients.steam_client import SteamClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         if "storesearch" in url:
             return Resp(
                 {
@@ -174,7 +174,7 @@ def test_steam_search_prefers_base_or_edition_over_sequel_when_query_has_no_numb
 
         raise AssertionError(f"unexpected url {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     best = client.search_appid("Borderlands")
@@ -186,7 +186,7 @@ def test_steam_search_prefers_game_over_soundtrack_via_details(monkeypatch, tmp_
     from game_catalog_builder.clients.steam_client import SteamClient
 
     # storesearch returns a soundtrack-ish item and the real game.
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         assert "storesearch" in url or "appdetails" in url
 
         if "storesearch" in url:
@@ -223,7 +223,7 @@ def test_steam_search_prefers_game_over_soundtrack_via_details(monkeypatch, tmp_
             )
         return Resp({appid: {"success": False}})
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     best = client.search_appid("Half-Life 2: Episode Two")
@@ -234,7 +234,7 @@ def test_steam_search_prefers_game_over_soundtrack_via_details(monkeypatch, tmp_
 def test_steam_rejects_dlc_type_when_appdetails_type_is_not_game(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steam_client import SteamClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         if "storesearch" in url:
             return Resp(
                 {"items": [{"id": 2112230, "name": "Car Mechanic Simulator 2021: Aston Martin"}]}
@@ -256,7 +256,7 @@ def test_steam_rejects_dlc_type_when_appdetails_type_is_not_game(tmp_path, monke
 
         raise AssertionError(f"unexpected url {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     assert client.search_appid("Car Mechanic Simulator 2021") is None

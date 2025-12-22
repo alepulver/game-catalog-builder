@@ -6,6 +6,7 @@ import random
 import re
 import time
 import uuid
+import atexit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -14,7 +15,7 @@ import pandas as pd
 import yaml
 from rapidfuzz import fuzz
 
-from ..config import RETRY
+from ..config import CACHE, RETRY
 
 IDENTITY_NOT_FOUND = "__NOT_FOUND__"
 
@@ -538,6 +539,7 @@ def with_retries(
     retry_on: tuple[type, ...] = (Exception,),
     on_fail_return: Any = None,
     context: str | None = None,
+    retry_stats: dict[str, Any] | None = None,
 ) -> Any:
     """
     Execute fn with retries and exponential backoff.
@@ -549,13 +551,19 @@ def with_retries(
         except retry_on as e:
             last_exc = e
             retry_after_s: float | None = None
+            status: int | None = None
+            is_429 = False
+            is_network = False
+            is_http = False
             try:
                 import requests  # local import to avoid hard dependency at import time
 
                 if isinstance(last_exc, requests.exceptions.HTTPError):
+                    is_http = True
                     resp = getattr(last_exc, "response", None)
                     status = getattr(resp, "status_code", None)
                     if status == 429:
+                        is_429 = True
                         headers = getattr(resp, "headers", {}) or {}
                         try:
                             ra = str(headers.get("Retry-After", "") or "").strip()
@@ -565,8 +573,28 @@ def with_retries(
                             retry_after_s = None
                         if retry_after_s is None:
                             retry_after_s = RETRY.http_429_default_retry_after_s
+                else:
+                    net_types = (
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.Timeout,
+                        requests.exceptions.SSLError,
+                    )
+                    if isinstance(last_exc, net_types):
+                        is_network = True
             except Exception:
                 retry_after_s = None
+                status = None
+                is_429 = False
+                is_network = False
+                is_http = False
+
+            if retry_stats is not None:
+                if is_429:
+                    retry_stats["http_429"] = int(retry_stats.get("http_429", 0)) + 1
+                if is_network:
+                    retry_stats["network_errors"] = int(retry_stats.get("network_errors", 0)) + 1
+                if is_http:
+                    retry_stats["http_errors"] = int(retry_stats.get("http_errors", 0)) + 1
 
             if attempt == retries - 1:
                 if context and last_exc is not None:
@@ -595,12 +623,119 @@ def with_retries(
                             )
                     except Exception:
                         logging.error(f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}")
+                if retry_stats is not None:
+                    if is_network:
+                        retry_stats["network_failures"] = int(
+                            retry_stats.get("network_failures", 0)
+                        ) + 1
+                    if is_http:
+                        retry_stats["http_failures"] = int(retry_stats.get("http_failures", 0)) + 1
                 return on_fail_return
             sleep = base_sleep_s * (2**attempt) + random.uniform(0, jitter_s)
             if retry_after_s is not None and retry_after_s > 0:
                 sleep = max(sleep, retry_after_s)
+            if retry_stats is not None:
+                retry_stats["retry_attempts"] = int(retry_stats.get("retry_attempts", 0)) + 1
+                if is_429:
+                    retry_stats["http_429_retries"] = int(retry_stats.get("http_429_retries", 0)) + 1
+                    retry_stats["http_429_backoff_ms"] = int(
+                        retry_stats.get("http_429_backoff_ms", 0)
+                    ) + int(round(sleep * 1000.0))
             time.sleep(sleep)
     return on_fail_return
+
+
+def network_failures_count(stats: dict[str, Any] | None) -> int:
+    if not stats:
+        return 0
+    try:
+        return int(stats.get("network_failures", 0) or 0)
+    except Exception:
+        return 0
+
+
+def raise_on_new_network_failure(
+    stats: dict[str, Any] | None, *, before: int, context: str
+) -> None:
+    """
+    Raise a clear error when a network failure happened during a provider request.
+
+    Use this when a cache miss required a real HTTP call: we prefer failing fast rather than
+    producing partial results that look like "not found".
+    """
+    after = network_failures_count(stats)
+    if after > before:
+        raise RuntimeError(
+            f"Network unavailable while calling {context}. Enable internet access and rerun."
+        )
+
+
+@dataclass
+class CacheIOTracker:
+    """
+    Track JSON cache load/save counts and time in milliseconds.
+
+    Clients should use this instead of duplicating perf_counter timing logic.
+    """
+
+    stats: dict[str, Any]
+    prefix: str = "cache"
+    min_interval_s: float | None = None
+
+    def __post_init__(self) -> None:
+        self.stats.setdefault(f"{self.prefix}_load_count", 0)
+        self.stats.setdefault(f"{self.prefix}_load_ms", 0)
+        self.stats.setdefault(f"{self.prefix}_save_count", 0)
+        self.stats.setdefault(f"{self.prefix}_save_ms", 0)
+        self._last_save_s = 0.0
+        self._pending: tuple[dict[str, Any], Path] | None = None
+        atexit.register(self.flush)
+
+    def load_json(self, path: str | Path) -> dict[str, Any]:
+        t0 = time.perf_counter()
+        raw = load_json_cache(path)
+        t1 = time.perf_counter()
+        self.stats[f"{self.prefix}_load_count"] = int(
+            self.stats.get(f"{self.prefix}_load_count", 0) or 0
+        ) + 1
+        self.stats[f"{self.prefix}_load_ms"] = int(self.stats.get(f"{self.prefix}_load_ms", 0) or 0) + int(
+            round((t1 - t0) * 1000.0)
+        )
+        return raw
+
+    def save_json(self, cache: dict[str, Any], path: str | Path) -> None:
+        # Throttle full-cache rewrites; caches can be large and write-heavy runs suffer otherwise.
+        p = Path(path)
+        now = time.monotonic()
+        if self.min_interval_s is not None:
+            min_interval = float(self.min_interval_s)
+        else:
+            min_interval = float(getattr(CACHE, "save_min_interval_small_s", 0.0) or 0.0)
+        if min_interval > 0 and (now - self._last_save_s) < min_interval:
+            self._pending = (cache, p)
+            return
+
+        self._save_now(cache, p)
+
+    def flush(self) -> None:
+        pending = self._pending
+        if pending is None:
+            return
+        cache, path = pending
+        self._pending = None
+        self._save_now(cache, path)
+
+    def _save_now(self, cache: dict[str, Any], path: Path) -> None:
+        t0 = time.perf_counter()
+        save_json_cache(cache, path)
+        t1 = time.perf_counter()
+        self._last_save_s = time.monotonic()
+        self.stats[f"{self.prefix}_save_count"] = int(
+            self.stats.get(f"{self.prefix}_save_count", 0) or 0
+        ) + 1
+        self.stats[f"{self.prefix}_save_ms"] = int(self.stats.get(f"{self.prefix}_save_ms", 0) or 0) + int(
+            round((t1 - t0) * 1000.0)
+        )
 
 
 def iter_chunks(items: list[Any], chunk_size: int) -> list[list[Any]]:
@@ -675,10 +810,14 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "RAWG_Name": "",
     "RAWG_Released": "",
     "RAWG_Year": "",
+    "RAWG_Website": "",
+    "RAWG_DescriptionRaw": "",
     "RAWG_Genre": "",
     "RAWG_Genre2": "",
+    "RAWG_Genres": "",
     "RAWG_Platforms": "",
     "RAWG_Tags": "",
+    "RAWG_ESRB": "",
     "RAWG_Rating": "",
     "Score_RAWG_100": "",
     "RAWG_RatingsCount": "",
@@ -687,6 +826,8 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "IGDB_ID": "",
     "IGDB_Name": "",
     "IGDB_Year": "",
+    "IGDB_Summary": "",
+    "IGDB_Websites": "",
     "IGDB_Platforms": "",
     "IGDB_Genres": "",
     "IGDB_Themes": "",
@@ -694,6 +835,11 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "IGDB_Perspectives": "",
     "IGDB_Franchise": "",
     "IGDB_Engine": "",
+    "IGDB_ParentGame": "",
+    "IGDB_VersionParent": "",
+    "IGDB_DLCs": "",
+    "IGDB_Expansions": "",
+    "IGDB_Ports": "",
     "IGDB_Companies": "",
     "IGDB_SteamAppID": "",
     "IGDB_Rating": "",
@@ -705,6 +851,10 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     # Steam
     "Steam_AppID": "",
     "Steam_Name": "",
+    "Steam_URL": "",
+    "Steam_Website": "",
+    "Steam_ShortDescription": "",
+    "Steam_StoreType": "",
     "Steam_ReleaseYear": "",
     "Steam_Platforms": "",
     "Steam_Tags": "",

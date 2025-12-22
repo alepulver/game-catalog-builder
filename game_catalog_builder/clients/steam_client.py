@@ -10,13 +10,14 @@ import requests
 
 from ..config import MATCHING, REQUEST, RETRY, STEAM
 from ..utils.utilities import (
+    CacheIOTracker,
     RateLimiter,
     extract_year_hint,
     iter_chunks,
-    load_json_cache,
+    network_failures_count,
     normalize_game_name,
     pick_best_match,
-    save_json_cache,
+    raise_on_new_network_failure,
     with_retries,
 )
 
@@ -31,6 +32,7 @@ class SteamClient:
         cache_path: str | Path,
         min_interval_s: float = STEAM.storesearch_min_interval_s,
     ):
+        self._session = requests.Session()
         self.cache_path = Path(cache_path)
         self.stats: dict[str, int] = {
             "by_query_hit": 0,
@@ -45,6 +47,10 @@ class SteamClient:
             "by_package_fetch": 0,
             "by_package_negative_hit": 0,
             "by_package_negative_fetch": 0,
+            # HTTP request counters (attempts, including retries).
+            "http_storesearch": 0,
+            "http_appdetails": 0,
+            "http_packagedetails": 0,
         }
         # Cache search results by exact query (list of {id,name,type}).
         self._by_query: dict[str, list[dict[str, Any]]] = {}
@@ -54,7 +60,8 @@ class SteamClient:
         # Cache raw packagedetails payloads keyed by package/sub id.
         self._by_package: dict[str, Any] = {}
         self._by_package_negative: set[str] = set()
-        self._load_cache(load_json_cache(self.cache_path))
+        self._cache_io = CacheIOTracker(self.stats)
+        self._load_cache(self._cache_io.load_json(self.cache_path))
         # Steam storesearch and appdetails have different rate limits. appdetails is much stricter,
         # so we keep a slower limiter (and dynamic 429 backoff) for details.
         self.storesearch_ratelimiter = RateLimiter(min_interval_s=min_interval_s)
@@ -106,7 +113,7 @@ class SteamClient:
             self._by_package_negative = {str(x) for x in by_package_negative if str(x).strip()}
 
     def _save_cache(self) -> None:
-        save_json_cache(
+        self._cache_io.save_json(
             {
                 "by_id": self._by_id,
                 "by_query": self._by_query,
@@ -128,18 +135,25 @@ class SteamClient:
 
         def _request():
             self.appdetails_ratelimiter.wait()
+            self.stats["http_packagedetails"] += 1
             url = f"{STEAM_PACKAGEDETAILS_URL}?packageids={packageid}&l=english&cc=us"
-            r = requests.get(url, timeout=REQUEST.timeout_s)
+            r = self._session.get(url, timeout=REQUEST.timeout_s)
             r.raise_for_status()
             return r.json()
 
+        before_net = network_failures_count(self.stats)
         data = with_retries(
             _request,
             retries=RETRY.retries,
             base_sleep_s=max(2.0, RETRY.base_sleep_s),
             on_fail_return=None,
             context=f"Steam packagedetails packageid={packageid}",
+            retry_stats=self.stats,
         )
+        if data is None:
+            raise_on_new_network_failure(
+                self.stats, before=before_net, context=f"Steam packagedetails packageid={packageid}"
+            )
         if not isinstance(data, dict):
             return None
         entry = data.get(str(packageid))
@@ -214,10 +228,12 @@ class SteamClient:
             query_key = f"l:english|cc:US|term:{term}"
             cached_items = self._by_query.get(query_key)
             if cached_items is None:
+                before_net = network_failures_count(self.stats)
 
                 def _request(term=term):
                     self.storesearch_ratelimiter.wait()
-                    r = requests.get(
+                    self.stats["http_storesearch"] += 1
+                    r = self._session.get(
                         STEAM_SEARCH_URL,
                         params={
                             "term": term,
@@ -234,7 +250,12 @@ class SteamClient:
                     retries=RETRY.retries,
                     on_fail_return=None,
                     context=f"Steam storesearch term={term!r}",
+                    retry_stats=self.stats,
                 )
+                if data is None:
+                    raise_on_new_network_failure(
+                        self.stats, before=before_net, context=f"Steam storesearch term={term!r}"
+                    )
                 if isinstance(data, dict):
                     cached_items = [it for it in (data.get("items") or []) if isinstance(it, dict)]
                     # Cache empty results too (negative cache) by query key.
@@ -697,13 +718,15 @@ class SteamClient:
 
         def _fetch_chunk(chunk: list[int]) -> dict[str, Any] | None:
             ids = ",".join(str(i) for i in chunk)
+            before_net = network_failures_count(self.stats)
 
             def _request():
                 self.appdetails_ratelimiter.wait()
+                self.stats["http_appdetails"] += 1
                 # Steam's appdetails endpoint does not reliably accept URL-encoded commas in the
                 # `appids` query param. Build the query string manually to keep commas literal.
                 url = f"{STEAM_APPDETAILS_URL}?appids={ids}&l=english&cc=us"
-                r = requests.get(url, timeout=REQUEST.timeout_s)
+                r = self._session.get(url, timeout=REQUEST.timeout_s)
                 # Some Steam IDs in the wild are not appids (e.g. package ids) and the endpoint
                 # can respond with 400 for multi-id requests. Treat 400 as a non-retriable miss
                 # (and for batches, fall back to single-id requests to salvage valid entries).
@@ -718,7 +741,12 @@ class SteamClient:
                 base_sleep_s=max(2.0, RETRY.base_sleep_s),
                 on_fail_return=None,
                 context=f"Steam appdetails appids={ids}",
+                retry_stats=self.stats,
             )
+            if got is None:
+                raise_on_new_network_failure(
+                    self.stats, before=before_net, context=f"Steam appdetails appids={ids}"
+                )
             if not isinstance(got, dict):
                 return None
             status = got.get("__status")
@@ -769,14 +797,29 @@ class SteamClient:
 
     def format_cache_stats(self) -> str:
         s = self.stats
-        return (
+        base = (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
             f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
             f"by_package hit={s['by_package_hit']} fetch={s['by_package_fetch']} "
-            f"(neg hit={s['by_package_negative_hit']} fetch={s['by_package_negative_fetch']})"
+            f"(neg hit={s['by_package_negative_hit']} fetch={s['by_package_negative_fetch']}), "
+            f"http storesearch={s['http_storesearch']} appdetails={s['http_appdetails']} "
+            f"packagedetails={s['http_packagedetails']}"
         )
+        base += (
+            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
+            f" saves={int(s.get('cache_save_count', 0) or 0)}"
+            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
+        )
+        http_429 = int(s.get("http_429", 0) or 0)
+        if http_429:
+            return (
+                base
+                + f", 429={http_429} retries={int(s.get('http_429_retries', 0) or 0)}"
+                + f" backoff_ms={int(s.get('http_429_backoff_ms', 0) or 0)}"
+            )
+        return base
 
     # -------------------------------------------------
     # Metadata extraction
@@ -805,6 +848,13 @@ class SteamClient:
         review_count = recommendations.get("total", "")
         metacritic = details.get("metacritic", {}) or {}
         metacritic_score = metacritic.get("score", "")
+        store_url = ""
+        try:
+            if str(appid).isdigit():
+                store_url = f"https://store.steampowered.com/app/{int(appid)}/"
+        except Exception:
+            store_url = ""
+        store_type = str(details.get("type", "") or "").strip().lower()
 
         release = details.get("release_date", {}) or {}
         release_year = extract_year(str(release.get("date", "") or ""))
@@ -837,6 +887,10 @@ class SteamClient:
         return {
             "Steam_AppID": str(appid),
             "Steam_Name": str(details.get("name", "") or ""),
+            "Steam_URL": store_url,
+            "Steam_Website": str(details.get("website", "") or "").strip(),
+            "Steam_ShortDescription": str(details.get("short_description", "") or "").strip(),
+            "Steam_StoreType": store_type,
             "Steam_ReleaseYear": release_year,
             "Steam_Platforms": ", ".join(platform_names),
             "Steam_Tags": ", ".join(genres),

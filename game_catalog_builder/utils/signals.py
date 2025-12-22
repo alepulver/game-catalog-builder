@@ -10,39 +10,7 @@ import pandas as pd
 import yaml
 
 from ..config import SIGNALS
-
-_LEGAL_SUFFIX_RE = re.compile(
-    r"""(?ix)
-    (?:,?\s+|\s*,\s*)
-    (?:
-        inc\.?|incorporated|llc|l\.l\.c\.|ltd\.?|limited|corp\.?|corporation|
-        co\.?|company|gmbh|s\.a\.|s\.a|s\.r\.l\.|s\.r\.l|s\.p\.a\.|s\.p\.a|
-        a/s|a\.s\.|ag|bv|oy|oyj|kg|k\.g\.|pte\.?\s+ltd\.?|
-        co\.,?\s*ltd\.?|co\.,?\s*limited|co\.,?\s*ltd
-    )\s*$
-    """
-)
-
-
-def normalize_company_name(value: Any) -> str:
-    """
-    Normalize company/publisher/developer names for matching:
-    - strips trailing legal suffixes (Inc., Ltd., LLC, Co., Ltd., etc)
-    - strips trailing parentheticals used for porting labels (e.g. "Aspyr (Mac, Linux)")
-    - collapses whitespace and trims punctuation
-    """
-    s = str(value or "").strip()
-    if not s or s.casefold() in {"nan", "none", "null"}:
-        return ""
-    s = re.sub(r"\s*\([^)]*\)\s*$", "", s).strip()
-    # Strip repeated legal suffixes (handles "Company, Inc." and "Company Co., Ltd.")
-    prev = None
-    while prev != s:
-        prev = s
-        s = _LEGAL_SUFFIX_RE.sub("", s).strip().rstrip(",").strip()
-    s = re.sub(r"\s{2,}", " ", s).strip()
-    return s
-
+from .company import normalize_company_name
 
 _COMPANY_SPLIT_RE = re.compile(r"(?i)\s*(?:,|/|&|\band\b|\bwith\b|\+)\s*")
 

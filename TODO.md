@@ -1,4 +1,5 @@
 - Make user data (input) and output columns configurable; for the latter, keep a schema or flat list of available data per provider with description (so they can be mapped to the output)
 - Keep working on derived metrics with ChatGPT (tags, estimated popularity, users, production level, replayability, mods, "must play classic", etc)
 - Support for checking mod websites such as nexus to determine activity, number of mods, etc
-- Check if there is a remake or new edition?
+- Review/improve performance and add progress bar, as well as basic profiling logging for requests
+- Decouple data that needs to be fetched so it can be batched independently, if possible; have different workers per http endpoint that can be batched?

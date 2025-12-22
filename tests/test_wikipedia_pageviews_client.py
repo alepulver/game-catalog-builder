@@ -20,11 +20,11 @@ def test_pageviews_client_caches_and_sums(tmp_path, monkeypatch):
                 ]
             }
 
-    def fake_get(url, timeout, headers):
+    def fake_get(_self, url, timeout, headers):
         calls["get"] += 1
         return FakeResp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = WikipediaPageviewsClient(cache_path=tmp_path / "pv.json", min_interval_s=0.0)
     total1 = client.get_pageviews_summary_enwiki("Doom").days_365
@@ -54,10 +54,10 @@ def test_pageviews_first_days_since_release_returns_sum(tmp_path, monkeypatch):
                 ]
             }
 
-    def fake_get(url, timeout, headers):
+    def fake_get(_self, url, timeout, headers):
         return FakeResp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = WikipediaPageviewsClient(cache_path=tmp_path / "pv.json", min_interval_s=0.0)
     got = client.get_pageviews_first_days_since_release_enwiki(

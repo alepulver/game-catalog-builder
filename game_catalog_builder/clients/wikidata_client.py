@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -9,17 +10,23 @@ import requests
 
 from ..config import MATCHING, REQUEST, RETRY, WIKIDATA
 from ..utils.utilities import (
+    CacheIOTracker,
     RateLimiter,
     fuzzy_score,
     iter_chunks,
-    load_json_cache,
     pick_best_match,
-    save_json_cache,
     with_retries,
 )
+from ..config import CACHE
 
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
+WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 USER_AGENT = "game-catalog-builder/1.0 (contact: alepulver@protonmail.com)"
+
+# External identifier properties (Wikidata wdt:Pxxxx).
+# Keep these centralized so we can adjust if needed.
+WIKIDATA_PROP_STEAM_APPID = "P1733"
+WIKIDATA_PROP_IGDB_ID = "P5794"
 
 
 class WikidataClient:
@@ -28,28 +35,54 @@ class WikidataClient:
 
     Cache format:
       - by_query: query_key -> list[search result dict] (from wbsearchentities)
+      - by_hint: hint_key -> qid (external-id based resolver, e.g. Steam AppID)
       - by_id: qid -> raw wbgetentities entity dict (English labels/claims/sitelinks)
       - by_id_negative: list[str] of qids that failed
     """
 
     def __init__(self, cache_path: str | Path, min_interval_s: float = WIKIDATA.min_interval_s):
         self.cache_path = Path(cache_path)
+        # Use a persistent session to avoid paying TLS handshake + connection setup cost on every
+        # request. This matters a lot for label fetches during warm-cache import runs.
+        self._session = requests.Session()
         self.stats: dict[str, int] = {
             "by_query_hit": 0,
             "by_query_fetch": 0,
             "by_query_negative_hit": 0,
             "by_query_negative_fetch": 0,
+            "by_hint_hit": 0,
+            "by_hint_fetch": 0,
+            "by_hint_negative_hit": 0,
+            "by_hint_negative_fetch": 0,
             "by_id_hit": 0,
             "by_id_fetch": 0,
             "by_id_negative_hit": 0,
             "by_id_negative_fetch": 0,
+            # HTTP request counters (attempts, including retries).
+            "http_sparql": 0,
+            "http_wbsearchentities": 0,
+            "http_wbgetentities": 0,
+            "http_wbgetentities_labels": 0,
+            # Label cache behavior.
+            "labels_hit": 0,
+            "labels_fetch": 0,
+            # Cache IO.
+            "cache_load_count": 0,
+            "cache_load_ms": 0,
+            "cache_save_count": 0,
+            "cache_save_ms": 0,
         }
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
         self._by_query: dict[str, list[dict[str, Any]]] = {}
+        self._by_hint: dict[str, str] = {}
         self._by_id: dict[str, dict[str, Any]] = {}
         self._labels: dict[str, str] = {}
+        # If a run is offline and label fetching fails, stop attempting further label HTTP calls.
+        # This keeps cache-only runs fast and avoids spending minutes retrying the same endpoint.
+        self._labels_fetch_disabled = False
         self._by_id_negative: set[str] = set()
-        self._load_cache(load_json_cache(self.cache_path))
+        self._cache_io = CacheIOTracker(self.stats, min_interval_s=CACHE.save_min_interval_large_s)
+        self._load_cache(self._cache_io.load_json(self.cache_path))
 
     def _load_cache(self, raw: Any) -> None:
         if not isinstance(raw, dict) or not raw:
@@ -60,6 +93,8 @@ class WikidataClient:
                 for k, v in raw["by_query"].items()
                 if isinstance(v, list)
             }
+        if isinstance(raw.get("by_hint"), dict):
+            self._by_hint = {str(k): str(v) for k, v in raw["by_hint"].items() if str(k).strip()}
         if isinstance(raw.get("by_id"), dict):
             self._by_id = {str(k): v for k, v in raw["by_id"].items() if isinstance(v, dict)}
         if isinstance(raw.get("labels"), dict):
@@ -72,15 +107,130 @@ class WikidataClient:
             self._by_id_negative = {str(x) for x in raw["by_id_negative"] if str(x).strip()}
 
     def _save_cache(self) -> None:
-        save_json_cache(
+        self._cache_io.save_json(
             {
                 "by_query": self._by_query,
+                "by_hint": self._by_hint,
                 "by_id": self._by_id,
                 "labels": self._labels,
                 "by_id_negative": sorted(self._by_id_negative),
             },
             self.cache_path,
         )
+
+    def _sparql_select_qids(self, *, prop: str, value: str) -> list[str]:
+        """
+        Resolve Wikidata entity ids (QIDs) via an external identifier property.
+
+        Example: prop="P1733", value="620" -> the entity whose Steam AppID is 620.
+        """
+        p = str(prop or "").strip()
+        v = str(value or "").strip()
+        if not p or not v:
+            return []
+
+        # Use a minimal query and then validate candidates via get_by_id() guards.
+        query = f"""
+        SELECT ?item WHERE {{
+          ?item wdt:{p} "{v}" .
+        }}
+        LIMIT 10
+        """.strip()
+
+        def _request():
+            self.ratelimiter.wait()
+            self.stats["http_sparql"] += 1
+            r = self._session.get(
+                WIKIDATA_SPARQL_URL,
+                params={"format": "json", "query": query},
+                timeout=REQUEST.timeout_s,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/sparql-results+json"},
+            )
+            r.raise_for_status()
+            return r.json()
+
+        data = with_retries(
+            _request,
+            retries=RETRY.retries,
+            on_fail_return=None,
+            context=f"Wikidata SPARQL prop={p} value={v}",
+            retry_stats=self.stats,
+        )
+        if not isinstance(data, dict):
+            # If a network failure occurred, abort the operation instead of silently turning
+            # this into "not found" results.
+            if int(self.stats.get("network_failures", 0) or 0) > 0:
+                raise RuntimeError(
+                    "Wikidata request failed due to network issues (SPARQL). "
+                    "Enable internet access or rerun with a warm cache."
+                )
+            return []
+        results = (data.get("results") or {}).get("bindings") or []
+        if not isinstance(results, list):
+            return []
+        out: list[str] = []
+        for it in results:
+            if not isinstance(it, dict):
+                continue
+            item = it.get("item") or {}
+            if not isinstance(item, dict):
+                continue
+            uri = str(item.get("value") or "").strip()
+            m = re.search(r"/entity/(Q\d+)$", uri)
+            if m:
+                out.append(m.group(1))
+        # Dedup while preserving order.
+        seen: set[str] = set()
+        return [q for q in out if not (q in seen or seen.add(q))]
+
+    def resolve_by_hints(
+        self,
+        *,
+        steam_appid: str | None = None,
+        igdb_id: str | None = None,
+    ) -> dict[str, str] | None:
+        """
+        Resolve a Wikidata entity using provider-backed identifiers (no free-text search).
+
+        This is intentionally conservative: it validates each candidate via get_by_id() and
+        will return None if Wikidata does not clearly identify a video game entity.
+        """
+
+        def _try(prop: str, value: str) -> dict[str, str] | None:
+            hint_key = f"hint:{prop}:{value}"
+            cached = self._by_hint.get(hint_key)
+            if cached is not None:
+                qid = str(cached).strip()
+                if not qid:
+                    self.stats["by_hint_negative_hit"] += 1
+                    return None
+                self.stats["by_hint_hit"] += 1
+                out = self.get_by_id(qid)
+                return out
+
+            qids = self._sparql_select_qids(prop=prop, value=value)
+            for q in qids:
+                got = self.get_by_id(q)
+                if got:
+                    self._by_hint[hint_key] = q
+                    self._save_cache()
+                    self.stats["by_hint_fetch"] += 1
+                    return got
+            # Negative-cache the hint lookup.
+            self._by_hint[hint_key] = ""
+            self._save_cache()
+            self.stats["by_hint_negative_fetch"] += 1
+            return None
+
+        if steam_appid:
+            got = _try(WIKIDATA_PROP_STEAM_APPID, str(steam_appid).strip())
+            if got:
+                return got
+        if igdb_id:
+            got = _try(WIKIDATA_PROP_IGDB_ID, str(igdb_id).strip())
+            if got:
+                return got
+        return None
 
     def _search(self, query: str) -> list[dict[str, Any]]:
         q = str(query or "").strip()
@@ -97,7 +247,8 @@ class WikidataClient:
 
         def _request():
             self.ratelimiter.wait()
-            r = requests.get(
+            self.stats["http_wbsearchentities"] += 1
+            r = self._session.get(
                 WIKIDATA_API_URL,
                 params={
                     "action": "wbsearchentities",
@@ -117,11 +268,17 @@ class WikidataClient:
             retries=RETRY.retries,
             on_fail_return=None,
             context="Wikidata search",
+            retry_stats=self.stats,
         )
         if data is None:
             logging.warning(
                 f"Wikidata search request failed for '{q}' (no response); not caching as not-found."
             )
+            if int(self.stats.get("network_failures", 0) or 0) > 0:
+                raise RuntimeError(
+                    "Wikidata request failed due to network issues (search). "
+                    "Enable internet access or rerun with a warm cache."
+                )
             return []
         if not isinstance(data, dict):
             self._by_query[query_key] = []
@@ -134,7 +291,9 @@ class WikidataClient:
         self.stats["by_query_fetch"] += 1
         return items
 
-    def _get_entities(self, qids: list[str], *, props: str) -> dict[str, dict[str, Any]]:
+    def _get_entities(
+        self, qids: list[str], *, props: str, purpose: str = "entities"
+    ) -> dict[str, dict[str, Any]]:
         """
         Fetch multiple entities in a single call.
         """
@@ -144,7 +303,11 @@ class WikidataClient:
 
         def _request():
             self.ratelimiter.wait()
-            r = requests.get(
+            if purpose == "labels":
+                self.stats["http_wbgetentities_labels"] += 1
+            else:
+                self.stats["http_wbgetentities"] += 1
+            r = self._session.get(
                 WIKIDATA_API_URL,
                 params={
                     "action": "wbgetentities",
@@ -164,13 +327,75 @@ class WikidataClient:
             retries=RETRY.retries,
             on_fail_return=None,
             context="Wikidata wbgetentities",
+            retry_stats=self.stats,
         )
         if not isinstance(data, dict):
+            if int(self.stats.get("network_failures", 0) or 0) > 0:
+                raise RuntimeError(
+                    "Wikidata request failed due to network issues (wbgetentities). "
+                    "Enable internet access or rerun with a warm cache."
+                )
             return {}
         entities = data.get("entities") or {}
         if not isinstance(entities, dict):
             return {}
         return {str(k): v for k, v in entities.items() if isinstance(v, dict)}
+
+    def _collect_linked_ids(self, entity: dict[str, Any]) -> set[str]:
+        claims = entity.get("claims") or {}
+        if not isinstance(claims, dict):
+            return set()
+
+        out: set[str] = set()
+        for prop in ("P178", "P123", "P400", "P179", "P136", "P31"):
+            vals = claims.get(prop) or []
+            if not isinstance(vals, list):
+                continue
+            for st in vals:
+                m = (st or {}).get("mainsnak") or {}
+                dv = m.get("datavalue") or {}
+                v = dv.get("value")
+                if isinstance(v, dict) and v.get("id"):
+                    qid = str(v.get("id") or "").strip()
+                    if qid:
+                        out.add(qid)
+        return out
+
+    def _ensure_labels(self, qids: set[str]) -> None:
+        if self._labels_fetch_disabled:
+            raise RuntimeError(
+                "Wikidata label fetching is disabled for this run due to a prior network failure. "
+                "Enable internet access or rerun with a warm cache."
+            )
+        ids = [str(q).strip() for q in qids if str(q).strip()]
+        if not ids:
+            return
+        missing = [q for q in ids if q not in self._labels]
+        if not missing:
+            self.stats["labels_hit"] += len(ids)
+            return
+
+        # Count hits for known IDs, and fetch only missing.
+        self.stats["labels_hit"] += len(ids) - len(missing)
+        updated = False
+        for chunk in iter_chunks(missing, WIKIDATA.labels_batch_size):
+            entities = self._get_entities(chunk, props="labels", purpose="labels")
+            if not entities and chunk:
+                # Network is likely unavailable; stop trying for the remainder of this run and fail
+                # fast to avoid producing partially-resolved metadata.
+                self._labels_fetch_disabled = True
+                raise RuntimeError(
+                    "Wikidata label lookup failed due to network issues. "
+                    "Enable internet access or rerun with a warm cache."
+                )
+            for k, v in entities.items():
+                lbl = str((v.get("labels") or {}).get("en", {}).get("value") or "").strip()
+                if lbl:
+                    self._labels[str(k)] = lbl
+                    updated = True
+        self.stats["labels_fetch"] += len(missing)
+        if updated:
+            self._save_cache()
 
     def _is_complete_entity(self, entity: dict[str, Any]) -> bool:
         """
@@ -196,9 +421,12 @@ class WikidataClient:
         cached = self._by_id.get(q)
         if isinstance(cached, dict) and self._is_complete_entity(cached):
             self.stats["by_id_hit"] += 1
+            self._ensure_labels(self._collect_linked_ids(cached))
             return self._extract_fields(cached)
 
-        entities = self._get_entities([q], props="labels|descriptions|aliases|claims|sitelinks")
+        entities = self._get_entities(
+            [q], props="labels|descriptions|aliases|claims|sitelinks", purpose="entities"
+        )
         ent = entities.get(q)
         if not isinstance(ent, dict):
             self._by_id_negative.add(q)
@@ -208,6 +436,7 @@ class WikidataClient:
         self._by_id[q] = ent
         self._save_cache()
         self.stats["by_id_fetch"] += 1
+        self._ensure_labels(self._collect_linked_ids(ent))
         return self._extract_fields(ent)
 
     def get_by_ids(self, qids: list[str]) -> dict[str, dict[str, str]]:
@@ -220,7 +449,7 @@ class WikidataClient:
         if not ids:
             return {}
 
-        out: dict[str, dict[str, str]] = {}
+        entities_to_extract: dict[str, dict[str, Any]] = {}
         missing: list[str] = []
         for q in ids:
             if q in self._by_id_negative:
@@ -229,14 +458,14 @@ class WikidataClient:
             cached = self._by_id.get(q)
             if isinstance(cached, dict) and self._is_complete_entity(cached):
                 self.stats["by_id_hit"] += 1
-                out[q] = self._extract_fields(cached)
+                entities_to_extract[q] = cached
             else:
                 missing.append(q)
 
         if missing:
             for chunk in iter_chunks(missing, WIKIDATA.get_by_ids_batch_size):
                 entities = self._get_entities(
-                    chunk, props="labels|descriptions|aliases|claims|sitelinks"
+                    chunk, props="labels|descriptions|aliases|claims|sitelinks", purpose="entities"
                 )
                 for q in chunk:
                     ent = entities.get(q)
@@ -246,10 +475,44 @@ class WikidataClient:
                         continue
                     self._by_id[q] = ent
                     self.stats["by_id_fetch"] += 1
-                    out[q] = self._extract_fields(ent)
+                    entities_to_extract[q] = ent
             self._save_cache()
 
-        return out
+        linked: set[str] = set()
+        for ent in entities_to_extract.values():
+            linked |= self._collect_linked_ids(ent)
+        self._ensure_labels(linked)
+
+        return {qid: self._extract_fields(ent) for qid, ent in entities_to_extract.items()}
+
+    def get_aliases(self, qid: str, *, language: str = "en", limit: int = 20) -> list[str]:
+        """
+        Return cached Wikidata aliases for a QID (no network).
+        """
+        q = str(qid or "").strip()
+        if not q:
+            return []
+        ent = self._by_id.get(q)
+        if not isinstance(ent, dict):
+            return []
+        aliases = ent.get("aliases") or {}
+        if not isinstance(aliases, dict):
+            return []
+        lang_vals = aliases.get(language) or []
+        if not isinstance(lang_vals, list):
+            return []
+        out: list[str] = []
+        for it in lang_vals:
+            if not isinstance(it, dict):
+                continue
+            v = str(it.get("value") or "").strip()
+            if v:
+                out.append(v)
+            if len(out) >= limit:
+                break
+        # Dedup preserving order
+        seen: set[str] = set()
+        return [a for a in out if not (a in seen or seen.add(a))]
 
     def search(self, game_name: str, year_hint: int | None = None) -> dict[str, str] | None:
         name = str(game_name or "").strip()
@@ -647,31 +910,10 @@ class WikidataClient:
         release_year = _time_year("P577")  # publication date (year)
         release_date = _time_date("P577")  # publication date (YYYY-MM-DD when available)
 
-        # Resolve labels for linked entities (batch lookup per game).
-        linked_ids = list(
-            {
-                *_qids("P178"),  # developer
-                *_qids("P123"),  # publisher
-                *_qids("P400"),  # platform
-                *_qids("P179"),  # series
-                *_qids("P136"),  # genre
-                *_qids("P31"),  # instance of
-            }
-        )
-        label_map: dict[str, str] = {}
-        if linked_ids:
-            missing = [i for i in linked_ids if i not in self._labels]
-            if missing:
-                entities = self._get_entities(missing[: WIKIDATA.labels_batch_size], props="labels")
-                for k, v in entities.items():
-                    lbl = str((v.get("labels") or {}).get("en", {}).get("value") or "").strip()
-                    if lbl:
-                        self._labels[str(k)] = lbl
-                self._save_cache()
-            for i in linked_ids:
-                lbl = str(self._labels.get(i) or "").strip()
-                if lbl:
-                    label_map[i] = lbl
+        linked_ids = self._collect_linked_ids(entity)
+        label_map: dict[str, str] = {
+            q: str(self._labels.get(q) or "").strip() for q in linked_ids if str(q).strip()
+        }
 
         def _labels(prop: str) -> str:
             ids = _qids(prop)
@@ -709,9 +951,27 @@ class WikidataClient:
 
     def format_cache_stats(self) -> str:
         s = self.stats
-        return (
+        base = (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
+            f"by_hint hit={s['by_hint_hit']} fetch={s['by_hint_fetch']} "
+            f"(neg hit={s['by_hint_negative_hit']} fetch={s['by_hint_negative_fetch']}), "
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
-            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']})"
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
+            f"labels hit={s['labels_hit']} fetch={s['labels_fetch']}, "
+            f"http search={s['http_wbsearchentities']} getentities={s['http_wbgetentities']} "
+            f"labels={s['http_wbgetentities_labels']} sparql={s['http_sparql']}"
         )
+        base += (
+            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
+            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
+            f" saves={int(s.get('cache_save_count', 0) or 0)}"
+        )
+        http_429 = int(s.get("http_429", 0) or 0)
+        if http_429:
+            return (
+                base
+                + f", 429={http_429} retries={int(s.get('http_429_retries', 0) or 0)}"
+                + f" backoff_ms={int(s.get('http_429_backoff_ms', 0) or 0)}"
+            )
+        return base

@@ -7,6 +7,8 @@ This document describes how the **import/pinning** stage matches your `Name` row
 - Prefer the “same game” across providers (base game vs sequel/DLC/demo is a mismatch).
 - Avoid overfitting heuristics: when unclear, emit warnings and let you pin IDs in `Games_Catalog.csv`.
 - Keep matching repeatable via cached raw search responses.
+- Keep the default `import` pass minimal and predictable; put optional auto-resolve/retry logic
+  behind an explicit third pass (`resolve`).
 
 ## Inputs used for matching
 
@@ -82,6 +84,8 @@ Example: `Postal 4` → `POSTAL 4: No Regerts`.
 
 - Uses Wikidata `wbsearchentities` and then applies the shared scoring against the English label.
 - Uses `YearHint` as a soft hint from the search result description when available (no extra requests).
+- If `Steam_AppID` and/or `IGDB_ID` are already present for the row, the importer will first try a
+  resolver based on those external IDs (via Wikidata SPARQL) before falling back to free-text search.
 
 ## Caching (important)
 
@@ -100,6 +104,7 @@ Because caching is query-based, “not found” is also cached **per query**:
 - If you later change how the query is formed (e.g. different punctuation stripping / year hint usage),
   the cache key changes and the provider will try again (which is the behavior you want).
 - Request failures (timeouts/no response) are intentionally not negative-cached.
+- If a query requires a real HTTP call (cache miss) and the network is unavailable, the provider fails fast (distinct from “not found”) so you can enable internet and rerun.
 
 ### HLTB note (build once)
 
@@ -113,6 +118,8 @@ HLTB searches are slow relative to other providers, so the cache is designed to 
 
 - Any non-100% match emits a `WARNING` with alternatives.
 - Import safety: if diagnostics mark a provider as `likely_wrong:<provider>` and there is a strict-majority provider consensus (and the provider is tagged as the outlier), the importer clears that provider ID so enrichment won’t silently use a wrong pin.
+- Optional third pass (`resolve`): can retry repinning after auto-unpin using the majority title and
+  cached aliases (Wikidata aliases / IGDB alternative names). This is off by default.
 - When a match is wrong or ambiguous, pin the provider ID in `data/input/Games_Catalog.csv` rather than changing your original `Name` unless the rename is truly canonical for you.
 - Import diagnostics (`ReviewTags`) also include a few conservative cross-provider checks when cached details are available:
   - `year_disagree` (RAWG vs IGDB)
@@ -121,13 +128,18 @@ HLTB searches are slow relative to other providers, so the cache is designed to 
   - `likely_wrong:<provider>` (high-signal: title outlier + year/platform outlier)
   - `ambiguous_title_year` (titles agree but years split widely; reboot/remaster/edition under same name)
   - `genre_disagree` (RAWG vs IGDB)
-  - `developer_disagree`, `publisher_disagree` (when Steam/RAWG/IGDB dev/pub data is available)
+  - `developer_disagree`, `publisher_disagree` (optionally with `<kind>_outlier:<provider>` when a strict-majority source disagrees)
 
 ## Known issues / limitations
 
 - Providers have provider-specific canonical titles; sometimes the “best” name differs per provider.
 - Steam search can surface DLC/soundtrack/demo entries even when the base game exists; the importer tries to reject these automatically (via appdetails `type` + DLC-like token filters), but some cases still require manual pinning.
-- `YearHint` is best-effort: Steam’s year may reflect store release/re-release, not the original release year.
+- `YearHint` is used as a soft disambiguator: RAWG/IGDB prefer candidates with release years within ±2 years when alternatives exist; Steam’s year may reflect store release/re-release, not the original release year.
+
+### Tried and rejected
+
+See `docs/improvements/tried-and-rejected.md` for a short list of matching/pinning experiments we
+intentionally reverted.
 
 ## Configuration (static for now)
 

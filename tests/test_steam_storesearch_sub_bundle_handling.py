@@ -4,7 +4,7 @@ from __future__ import annotations
 def test_steam_search_ignores_sub_results_and_pins_appid(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steam_client import SteamClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         def _appids_from_url(u: str) -> list[str]:
             if "appids=" not in u:
                 return []
@@ -45,7 +45,7 @@ def test_steam_search_ignores_sub_results_and_pins_appid(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     best = client.search_appid("Fallout 4: Game of the Year Edition")
@@ -56,7 +56,7 @@ def test_steam_search_ignores_sub_results_and_pins_appid(tmp_path, monkeypatch):
 def test_steam_search_returns_none_when_only_sub_results_exist(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steam_client import SteamClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         def _packageid_from_url(u: str) -> str:
             if "packageids=" not in u:
                 return ""
@@ -92,7 +92,7 @@ def test_steam_search_returns_none_when_only_sub_results_exist(tmp_path, monkeyp
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     assert client.search_appid("LISA: Complete Edition") is None
@@ -101,7 +101,7 @@ def test_steam_search_returns_none_when_only_sub_results_exist(tmp_path, monkeyp
 def test_steam_search_resolves_sub_via_packagedetails(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steam_client import SteamClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         def _packageid_from_url(u: str) -> str:
             if "packageids=" not in u:
                 return ""
@@ -151,7 +151,7 @@ def test_steam_search_resolves_sub_via_packagedetails(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     best = client.search_appid("Fallout 4: Game of the Year Edition")

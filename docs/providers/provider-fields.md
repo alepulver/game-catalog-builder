@@ -35,10 +35,14 @@ Current output columns:
 | `RAWG_Name` | `name` | Provider title |
 | `RAWG_Released` | `released` | Release date (`YYYY-MM-DD`) |
 | `RAWG_Year` | `released[:4]` | Release year |
+| `RAWG_Website` | `website` | Official website (if present) |
+| `RAWG_DescriptionRaw` | `description_raw` | Raw description (truncated for CSV ergonomics) |
 | `RAWG_Genre` | `genres[0].name` | Primary genre |
 | `RAWG_Genre2` | `genres[1].name` | Secondary genre |
+| `RAWG_Genres` | `genres[].name` | Full genre list (comma-separated) |
 | `RAWG_Platforms` | `platforms[].platform.name` | Platform list |
 | `RAWG_Tags` | `tags[].name` | Tag list (project filters Cyrillic duplicates) |
+| `RAWG_ESRB` | `esrb_rating.name` | ESRB rating name (when present) |
 | `RAWG_Developers` | `developers[].name` | JSON array of developers |
 | `RAWG_Publishers` | `publishers[].name` | JSON array of publishers |
 | `RAWG_Rating` | `rating` | Average rating |
@@ -76,6 +80,8 @@ Current output columns (from the `/v4/games` object returned by the query):
 | `IGDB_ID` | `id` | IGDB game id |
 | `IGDB_Name` | `name` | Provider title |
 | `IGDB_Year` | `first_release_date` | First release year (Unix timestamp → year) |
+| `IGDB_Summary` | `summary` | Summary (truncated for CSV ergonomics) |
+| `IGDB_Websites` | `websites[].url` | Website URLs (comma-separated, capped) |
 | `IGDB_Platforms` | `platforms[].name` | Platform list |
 | `IGDB_Genres` | `genres[].name` | Genres |
 | `IGDB_Themes` | `themes[].name` | Themes |
@@ -83,6 +89,11 @@ Current output columns (from the `/v4/games` object returned by the query):
 | `IGDB_Perspectives` | `player_perspectives[].name` | Player perspectives |
 | `IGDB_Franchise` | `franchises[].name` | Franchise(s) |
 | `IGDB_Engine` | `game_engines[].name` | Engine(s) |
+| `IGDB_ParentGame` | `parent_game.name` | Base/parent game (editions/ports context) |
+| `IGDB_VersionParent` | `version_parent.name` | Edition parent (when the matched item is a version) |
+| `IGDB_DLCs` | `dlcs[].name` | DLCs (comma-separated) |
+| `IGDB_Expansions` | `expansions[].name` | Expansions (comma-separated) |
+| `IGDB_Ports` | `ports[].name` | Ports (comma-separated) |
 | `IGDB_SteamAppID` | `external_games[]` | Cross-check Steam uid when `external_game_source == 1` |
 | `IGDB_Developers` | `involved_companies[]` | JSON array of developer companies |
 | `IGDB_Publishers` | `involved_companies[]` | JSON array of publisher companies |
@@ -122,6 +133,10 @@ Current output columns (from the `data` object inside appdetails):
 |---|---|---|
 | `Steam_AppID` | `<appid>` | Steam appid |
 | `Steam_Name` | `name` | Store title |
+| `Steam_URL` | `<appid>` | Store page URL |
+| `Steam_Website` | `website` | Official website URL (if present) |
+| `Steam_ShortDescription` | `short_description` | Short store description |
+| `Steam_StoreType` | `type` | Store type (expected `game`; used for filtering/diagnostics) |
 | `Steam_ReleaseYear` | `release_date.date` | Parsed year from the release date string |
 | `Steam_Platforms` | `platforms.{windows,mac,linux}` | Platform flags → list |
 | `Steam_Tags` | `genres[].description` | Genre list (Steam “genres”) |
@@ -214,6 +229,7 @@ without re-fetching.
 
 Caching notes:
 - Search responses are cached under `by_query`.
+- When provider-backed IDs exist (e.g. `Steam_AppID`), an additional resolver uses Wikidata SPARQL and caches the mapping under `by_hint` (external-id lookup → QID).
 - Full entities are cached under `by_id` keyed by `Wikidata_QID`.
 - Linked-entity labels (developer/publisher/platform/etc) are cached under `labels`.
 

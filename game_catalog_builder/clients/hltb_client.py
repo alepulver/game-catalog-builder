@@ -8,7 +8,7 @@ from typing import Any
 from howlongtobeatpy import HowLongToBeat
 
 from ..config import HLTB
-from ..utils.utilities import extract_year_hint, fuzzy_score, load_json_cache, save_json_cache
+from ..utils.utilities import CacheIOTracker, extract_year_hint, fuzzy_score
 
 
 class HLTBClient:
@@ -27,7 +27,8 @@ class HLTBClient:
         self._by_id: dict[str, Any] = {}
         # Cache query -> lightweight candidates (id/name). Raw game payloads are cached by id.
         self._by_query: dict[str, list[dict[str, Any]]] = {}
-        self._load_cache(load_json_cache(self.cache_path))
+        self._cache_io = CacheIOTracker(self.stats)
+        self._load_cache(self._cache_io.load_json(self.cache_path))
         self.client = HowLongToBeat()
 
     @staticmethod
@@ -127,7 +128,7 @@ class HLTBClient:
             self._by_query = out
 
     def _save_cache(self) -> None:
-        save_json_cache(
+        self._cache_io.save_json(
             {
                 "by_id": self._by_id,
                 "by_query": self._by_query,
@@ -417,5 +418,8 @@ class HLTBClient:
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
-            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']})"
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
+            f"cache load_ms={int(s.get('cache_load_ms', 0) or 0)} "
+            f"saves={int(s.get('cache_save_count', 0) or 0)} "
+            f"save_ms={int(s.get('cache_save_ms', 0) or 0)}"
         )

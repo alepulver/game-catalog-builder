@@ -11,12 +11,14 @@ import requests
 
 from ..config import IGDB, MATCHING, REQUEST, RETRY
 from ..utils.utilities import (
+    CacheIOTracker,
     RateLimiter,
     extract_year_hint,
     iter_chunks,
-    load_json_cache,
+    network_failures_count,
+    normalize_game_name,
     pick_best_match,
-    save_json_cache,
+    raise_on_new_network_failure,
     with_retries,
 )
 
@@ -33,6 +35,7 @@ class IGDBClient:
         language: str = "en",
         min_interval_s: float = IGDB.min_interval_s,
     ):
+        self._session = requests.Session()
         self.client_id = client_id
         self.client_secret = client_secret
         self.language = (language or "en").strip() or "en"
@@ -46,6 +49,9 @@ class IGDBClient:
             "by_id_fetch": 0,
             "by_id_negative_hit": 0,
             "by_id_negative_fetch": 0,
+            # HTTP request counters (attempts, including retries).
+            "http_oauth_token": 0,
+            "http_post": 0,
         }
         # Cache raw IGDB game payloads keyed by id (language:id). Derived output fields are
         # computed on-demand to keep caches independent of code changes.
@@ -53,7 +59,8 @@ class IGDBClient:
         # Cache by exact query string, storing only lightweight candidates
         # (id/name/first_release_date).
         self._by_query: dict[str, list[dict[str, Any]]] = {}
-        self._load_cache(load_json_cache(self.cache_path))
+        self._cache_io = CacheIOTracker(self.stats)
+        self._load_cache(self._cache_io.load_json(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
 
         self._token: str | None = None
@@ -68,7 +75,8 @@ class IGDBClient:
             return
 
         # Use form-encoded body (not URL params) to avoid leaking secrets in tracebacks/logs.
-        r = requests.post(
+        self.stats["http_oauth_token"] += 1
+        r = self._session.post(
             TWITCH_TOKEN_URL,
             data={
                 "client_id": self.client_id,
@@ -96,7 +104,8 @@ class IGDBClient:
         def _request():
             self._ensure_token()
             self.ratelimiter.wait()
-            r = requests.post(
+            self.stats["http_post"] += 1
+            r = self._session.post(
                 f"{IGDB_API_URL}/{endpoint}",
                 headers=self._headers(),
                 data=query,
@@ -110,6 +119,7 @@ class IGDBClient:
             retries=RETRY.retries,
             on_fail_return=None,
             context=f"IGDB POST /{endpoint}",
+            retry_stats=self.stats,
         )
 
     def _post_cached(self, endpoint: str, query: str) -> Any:
@@ -121,7 +131,11 @@ class IGDBClient:
                 self.stats["by_query_negative_hit"] += 1
             return cached
 
+        before_net = network_failures_count(self.stats)
         data = self._post(endpoint, query)
+        if data is None:
+            raise_on_new_network_failure(self.stats, before=before_net, context=f"IGDB POST /{endpoint}")
+            return None
         if not isinstance(data, list):
             return data
 
@@ -261,6 +275,105 @@ class IGDBClient:
     # -------------------------------------------------
     # Main search
     # -------------------------------------------------
+    @staticmethod
+    def _select_best_match(
+        *,
+        query: str,
+        results: list[dict[str, Any]],
+        year_hint: int | None,
+    ) -> tuple[dict[str, Any] | None, int, list[tuple[str, int]]]:
+        def _year_getter(obj: dict[str, Any]) -> int | None:
+            ts = obj.get("first_release_date")
+            if isinstance(ts, (int, float)) and ts > 0:
+                try:
+                    return int(datetime.fromtimestamp(ts, tz=timezone.utc).year)
+                except Exception:
+                    return None
+            return None
+
+        def _norm(s: str) -> str:
+            return re.sub(r"\s{2,}", " ", normalize_game_name(str(s or ""))).strip()
+
+        def _series_numbers(name: str) -> set[int]:
+            toks = normalize_game_name(name).split()
+            out: set[int] = set()
+            for t in toks:
+                if not t.isdigit():
+                    continue
+                if len(t) > 1 and t.startswith("0"):
+                    continue
+                n = int(t)
+                if n == 0:
+                    continue
+                if 1900 <= n <= 2100:
+                    continue
+                if 0 < n <= 50:
+                    out.add(n)
+            return out
+
+        def _looks_dlc_like(name: str) -> bool:
+            toks = set(normalize_game_name(name).split())
+            dlc_like = {
+                "soundtrack",
+                "demo",
+                "beta",
+                "dlc",
+                "expansion",
+                "pack",
+                "season",
+                "pass",
+            }
+            return any(t in toks for t in dlc_like)
+
+        query_dlc_like = _looks_dlc_like(query)
+        q_norm = _norm(query)
+
+        # Prefer exact normalized title matches when present.
+        exact = [it for it in results if _norm(str(it.get("name", "") or "")) == q_norm]
+        if exact and len(exact) < len(results):
+            results = exact
+
+        # Prefer "main game" entries when present, unless the user clearly asked for DLC-like
+        # content. (IGDB uses category=0 for main game; other categories include DLC/expansion/etc.)
+        if not query_dlc_like:
+            main = [it for it in results if it.get("category") in (0, "0", None)]
+            # Only narrow when it actually reduces candidates and keeps at least one result.
+            if main and len(main) < len(results):
+                results = main
+
+        # If the query has no sequel number, prefer candidates without explicit sequel numbers
+        # when alternatives exist.
+        if q_norm and not _series_numbers(q_norm):
+            no_nums = [it for it in results if not _series_numbers(str(it.get("name", "") or ""))]
+            if no_nums and len(no_nums) < len(results):
+                results = no_nums
+
+        # Avoid DLC/demo/soundtrack-like matches unless explicitly requested.
+        if not query_dlc_like:
+            non_dlc = [it for it in results if not _looks_dlc_like(str(it.get("name", "") or ""))]
+            if non_dlc and len(non_dlc) < len(results):
+                results = non_dlc
+
+        if year_hint is not None:
+            tol = int(MATCHING.year_hint_tolerance)
+            near = []
+            for it in results:
+                y = _year_getter(it)
+                if y is None:
+                    continue
+                if abs(int(y) - int(year_hint)) <= tol:
+                    near.append(it)
+            if near and len(near) < len(results):
+                results = near
+
+        return pick_best_match(
+            query,
+            results,
+            name_key="name",
+            year_hint=year_hint,
+            year_getter=_year_getter,
+        )
+
     def search(self, game_name: str, year_hint: int | None = None) -> dict[str, Any] | None:
         def _strip_trailing_paren_year(s: str) -> str:
             y = extract_year_hint(s)
@@ -343,21 +456,10 @@ class IGDBClient:
             logging.warning(f"Not found in IGDB: '{game_name}'. No results from API.")
             return None
 
-        def _year_getter(obj: dict[str, Any]) -> int | None:
-            ts = obj.get("first_release_date")
-            if isinstance(ts, (int, float)) and ts > 0:
-                try:
-                    return int(datetime.fromtimestamp(ts, tz=timezone.utc).year)
-                except Exception:
-                    return None
-            return None
-
-        best, score, top_matches = pick_best_match(
-            search_text,
-            data,
-            name_key="name",
+        best, score, top_matches = self._select_best_match(
+            query=search_text,
+            results=data,
             year_hint=year_hint,
-            year_getter=_year_getter,
         )
         if not best or score < MATCHING.min_score:
             # Log top 5 closest matches when not found
@@ -395,19 +497,61 @@ class IGDBClient:
 
     def format_cache_stats(self) -> str:
         s = self.stats
-        return (
+        base = (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
-            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']})"
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
+            f"http oauth={s['http_oauth_token']} post={s['http_post']}"
         )
+        base += (
+            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
+            f" saves={int(s.get('cache_save_count', 0) or 0)}"
+            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
+        )
+        http_429 = int(s.get("http_429", 0) or 0)
+        if http_429:
+            return (
+                base
+                + f", 429={http_429} retries={int(s.get('http_429_retries', 0) or 0)}"
+                + f" backoff_ms={int(s.get('http_429_backoff_ms', 0) or 0)}"
+            )
+        return base
+
+    def get_alternative_names(self, igdb_id: str | int) -> list[str]:
+        """
+        Return IGDB alternative_names.name values from cached raw payload (no network).
+        """
+        igdb_id_str = str(igdb_id or "").strip()
+        if not igdb_id_str:
+            return []
+        raw = self._by_id.get(f"{self.language}:{igdb_id_str}")
+        if not isinstance(raw, dict):
+            return []
+        items = raw.get("alternative_names") or []
+        if not isinstance(items, list):
+            return []
+        names: list[str] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            n = str(it.get("name") or "").strip()
+            if n:
+                names.append(n)
+        # Dedup while preserving order.
+        seen: set[str] = set()
+        return [n for n in names if not (n in seen or seen.add(n))]
 
     def _extract_fields(self, game: dict[str, Any]) -> dict[str, str]:
         def join_names(items: Any) -> str:
             if not items:
                 return ""
             names: list[str] = []
-            if isinstance(items, list):
+            if isinstance(items, dict):
+                name = str(items.get("name", "") or "").strip()
+                if name:
+                    names.append(name)
+            elif isinstance(items, list):
                 for item in items:
                     if isinstance(item, dict):
                         name = str(item.get("name", "") or "").strip()
@@ -419,6 +563,14 @@ class IGDBClient:
                             names.append(s)
             return ", ".join(names)
 
+        def _truncate(text: object, max_len: int = 500) -> str:
+            s = str(text or "").strip()
+            if not s:
+                return ""
+            if len(s) <= max_len:
+                return s
+            return s[:max_len].rstrip() + "…"
+
         steam_appid = self._steam_appid_from_external_games(game.get("external_games", []) or [])
         involved = game.get("involved_companies", []) or []
         dev_list: list[str] = []
@@ -428,7 +580,9 @@ class IGDBClient:
                 if not isinstance(ic, dict):
                     continue
                 company = ic.get("company") or {}
-                cname = str((company.get("name") if isinstance(company, dict) else "") or "").strip()
+                cname = str(
+                    (company.get("name") if isinstance(company, dict) else "") or ""
+                ).strip()
                 if not cname:
                     continue
                 if ic.get("developer") is True:
@@ -466,10 +620,26 @@ class IGDBClient:
             except Exception:
                 agg_100 = ""
 
+        websites: list[str] = []
+        for w in (game.get("websites") or []) if isinstance(game.get("websites"), list) else []:
+            if not isinstance(w, dict):
+                continue
+            url = str(w.get("url") or "").strip()
+            if url and url not in websites:
+                websites.append(url)
+        websites_str = ", ".join(websites[:5])
+
         return {
             "IGDB_ID": str(game.get("id", "") or ""),
             "IGDB_Name": str(game.get("name", "") or ""),
             "IGDB_Year": year,
+            "IGDB_Summary": _truncate(game.get("summary", "")),
+            "IGDB_Websites": websites_str,
+            "IGDB_ParentGame": join_names(game.get("parent_game")),
+            "IGDB_VersionParent": join_names(game.get("version_parent")),
+            "IGDB_DLCs": join_names(game.get("dlcs")),
+            "IGDB_Expansions": join_names(game.get("expansions")),
+            "IGDB_Ports": join_names(game.get("ports")),
             "IGDB_Platforms": join_names(game.get("platforms")),
             "IGDB_Genres": join_names(game.get("genres")),
             "IGDB_Themes": join_names(game.get("themes")),
@@ -531,7 +701,7 @@ class IGDBClient:
             self._by_query = out
 
     def _save_cache(self) -> None:
-        save_json_cache(
+        self._cache_io.save_json(
             {
                 "by_id": self._by_id,
                 "by_query": self._by_query,

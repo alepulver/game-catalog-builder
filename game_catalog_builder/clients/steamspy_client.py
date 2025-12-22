@@ -8,9 +8,10 @@ import requests
 
 from ..config import REQUEST, RETRY, STEAMSPY
 from ..utils.utilities import (
+    CacheIOTracker,
     RateLimiter,
-    load_json_cache,
-    save_json_cache,
+    network_failures_count,
+    raise_on_new_network_failure,
     with_retries,
 )
 
@@ -23,14 +24,18 @@ class SteamSpyClient:
         cache_path: str | Path,
         min_interval_s: float = STEAMSPY.min_interval_s,
     ):
+        self._session = requests.Session()
         self.cache_path = Path(cache_path)
         self.stats: dict[str, int] = {
             "by_id_hit": 0,
             "by_id_fetch": 0,
             "by_id_negative_hit": 0,
             "by_id_negative_fetch": 0,
+            # HTTP request counters (attempts, including retries).
+            "http_get": 0,
         }
-        raw = load_json_cache(self.cache_path)
+        self._cache_io = CacheIOTracker(self.stats)
+        raw = self._cache_io.load_json(self.cache_path)
         if isinstance(raw, dict) and isinstance(raw.get("by_id"), dict):
             self.cache = raw.get("by_id") or {}
         elif not raw:
@@ -42,6 +47,9 @@ class SteamSpyClient:
             )
             self.cache = {}
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
+
+    def _save_cache(self) -> None:
+        self._cache_io.save_json({"by_id": self.cache}, self.cache_path)
 
     # -------------------------------------------------
     # Main query
@@ -59,7 +67,8 @@ class SteamSpyClient:
 
         def _request():
             self.ratelimiter.wait()
-            r = requests.get(
+            self.stats["http_get"] += 1
+            r = self._session.get(
                 STEAMSPY_URL,
                 params={
                     "request": "appdetails",
@@ -70,10 +79,17 @@ class SteamSpyClient:
             r.raise_for_status()
             return r.json()
 
-        data = with_retries(_request, retries=RETRY.retries, on_fail_return=None)
+        before_net = network_failures_count(self.stats)
+        data = with_retries(
+            _request, retries=RETRY.retries, on_fail_return=None, retry_stats=self.stats
+        )
+        if data is None:
+            raise_on_new_network_failure(
+                self.stats, before=before_net, context=f"SteamSpy appdetails appid={appid}"
+            )
         if not data or not isinstance(data, dict):
             self.cache[key] = None
-            save_json_cache({"by_id": self.cache}, self.cache_path)
+            self._save_cache()
             self.stats["by_id_negative_fetch"] += 1
             return None
 
@@ -81,13 +97,13 @@ class SteamSpyClient:
         if "error" in data:
             logging.warning(f"Not found in SteamSpy: AppID {appid}. {data.get('error')}")
             self.cache[key] = None
-            save_json_cache({"by_id": self.cache}, self.cache_path)
+            self._save_cache()
             self.stats["by_id_negative_fetch"] += 1
             return None
 
         # Cache the full provider response; extraction is computed on-demand.
         self.cache[key] = data
-        save_json_cache({"by_id": self.cache}, self.cache_path)
+        self._save_cache()
         self.stats["by_id_fetch"] += 1
         return self._extract_fields(data)
 
@@ -119,7 +135,21 @@ class SteamSpyClient:
 
     def format_cache_stats(self) -> str:
         s = self.stats
-        return (
+        base = (
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
-            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']})"
+            f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
+            f"http get={s['http_get']}"
         )
+        base += (
+            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
+            f" saves={int(s.get('cache_save_count', 0) or 0)}"
+            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
+        )
+        http_429 = int(s.get("http_429", 0) or 0)
+        if http_429:
+            return (
+                base
+                + f", 429={http_429} retries={int(s.get('http_429_retries', 0) or 0)}"
+                + f" backoff_ms={int(s.get('http_429_backoff_ms', 0) or 0)}"
+            )
+        return base

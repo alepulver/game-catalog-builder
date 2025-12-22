@@ -2,8 +2,8 @@ from __future__ import annotations
 
 
 def test_steam_search_prefers_exact_normalized_match(tmp_path, monkeypatch):
-    from game_catalog_builder.clients.steam_client import SteamClient
     from game_catalog_builder.clients import steam_client as steam_mod
+    from game_catalog_builder.clients.steam_client import SteamClient
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
 

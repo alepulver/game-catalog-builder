@@ -30,8 +30,8 @@ def test_wikidata_search_prefers_video_game_candidate(monkeypatch, tmp_path):
 
 
 def test_wikidata_search_prefers_no_extra_tokens_when_suspicious(monkeypatch, tmp_path):
-    from game_catalog_builder.clients.wikidata_client import WikidataClient
     from game_catalog_builder.clients import wikidata_client as mod
+    from game_catalog_builder.clients.wikidata_client import WikidataClient
 
     client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
 
@@ -53,7 +53,8 @@ def test_wikidata_search_prefers_no_extra_tokens_when_suspicious(monkeypatch, tm
             c = candidates[0]
             return c, 100, [(c.get("label", ""), 100)]
         c = candidates[0]
-        return c, 81, [(it.get("label", ""), 81 if i == 0 else 79) for i, it in enumerate(candidates)]
+        top = [(it.get("label", ""), 81 if i == 0 else 79) for i, it in enumerate(candidates)]
+        return c, 81, top
 
     monkeypatch.setattr(client, "_search", fake_search)
     monkeypatch.setattr(client, "get_by_id", fake_get_by_id)

@@ -206,6 +206,76 @@ def platform_outlier_tags(platforms: dict[str, set[str]]) -> list[str]:
     return out
 
 
+def company_disagreement_tags(
+    company_sets: dict[str, set[str]],
+    *,
+    kind: str,
+    min_providers: int = 2,
+) -> list[str]:
+    """
+    Compute high-signal developer/publisher disagreement tags, while avoiding false positives
+    from "bridge" cases (e.g. one provider lists both studios A+B while others list A and B
+    separately).
+
+    Returns:
+      - `<kind>_disagree` when there is a disconnected overlap graph.
+      - `<kind>_outlier:<provider>` when a strict-majority component exists.
+
+    `kind` should be `developer` or `publisher`.
+    """
+    from .company import LOW_SIGNAL_COMPANY_KEYS
+
+    cleaned: dict[str, set[str]] = {}
+    for p, s in company_sets.items():
+        cleaned[p] = {x for x in (s or set()) if x and x not in LOW_SIGNAL_COMPANY_KEYS}
+
+    present = [p for p, s in cleaned.items() if s]
+    if len(present) < min_providers:
+        return []
+
+    parent: dict[str, str] = {p: p for p in present}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i, a in enumerate(present):
+        for b in present[i + 1 :]:
+            if not cleaned[a].isdisjoint(cleaned[b]):
+                union(a, b)
+
+    comps: dict[str, set[str]] = {}
+    for p in present:
+        comps.setdefault(find(p), set()).add(p)
+    if len(comps) <= 1:
+        return []
+
+    groups = list(comps.values())
+    groups.sort(key=lambda s: (-len(s), "+".join(sorted(s))))
+    best = groups[0]
+    has_majority = len(best) > len(present) / 2
+
+    # Only emit disagreement when it's strong enough to be actionable:
+    # - always for 2-provider comparisons (no majority possible, but it's a clear split)
+    # - for 3+ providers, require a strict-majority component to avoid noisy "regional publisher"
+    #   splits, unless you explicitly add those later as separate tags.
+    if len(present) >= 3 and not has_majority:
+        return []
+
+    out = [f"{kind}_disagree"]
+    if has_majority:
+        for p in sorted(set(present) - set(best)):
+            out.append(f"{kind}_outlier:{p}")
+    return out
+
+
 def actionable_mismatch_tags(
     *,
     provider_consensus: ProviderConsensus | None,

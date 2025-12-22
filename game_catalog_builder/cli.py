@@ -30,6 +30,8 @@ from .utils import (
     IDENTITY_NOT_FOUND,
     PUBLIC_DEFAULT_COLS,
     ProjectPaths,
+    ReviewConfig,
+    build_review_csv,
     ensure_columns,
     ensure_row_ids,
     extract_year_hint,
@@ -47,6 +49,7 @@ from .utils import (
 from .utils.consistency import (
     actionable_mismatch_tags,
     compute_provider_consensus,
+    compute_year_consensus,
     platform_outlier_tags,
     year_outlier_tags,
 )
@@ -67,6 +70,8 @@ EVAL_COLUMNS = [
     "Steam_MatchedName",
     "Steam_MatchScore",
     "Steam_MatchedYear",
+    "Steam_RejectedReason",
+    "Steam_StoreType",
     "HLTB_MatchedName",
     "HLTB_MatchScore",
     "HLTB_MatchedYear",
@@ -168,6 +173,12 @@ def fill_eval_tags(
 ) -> pd.DataFrame:
     out = df.copy()
     out = ensure_columns(out, {"ReviewTags": "", "MatchConfidence": ""})
+
+    preserve_prefixes = (
+        "autounpinned:",
+        "repinned_by_resolve:",
+        "wikidata_hint",
+    )
 
     tags_list: list[str] = []
     confidence_list: list[str] = []
@@ -286,39 +297,8 @@ def fill_eval_tags(
             out_set.add(normalize_game_name(part))
         return {x for x in out_set if x}
 
-    def _company_set_from_json_cell(s: object) -> set[str]:
-        import json
-
-        raw = str(s or "").strip()
-        if not raw or not raw.startswith("["):
-            return set()
-        try:
-            arr = json.loads(raw)
-        except Exception:
-            return set()
-        if not isinstance(arr, list):
-            return set()
-
-        def _norm(v: object) -> str:
-            t = str(v or "").strip()
-            if not t:
-                return ""
-            if t.endswith(")") and "(" in t:
-                t = t.rsplit("(", 1)[0].strip()
-            t = t.strip().rstrip(",").strip()
-            return t.casefold()
-
-        return {x for x in (_norm(v) for v in arr) if x}
-
-    def _has_any_disagree(sets: list[set[str]]) -> bool:
-        present = [s for s in sets if s]
-        if len(present) < 2:
-            return False
-        for i in range(len(present)):
-            for j in range(i + 1, len(present)):
-                if present[i].isdisjoint(present[j]):
-                    return True
-        return False
+    from .utils.company import company_set_from_json_array_cell
+    from .utils.consistency import company_disagreement_tags
 
     def _platforms_from_steam(details: object) -> set[str]:
         if not isinstance(details, dict):
@@ -331,7 +311,7 @@ def fill_eval_tags(
             out_set.add("pc")
         return out_set
 
-    for _, row in out.iterrows():
+    for idx, row in out.iterrows():
         tags: list[str] = []
         disabled = _is_yes(row.get("Disabled", ""))
         if disabled:
@@ -374,6 +354,11 @@ def fill_eval_tags(
             elif not steam_id and steam_expected:
                 tags.append("missing_steam")
                 has_missing_provider = True
+                rejected = str(row.get("Steam_RejectedReason", "") or "").strip()
+                if rejected:
+                    tags.append("steam_rejected")
+                    tags.append(f"steam_rejected:{rejected}")
+                    has_low_issue = True
             elif steam_id and not str(row.get("Steam_MatchedName", "") or "").strip():
                 tags.append("steam_id_unresolved")
                 has_low_issue = True
@@ -521,21 +506,23 @@ def fill_eval_tags(
                 has_medium_issue = True
 
         # Developer/publisher cross-checks (high-signal when present).
-        dev_sets = [
-            _company_set_from_json_cell(row.get("Steam_Developers", "")),
-            _company_set_from_json_cell(row.get("RAWG_Developers", "")),
-            _company_set_from_json_cell(row.get("IGDB_Developers", "")),
-        ]
-        pub_sets = [
-            _company_set_from_json_cell(row.get("Steam_Publishers", "")),
-            _company_set_from_json_cell(row.get("RAWG_Publishers", "")),
-            _company_set_from_json_cell(row.get("IGDB_Publishers", "")),
-        ]
-        if _has_any_disagree(dev_sets):
-            tags.append("developer_disagree")
+        dev_sets = {
+            "steam": company_set_from_json_array_cell(row.get("Steam_Developers", "")),
+            "rawg": company_set_from_json_array_cell(row.get("RAWG_Developers", "")),
+            "igdb": company_set_from_json_array_cell(row.get("IGDB_Developers", "")),
+        }
+        pub_sets = {
+            "steam": company_set_from_json_array_cell(row.get("Steam_Publishers", "")),
+            "rawg": company_set_from_json_array_cell(row.get("RAWG_Publishers", "")),
+            "igdb": company_set_from_json_array_cell(row.get("IGDB_Publishers", "")),
+        }
+        disagree = company_disagreement_tags(dev_sets, kind="developer")
+        if disagree:
+            tags.extend(disagree)
             has_medium_issue = True
-        if _has_any_disagree(pub_sets):
-            tags.append("publisher_disagree")
+        disagree = company_disagreement_tags(pub_sets, kind="publisher")
+        if disagree:
+            tags.extend(disagree)
             has_medium_issue = True
 
         # Symmetric year outlier tags relative to a strict-majority consensus year.
@@ -591,6 +578,10 @@ def fill_eval_tags(
                 if q_nums != s_nums:
                     tags.append("steam_series_mismatch")
                     has_low_issue = True
+                store_type = str(row.get("Steam_StoreType", "") or "").strip().lower()
+                if store_type and store_type != "game":
+                    tags.append(f"store_type_not_game:{store_type}")
+                    has_low_issue = True
 
         if disabled:
             confidence = ""
@@ -601,11 +592,23 @@ def fill_eval_tags(
         else:
             confidence = "HIGH"
 
+        # Preserve a small set of stable, tool-emitted tags across recomputations.
+        prev = ""
+        try:
+            prev = str(df.at[idx, "ReviewTags"] or "")
+        except Exception:
+            prev = ""
+        if prev:
+            for t in [x.strip() for x in prev.split(",") if x.strip()]:
+                if t == "wikidata_hint" or t.startswith(preserve_prefixes):
+                    if t not in tags:
+                        tags.append(t)
+
         tags_list.append(", ".join(tags))
         confidence_list.append(confidence)
 
-    out["ReviewTags"] = pd.Series(tags_list)
-    out["MatchConfidence"] = pd.Series(confidence_list)
+    out["ReviewTags"] = pd.Series(tags_list, index=out.index)
+    out["MatchConfidence"] = pd.Series(confidence_list, index=out.index)
     if "NeedsReview" in out.columns:
         out = out.drop(columns=["NeedsReview"])
     return out
@@ -657,7 +660,7 @@ def _parse_sources(
     return out
 
 
-def _auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+def _auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame, int, list[int]]:
     """
     If a provider was auto-pinned and diagnostics indicate it's likely wrong, clear the ID.
 
@@ -666,12 +669,27 @@ def _auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFram
     """
     out = df.copy()
     changed = 0
+    changed_idx: list[int] = []
 
     rules: list[tuple[str, str, list[str]]] = [
-        ("steam", "Steam_AppID", ["Steam_MatchedName", "Steam_MatchScore", "Steam_MatchedYear"]),
+        (
+            "steam",
+            "Steam_AppID",
+            [
+                "Steam_MatchedName",
+                "Steam_MatchScore",
+                "Steam_MatchedYear",
+                "Steam_RejectedReason",
+                "Steam_StoreType",
+            ],
+        ),
         ("rawg", "RAWG_ID", ["RAWG_MatchedName", "RAWG_MatchScore", "RAWG_MatchedYear"]),
         ("igdb", "IGDB_ID", ["IGDB_MatchedName", "IGDB_MatchScore", "IGDB_MatchedYear"]),
-        ("hltb", "HLTB_ID", ["HLTB_MatchedName", "HLTB_MatchScore", "HLTB_MatchedYear"]),
+        (
+            "hltb",
+            "HLTB_ID",
+            ["HLTB_MatchedName", "HLTB_MatchScore", "HLTB_MatchedYear", "HLTB_MatchedPlatforms"],
+        ),
     ]
 
     for idx, row in out.iterrows():
@@ -709,8 +727,9 @@ def _auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFram
                 f"(RowId={rowid})"
             )
             changed += 1
+            changed_idx.append(idx)
 
-    return out, changed
+    return out, changed, changed_idx
 
 
 def load_or_merge_dataframe(input_csv: Path, output_csv: Path) -> pd.DataFrame:
@@ -1372,15 +1391,9 @@ def process_wikidata(
             if enwiki_title:
                 pageviews = pageviews_client.get_pageviews_summary_enwiki(enwiki_title)
                 release_date = str(data.get("Wikidata_ReleaseDate", "") or "").strip()
-                launch_90 = pageviews_client.get_pageviews_first_days_since_release_enwiki(
+                launch = pageviews_client.get_pageviews_launch_summary_enwiki(
                     enwiki_title=enwiki_title,
                     release_date=release_date,
-                    days=90,
-                )
-                launch_30 = pageviews_client.get_pageviews_first_days_since_release_enwiki(
-                    enwiki_title=enwiki_title,
-                    release_date=release_date,
-                    days=30,
                 )
                 summary = summary_client.get_summary(enwiki_title)
             else:
@@ -1398,8 +1411,12 @@ def process_wikidata(
                     df.at[idx2, "Wikidata_Pageviews365d"] = (
                         str(pageviews.days_365) if pageviews.days_365 is not None else ""
                     )
-                df.at[idx2, "Wikidata_PageviewsFirst30d"] = str(launch_30) if launch_30 else ""
-                df.at[idx2, "Wikidata_PageviewsFirst90d"] = str(launch_90) if launch_90 else ""
+                df.at[idx2, "Wikidata_PageviewsFirst30d"] = (
+                    str(launch.days_30) if launch and launch.days_30 is not None else ""
+                )
+                df.at[idx2, "Wikidata_PageviewsFirst90d"] = (
+                    str(launch.days_90) if launch and launch.days_90 is not None else ""
+                )
                 if isinstance(summary, dict) and summary:
                     extract = str(summary.get("extract") or "").strip()
                     if len(extract) > 320:
@@ -2009,9 +2026,12 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     df.at[idx, "Steam_MatchedName"] = ""
                     df.at[idx, "Steam_MatchScore"] = ""
                     df.at[idx, "Steam_MatchedYear"] = ""
+                    df.at[idx, "Steam_RejectedReason"] = ""
                 continue
             matched = ""
             matched_year = ""
+            rejected_reason = ""
+            store_type = ""
             if steam_id:
                 if not include_diagnostics:
                     continue
@@ -2020,6 +2040,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
                 except ValueError:
                     details = None
                 details_type = str((details or {}).get("type") or "").strip().lower()
+                store_type = details_type
                 if not details or (details_type and details_type != "game"):
                     logging.warning(
                         f"[STEAM] Ignoring pinned Steam_AppID for '{name}': appid={steam_id} "
@@ -2027,6 +2048,10 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     )
                     df.at[idx, "Steam_AppID"] = ""
                     steam_id = ""
+                    if include_diagnostics:
+                        matched = str((details or {}).get("name") or "").strip()
+                        matched_year = ""
+                        rejected_reason = f"non_game:{details_type or 'unknown'}"
                 else:
                     matched = str((details or {}).get("name") or "").strip()
                     release = (details or {}).get("release_date", {}) or {}
@@ -2053,11 +2078,20 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     inferred_int = int(inferred_ids[0])
                     details = client.get_app_details(inferred_int)
                     details_type = str((details or {}).get("type") or "").strip().lower()
+                    store_type = details_type
                     if not details or (details_type and details_type != "game"):
                         logging.warning(
                             f"[STEAM] Ignoring inferred Steam AppID for '{name}': "
                             f"appid={inferred_ids[0]} type={details_type or 'unknown'}"
                         )
+                        if include_diagnostics:
+                            matched = str((details or {}).get("name") or "").strip()
+                            release = (details or {}).get("release_date", {}) or {}
+                            m = re.search(
+                                r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or "")
+                            )
+                            matched_year = m.group(1) if m else ""
+                            rejected_reason = f"non_game:{details_type or 'unknown'}"
                     else:
                         df.at[idx, "Steam_AppID"] = str(inferred_int)
                         steam_id = str(inferred_int)
@@ -2072,6 +2106,8 @@ def _command_normalize(args: argparse.Namespace) -> None:
                                 r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or "")
                             )
                             df.at[idx, "Steam_MatchedYear"] = m.group(1) if m else ""
+                            df.at[idx, "Steam_RejectedReason"] = ""
+                            df.at[idx, "Steam_StoreType"] = str(details_type or "")
                         # If we successfully inferred a Steam AppID, do not overwrite it by running
                         # a secondary name-based search (which can surface DLC/soundtrack matches).
                         continue
@@ -2084,6 +2120,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
                     if include_diagnostics and appid_str.isdigit():
                         details = client.get_app_details(int(appid_str))
                         details_type = str((details or {}).get("type") or "").strip().lower()
+                        store_type = details_type
                         if not details or (details_type and details_type != "game"):
                             logging.warning(
                                 f"[STEAM] Ignoring Steam search result for '{name}': "
@@ -2092,6 +2129,7 @@ def _command_normalize(args: argparse.Namespace) -> None:
                             df.at[idx, "Steam_AppID"] = ""
                             matched = ""
                             matched_year = ""
+                            rejected_reason = f"non_game:{details_type or 'unknown'}"
                         else:
                             matched = str((details or {}).get("name") or "").strip()
                             release = (details or {}).get("release_date", {}) or {}
@@ -2108,6 +2146,8 @@ def _command_normalize(args: argparse.Namespace) -> None:
                 df.at[idx, "Steam_MatchedName"] = matched
                 df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
                 df.at[idx, "Steam_MatchedYear"] = matched_year
+                df.at[idx, "Steam_RejectedReason"] = rejected_reason
+                df.at[idx, "Steam_StoreType"] = store_type
 
     if "wikidata" in sources:
         client = WikidataClient(
@@ -2115,6 +2155,19 @@ def _command_normalize(args: argparse.Namespace) -> None:
             min_interval_s=WIKIDATA.min_interval_s,
         )
         diag_clients["wikidata"] = client
+        prefetched: dict[str, dict[str, str]] = {}
+        if include_diagnostics and "Wikidata_QID" in df.columns:
+            qids = sorted(
+                {
+                    str(x).strip()
+                    for x in df["Wikidata_QID"].fillna("").tolist()
+                    if str(x).strip() and str(x).strip() != IDENTITY_NOT_FOUND
+                }
+            )
+            if qids:
+                # Warm the wikidata cache in bulk (and fetch linked labels in batches) instead of
+                # calling get_by_id() per row. This keeps warm-cache imports fast.
+                prefetched = client.get_by_ids(qids)
         for idx, row in df.iterrows():
             if _is_yes(row.get("Disabled", "")):
                 continue
@@ -2131,7 +2184,18 @@ def _command_normalize(args: argparse.Namespace) -> None:
             if qid and not include_diagnostics:
                 continue
 
-            data = client.get_by_id(qid) if qid else client.search(name, year_hint=_year_hint(row))
+            data = None
+            if not qid:
+                steam_appid = str(row.get("Steam_AppID", "") or "").strip()
+                igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+                data = client.resolve_by_hints(steam_appid=steam_appid, igdb_id=igdb_id)
+            if data is None:
+                if qid:
+                    data = prefetched.get(qid) or client.get_by_id(qid)
+                else:
+                    data = client.search(name, year_hint=_year_hint(row))
+            if data and str(data.get("Wikidata_QID", "") or "").strip():
+                prefetched[str(data.get("Wikidata_QID") or "").strip()] = data
             if data and str(data.get("Wikidata_QID", "") or "").strip() and not qid:
                 df.at[idx, "Wikidata_QID"] = str(data.get("Wikidata_QID") or "").strip()
             if include_diagnostics:
@@ -2190,7 +2254,14 @@ def _command_normalize(args: argparse.Namespace) -> None:
 
     if include_diagnostics:
         df = fill_eval_tags(df, sources=set(sources), clients=diag_clients)
-        df, unpinned = _auto_unpin_likely_wrong_provider_ids(df)
+        df, unpinned, unpinned_idx = _auto_unpin_likely_wrong_provider_ids(df)
+        if unpinned_idx:
+            # After safety unpins, recompute tags/confidence for the final row state so we don't
+            # keep stale diagnostics like `steam_score:*` when Steam fields were cleared.
+            subset = df.loc[unpinned_idx].copy()
+            subset = fill_eval_tags(subset, sources=set(sources), clients=diag_clients)
+            df.loc[unpinned_idx, "ReviewTags"] = subset["ReviewTags"]
+            df.loc[unpinned_idx, "MatchConfidence"] = subset["MatchConfidence"]
         if unpinned:
             logging.info(f"✔ Import safety: auto-unpinned {unpinned} likely-wrong provider IDs")
     else:
@@ -2211,6 +2282,397 @@ def _command_normalize(args: argparse.Namespace) -> None:
 
     write_csv(df, out)
     logging.info(f"✔ Import matching completed: {out}")
+
+
+def _command_resolve(args: argparse.Namespace) -> None:
+    project_root, paths = _common_paths()
+    _setup_logging_from_args(
+        paths, args.log_file, args.debug, command_name="resolve", input_path=args.catalog
+    )
+
+    is_experiment = _is_under_dir(args.catalog, paths.data_experiments)
+    cache_dir = args.cache or (
+        (paths.data_experiments / "cache") if is_experiment else paths.data_cache
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    catalog_csv = args.catalog
+    if not catalog_csv.exists():
+        raise SystemExit(f"Catalog file not found: {catalog_csv}")
+
+    out = args.out or catalog_csv
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load credentials
+    credentials_path = args.credentials or (project_root / "data" / "credentials.yaml")
+    credentials = load_credentials(credentials_path)
+
+    sources = _parse_sources(
+        args.source,
+        allowed={"igdb", "rawg", "steam", "hltb", "wikidata"},
+        aliases={"core": ["igdb", "rawg", "steam"]},
+    )
+
+    df = read_csv(catalog_csv)
+    if "ReviewTags" not in df.columns or "MatchConfidence" not in df.columns:
+        raise SystemExit(
+            f"{catalog_csv} is missing diagnostics columns; run `import --diagnostics` first."
+        )
+
+    def _parse_int_year(text: object) -> int | None:
+        s = str(text or "").strip()
+        if s.isdigit() and len(s) == 4:
+            y = int(s)
+            if 1900 <= y <= 2100:
+                return y
+        return None
+
+    def _year_hint(row: pd.Series) -> int | None:
+        for col in ("YearHint", "Year", "ReleaseYear", "Release_Year"):
+            if col not in row.index:
+                continue
+            v = str(row.get(col, "") or "").strip()
+            if v.isdigit() and len(v) == 4:
+                y = int(v)
+                if 1900 <= y <= 2100:
+                    return y
+        return extract_year_hint(str(row.get("Name", "") or ""))
+
+    # Clients used for retries and for extracting alias/title hints.
+    clients: dict[str, object] = {}
+    if "rawg" in sources:
+        api_key = credentials.get("rawg", {}).get("api_key", "")
+        if api_key:
+            clients["rawg"] = RAWGClient(
+                api_key=api_key,
+                cache_path=cache_dir / "rawg_cache.json",
+                min_interval_s=RAWG.min_interval_s,
+            )
+    if "igdb" in sources:
+        client_id = credentials.get("igdb", {}).get("client_id", "")
+        secret = credentials.get("igdb", {}).get("client_secret", "")
+        if client_id and secret:
+            clients["igdb"] = IGDBClient(
+                client_id=client_id,
+                client_secret=secret,
+                cache_path=cache_dir / "igdb_cache.json",
+                min_interval_s=IGDB.min_interval_s,
+            )
+    if "steam" in sources:
+        clients["steam"] = SteamClient(
+            cache_path=cache_dir / "steam_cache.json",
+            min_interval_s=STEAM.storesearch_min_interval_s,
+        )
+    if "wikidata" in sources:
+        clients["wikidata"] = WikidataClient(
+            cache_path=cache_dir / "wikidata_cache.json", min_interval_s=WIKIDATA.min_interval_s
+        )
+    if "hltb" in sources:
+        clients["hltb"] = HLTBClient(cache_path=cache_dir / "hltb_cache.json")
+
+
+    df = fill_eval_tags(df, sources=set(sources), clients=clients)
+    df, unpinned, unpinned_idx = _auto_unpin_likely_wrong_provider_ids(df)
+    if unpinned_idx:
+        subset = df.loc[unpinned_idx].copy()
+        subset = fill_eval_tags(subset, sources=set(sources), clients=clients)
+        df.loc[unpinned_idx, "ReviewTags"] = subset["ReviewTags"]
+        df.loc[unpinned_idx, "MatchConfidence"] = subset["MatchConfidence"]
+
+    def _majority_title_and_year(row: pd.Series) -> tuple[str, int | None] | None:
+        title_cols = {
+            "rawg": "RAWG_MatchedName",
+            "igdb": "IGDB_MatchedName",
+            "steam": "Steam_MatchedName",
+            "hltb": "HLTB_MatchedName",
+            "wikidata": "Wikidata_MatchedLabel",
+        }
+        year_cols = {
+            "rawg": "RAWG_MatchedYear",
+            "igdb": "IGDB_MatchedYear",
+            "steam": "Steam_MatchedYear",
+            "hltb": "HLTB_MatchedYear",
+            "wikidata": "Wikidata_MatchedYear",
+        }
+
+        titles: dict[str, str] = {}
+        years: dict[str, int] = {}
+        for p, col in title_cols.items():
+            t = str(row.get(col, "") or "").strip()
+            if t:
+                titles[p] = t
+        for p, col in year_cols.items():
+            y = _parse_int_year(row.get(col, ""))
+            if y is not None:
+                years[p] = y
+
+        consensus = compute_provider_consensus(
+            titles,
+            years=years if years else None,
+            title_score_threshold=90,
+            year_tolerance=1,
+            ignore_year_providers={"steam"},
+            min_providers=2,
+        )
+        if not consensus or not consensus.has_majority or not consensus.majority:
+            return None
+
+        personal = str(row.get("Name", "") or "").strip()
+        best_title = ""
+        best_score = -1
+        maj_years: dict[str, int] = {}
+        for p in consensus.majority:
+            col = title_cols.get(p)
+            if col:
+                title = str(row.get(col, "") or "").strip()
+                if title:
+                    sc = fuzzy_score(personal, title)
+                    if sc > best_score:
+                        best_title, best_score = title, sc
+            y = years.get(p)
+            if y is not None:
+                maj_years[p] = y
+
+        year_consensus = compute_year_consensus(maj_years) if maj_years else None
+        year = year_consensus.value if year_consensus and year_consensus.has_majority else None
+        return best_title, year
+
+    def _provider_title_from_id(row: pd.Series, provider: str) -> str:
+        if provider == "rawg" and "rawg" in clients:
+            rid = str(row.get("RAWG_ID", "") or "").strip()
+            if rid:
+                obj = clients["rawg"].get_by_id(rid)  # type: ignore[attr-defined]
+                return str((obj or {}).get("name") or "").strip()
+        if provider == "igdb" and "igdb" in clients:
+            iid = str(row.get("IGDB_ID", "") or "").strip()
+            if iid:
+                obj = clients["igdb"].get_by_id(iid)  # type: ignore[attr-defined]
+                return str((obj or {}).get("IGDB_Name") or "").strip()
+        if provider == "steam" and "steam" in clients:
+            sid = str(row.get("Steam_AppID", "") or "").strip()
+            if sid.isdigit():
+                details = clients["steam"].get_app_details(int(sid))  # type: ignore[attr-defined]
+                return str((details or {}).get("name") or "").strip()
+        if provider == "wikidata" and "wikidata" in clients:
+            qid = str(row.get("Wikidata_QID", "") or "").strip()
+            if qid:
+                obj = clients["wikidata"].get_by_id(qid)  # type: ignore[attr-defined]
+                return str((obj or {}).get("Wikidata_Label") or "").strip()
+        return ""
+
+    def _pick_retry_query(
+        row: pd.Series,
+        majority_title: str,
+        majority_year: int | None,
+    ) -> tuple[str, int | None] | None:
+        personal = str(row.get("Name", "") or "").strip()
+        effective_year = majority_year if majority_year is not None else _year_hint(row)
+
+        candidates: list[str] = []
+        if majority_title:
+            candidates.append(majority_title)
+
+        # Provider titles already pinned (often canonical store/provider titles).
+        for p in ("steam", "rawg", "igdb"):
+            title = _provider_title_from_id(row, p)
+            if title:
+                candidates.append(title)
+
+        # Cached aliases
+        qid = str(row.get("Wikidata_QID", "") or "").strip()
+        if qid and "wikidata" in clients:
+            wd = clients["wikidata"]
+            aliases = wd.get_aliases(qid)  # type: ignore[attr-defined]
+            candidates.extend(aliases[:10])
+            # enwiki title can be a useful canonical spelling
+            ent = wd.get_by_id(qid)  # type: ignore[attr-defined]
+            enwiki = str((ent or {}).get("Wikidata_EnwikiTitle") or "").strip()
+            if enwiki:
+                candidates.append(enwiki)
+
+        igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+        if igdb_id and "igdb" in clients:
+            alts = clients["igdb"].get_alternative_names(igdb_id)  # type: ignore[attr-defined]
+            candidates.extend(alts[:10])
+
+        # Choose a single retry query.
+        target = majority_title or personal
+        best = ""
+        best_score = -1
+        for c in candidates:
+            s = str(c or "").strip()
+            if not s:
+                continue
+            sc = fuzzy_score(target, s)
+            if sc > best_score or (sc == best_score and len(s) < len(best)):
+                best, best_score = s, sc
+        if not best:
+            return None
+        return best, effective_year
+
+    def _add_tag(existing: str, tag: str) -> str:
+        s = str(existing or "").strip()
+        if not s:
+            return tag
+        tags = [t.strip() for t in s.split(",") if t.strip()]
+        if tag in tags:
+            return s
+        tags.append(tag)
+        return ", ".join(tags)
+
+    def _year_close(y: str, majority_year: int | None) -> bool:
+        if majority_year is None:
+            return True
+        yy = _parse_int_year(y)
+        if yy is None:
+            return True
+        return abs(yy - majority_year) <= 1
+
+    attempted = 0
+    repinned = 0
+    resolved_wikidata = 0
+
+    for idx, row in df.iterrows():
+        if _is_yes(row.get("Disabled", "")):
+            continue
+        tags = str(row.get("ReviewTags", "") or "")
+
+        # Decide which providers to retry.
+        retry_targets: list[str] = []
+        for prov, id_col in (
+            ("steam", "Steam_AppID"),
+            ("rawg", "RAWG_ID"),
+            ("igdb", "IGDB_ID"),
+        ):
+            if prov not in clients:
+                continue
+            id_val = str(row.get(id_col, "") or "").strip()
+            if f"autounpinned:{prov}" in tags and not id_val:
+                retry_targets.append(prov)
+            elif args.retry_missing and not id_val:
+                retry_targets.append(prov)
+
+        missing_wikidata_qid = (
+            "wikidata" in clients and not str(row.get("Wikidata_QID", "") or "").strip()
+        )
+        if not retry_targets and not missing_wikidata_qid:
+            continue
+
+        maj = _majority_title_and_year(row)
+        if not maj:
+            continue
+        majority_title, majority_year = maj
+
+        picked = _pick_retry_query(row, majority_title, majority_year)
+        if not picked:
+            continue
+        retry_query, retry_year = picked
+
+        # Resolve Wikidata QID by hints if missing (safe, provider-backed).
+        if missing_wikidata_qid:
+            steam_appid = str(row.get("Steam_AppID", "") or "").strip()
+            igdb_id = str(row.get("IGDB_ID", "") or "").strip()
+            got = clients["wikidata"].resolve_by_hints(  # type: ignore[attr-defined]
+                steam_appid=steam_appid, igdb_id=igdb_id
+            )
+            if got and str(got.get("Wikidata_QID", "") or "").strip():
+                df.at[idx, "Wikidata_QID"] = str(got.get("Wikidata_QID") or "").strip()
+                resolved_wikidata += 1
+                df.at[idx, "ReviewTags"] = _add_tag(df.at[idx, "ReviewTags"], "wikidata_hint")
+
+        for prov in retry_targets:
+            attempted += 1
+            name = str(row.get("Name", "") or "").strip()
+            if prov == "steam":
+                steam = clients["steam"]
+                logging.debug(f"[RESOLVE] Retry Steam for '{name}' using '{retry_query}'")
+                search = steam.search_appid(retry_query, year_hint=retry_year)
+                if not search or search.get("id") is None:
+                    continue
+                appid_str = str(search.get("id") or "").strip()
+                if not appid_str.isdigit():
+                    continue
+                details = steam.get_app_details(int(appid_str))
+                matched = str((details or {}).get("name") or search.get("name") or "").strip()
+                release = (details or {}).get("release_date", {}) or {}
+                m = re.search(r"\b(19\\d{2}|20\\d{2})\\b", str(release.get("date", "") or ""))
+                y = m.group(1) if m else ""
+                score = fuzzy_score(majority_title or name, matched) if matched else 0
+                # Gate: high score or corroborated by year proximity (when meaningful).
+                if score < 90 and not _year_close(y, majority_year):
+                    continue
+                df.at[idx, "Steam_AppID"] = appid_str
+                df.at[idx, "Steam_MatchedName"] = matched
+                df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+                df.at[idx, "Steam_MatchedYear"] = y
+                df.at[idx, "Steam_StoreType"] = (
+                    str((details or {}).get("type") or "").strip().lower()
+                )
+                df.at[idx, "Steam_RejectedReason"] = ""
+                df.at[idx, "ReviewTags"] = _add_tag(
+                    df.at[idx, "ReviewTags"], "repinned_by_resolve:steam"
+                )
+                repinned += 1
+            elif prov == "rawg":
+                rawg = clients["rawg"]
+                logging.debug(f"[RESOLVE] Retry RAWG for '{name}' using '{retry_query}'")
+                obj = rawg.search(retry_query, year_hint=retry_year)
+                if not obj or obj.get("id") is None:
+                    continue
+                matched = str(obj.get("name") or "").strip()
+                released = str(obj.get("released") or "").strip()
+                y = released[:4] if len(released) >= 4 else ""
+                score = fuzzy_score(majority_title or name, matched) if matched else 0
+                if score < 90 and not _year_close(y, majority_year):
+                    continue
+                df.at[idx, "RAWG_ID"] = str(obj.get("id") or "").strip()
+                df.at[idx, "RAWG_MatchedName"] = matched
+                df.at[idx, "RAWG_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+                df.at[idx, "RAWG_MatchedYear"] = y
+                df.at[idx, "ReviewTags"] = _add_tag(
+                    df.at[idx, "ReviewTags"], "repinned_by_resolve:rawg"
+                )
+                repinned += 1
+            elif prov == "igdb":
+                igdb = clients["igdb"]
+                logging.debug(f"[RESOLVE] Retry IGDB for '{name}' using '{retry_query}'")
+                obj = igdb.search(retry_query, year_hint=retry_year)
+                if not obj or not str(obj.get("IGDB_ID", "") or "").strip():
+                    continue
+                matched = str(obj.get("IGDB_Name") or "").strip()
+                y = str(obj.get("IGDB_Year") or "").strip()
+                score = fuzzy_score(majority_title or name, matched) if matched else 0
+                if score < 90 and not _year_close(y, majority_year):
+                    continue
+                df.at[idx, "IGDB_ID"] = str(obj.get("IGDB_ID") or "").strip()
+                df.at[idx, "IGDB_MatchedName"] = matched
+                df.at[idx, "IGDB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
+                df.at[idx, "IGDB_MatchedYear"] = y
+                df.at[idx, "ReviewTags"] = _add_tag(
+                    df.at[idx, "ReviewTags"], "repinned_by_resolve:igdb"
+                )
+                repinned += 1
+
+    if attempted or repinned or resolved_wikidata:
+        df = fill_eval_tags(df, sources=set(sources), clients=clients)
+
+    write_csv(df, out)
+
+    logging.info(
+        f"✔ Resolve completed: {out} (auto_unpinned={unpinned}, attempted={attempted}, "
+        f"repinned={repinned}, wikidata_hint_added={resolved_wikidata})"
+    )
+
+    if "rawg" in clients:
+        logging.info(f"[RAWG] Cache stats: {clients['rawg'].format_cache_stats()}")
+    if "igdb" in clients:
+        logging.info(f"[IGDB] Cache stats: {clients['igdb'].format_cache_stats()}")
+    if "steam" in clients:
+        logging.info(f"[STEAM] Cache stats: {clients['steam'].format_cache_stats()}")
+    if "wikidata" in clients:
+        logging.info(f"[WIKIDATA] Cache stats: {clients['wikidata'].format_cache_stats()}")
+    if "hltb" in clients:
+        logging.info(f"[HLTB] Cache stats: {clients['hltb'].format_cache_stats()}")
 
 
 def _command_enrich(args: argparse.Namespace) -> None:
@@ -2467,6 +2929,29 @@ def _command_validate(args: argparse.Namespace) -> None:
     logging.info(f"✔ Validation report generated: {out}")
 
 
+def _command_review(args: argparse.Namespace) -> None:
+    project_root, paths = _common_paths()
+    _setup_logging_from_args(
+        paths, args.log_file, args.debug, command_name="review", input_path=args.catalog
+    )
+    catalog_csv = args.catalog or (paths.data_input / "Games_Catalog.csv")
+    if not catalog_csv.exists():
+        raise SystemExit(f"Catalog not found: {catalog_csv}")
+    enriched_csv = args.enriched or (paths.data_output / "Games_Enriched.csv")
+    out = args.out or (paths.data_output / "Review_TopRisk.csv")
+
+    catalog_df = read_csv(catalog_csv)
+    enriched_df = read_csv(enriched_csv) if enriched_csv.exists() else None
+    review = build_review_csv(
+        catalog_df,
+        enriched_df=enriched_df,
+        config=ReviewConfig(max_rows=int(args.max_rows)),
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write_csv(review, out)
+    logging.info(f"✔ Review CSV generated: {out} (rows={len(review)})")
+
+
 def _command_production_tiers(args: argparse.Namespace) -> None:
     from game_catalog_builder.tools.production_tiers_updater import (
         suggest_and_update_production_tiers,
@@ -2552,6 +3037,53 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_import.set_defaults(_fn=_command_normalize)
 
+    p_resolve = sub.add_parser(
+        "resolve",
+        help=(
+            "Optional third pass: auto-unpin likely-wrong IDs and conservatively retry "
+            "repinning using consensus titles/aliases"
+        ),
+    )
+    p_resolve.add_argument(
+        "--catalog",
+        type=Path,
+        default=Path("data/input/Games_Catalog.csv"),
+        help="Catalog CSV with diagnostics (default: data/input/Games_Catalog.csv)",
+    )
+    p_resolve.add_argument(
+        "--out",
+        type=Path,
+        help="Output catalog CSV (default: overwrite --catalog)",
+    )
+    p_resolve.add_argument("--cache", type=Path, help="Cache directory (default: data/cache)")
+    p_resolve.add_argument(
+        "--credentials", type=Path, help="Credentials YAML (default: data/credentials.yaml)"
+    )
+    p_resolve.add_argument(
+        "--source",
+        type=str,
+        default="core,wikidata",
+        help="Providers to use for retries (default: core,wikidata)",
+    )
+    p_resolve.add_argument(
+        "--retry-missing",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Also attempt to fill missing provider IDs when a strict consensus exists "
+            "(default: false)"
+        ),
+    )
+    p_resolve.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_resolve.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
+    )
+    p_resolve.set_defaults(_fn=_command_resolve)
+
     p_enrich = sub.add_parser(
         "enrich", help="Generate provider outputs + Games_Enriched.csv from Games_Catalog.csv"
     )
@@ -2626,6 +3158,47 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_val.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
     p_val.set_defaults(_fn=_command_validate)
+
+    p_review = sub.add_parser(
+        "review",
+        help="Generate a focused review CSV from Games_Catalog.csv (+ optional Games_Enriched.csv)",
+    )
+    p_review.add_argument(
+        "--catalog",
+        type=Path,
+        default=Path("data/input/Games_Catalog.csv"),
+        help="Catalog CSV with diagnostics (default: data/input/Games_Catalog.csv)",
+    )
+    p_review.add_argument(
+        "--enriched",
+        type=Path,
+        default=Path("data/output/Games_Enriched.csv"),
+        help=(
+            "Enriched CSV (optional; used to add extra context) "
+            "(default: data/output/Games_Enriched.csv)"
+        ),
+    )
+    p_review.add_argument(
+        "--out",
+        type=Path,
+        default=Path("data/output/Review_TopRisk.csv"),
+        help="Output review CSV path (default: data/output/Review_TopRisk.csv)",
+    )
+    p_review.add_argument(
+        "--max-rows",
+        type=int,
+        default=200,
+        help="Max rows to include (default: 200)",
+    )
+    p_review.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_review.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
+    )
+    p_review.set_defaults(_fn=_command_review)
 
     p_tiers = sub.add_parser(
         "production-tiers",

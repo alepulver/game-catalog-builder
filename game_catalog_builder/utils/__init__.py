@@ -1,6 +1,7 @@
 """Utility functions and helpers."""
 
 from .merger import merge_all
+from .review import ReviewConfig, build_review_csv
 from .utilities import (
     IDENTITY_NOT_FOUND,
     PUBLIC_DEFAULT_COLS,
@@ -39,4 +40,6 @@ __all__ = [
     "read_csv",
     "write_csv",
     "PUBLIC_DEFAULT_COLS",
+    "ReviewConfig",
+    "build_review_csv",
 ]

@@ -10,7 +10,10 @@ def test_rawg_extract_fields_fixture():
         "id": 2454,
         "name": "DOOM (2016)",
         "released": "2016-05-13",
+        "website": "https://slayersclub.bethesda.net/",
+        "description_raw": "A long description " * 100,
         "genres": [{"name": "Action"}, {"name": "Shooter"}],
+        "esrb_rating": {"name": "Mature"},
         "platforms": [{"platform": {"name": "PC"}}, {"platform": {"name": "PlayStation 4"}}],
         "tags": [{"name": "Singleplayer"}, {"name": "Atmospheric"}],
         "developers": [{"name": "id Software"}],
@@ -25,8 +28,12 @@ def test_rawg_extract_fields_fixture():
     assert fields["RAWG_Name"] == "DOOM (2016)"
     assert fields["RAWG_Released"] == "2016-05-13"
     assert fields["RAWG_Year"] == "2016"
+    assert fields["RAWG_Website"] == "https://slayersclub.bethesda.net/"
+    assert fields["RAWG_DescriptionRaw"].endswith("…")
     assert fields["RAWG_Genre"] == "Action"
     assert fields["RAWG_Genre2"] == "Shooter"
+    assert fields["RAWG_Genres"] == "Action, Shooter"
+    assert fields["RAWG_ESRB"] == "Mature"
     assert fields["RAWG_Platforms"] == "PC, PlayStation 4"
     assert fields["RAWG_Tags"] == "Singleplayer, Atmospheric"
     assert fields["RAWG_Rating"] == "4.2"
@@ -41,7 +48,7 @@ def test_rawg_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
 
     calls = {"rawg": 0}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         class Resp:
             def raise_for_status(self):
                 return None
@@ -52,7 +59,7 @@ def test_rawg_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = RAWGClient(
         api_key="x",
@@ -70,6 +77,7 @@ def test_steam_extract_fields_fixture():
     from game_catalog_builder.clients.steam_client import SteamClient
 
     details = {
+        "type": "game",
         "name": "Example Game",
         "is_free": True,
         "release_date": {"coming_soon": False, "date": "10 May, 2016"},
@@ -82,6 +90,8 @@ def test_steam_extract_fields_fixture():
     fields = SteamClient.extract_fields(123, details)
     assert fields["Steam_AppID"] == "123"
     assert fields["Steam_Name"] == "Example Game"
+    assert fields["Steam_URL"].endswith("/123/")
+    assert fields["Steam_StoreType"] == "game"
     assert fields["Steam_ReleaseYear"] == "2016"
     assert fields["Steam_Platforms"] == "Windows, Linux"
     assert fields["Steam_Tags"] == "Action, Shooter"
@@ -95,7 +105,7 @@ def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
 
     calls = {"appdetails": 0}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         class Resp:
             status_code = 200
             headers: dict[str, str] = {}
@@ -113,7 +123,7 @@ def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     d1 = client.get_app_details(123)
@@ -126,7 +136,7 @@ def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
 def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steamspy_client import SteamSpyClient
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         class Resp:
             def raise_for_status(self):
                 return None
@@ -141,7 +151,7 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamSpyClient(cache_path=tmp_path / "steamspy_cache.json", min_interval_s=0.0)
     data = client.fetch(999)
@@ -158,6 +168,7 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
         "Score_SteamSpy_100": "",
     }
 
+    client._cache_io.flush()
     raw = json.loads((tmp_path / "steamspy_cache.json").read_text(encoding="utf-8"))
     assert raw["by_id"]["999"]["owners"] == "10,000 .. 20,000"
 
@@ -178,6 +189,8 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
                 "id": 7351,
                 "name": "Doom",
                 "first_release_date": 1463097600,
+                "summary": "Rip and tear until it is done.",
+                "websites": [{"url": "https://slayersclub.bethesda.net/"}, {"url": "https://doom.com/"}],
                 "platforms": [{"name": "PC (Microsoft Windows)"}],
                 "genres": [{"name": "Shooter"}],
                 "themes": [{"name": "Action"}],
@@ -185,9 +198,18 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
                 "player_perspectives": [{"name": "First person"}],
                 "franchises": [{"name": "Doom"}],
                 "game_engines": [{"name": "id Tech 6"}],
+                "parent_game": {"name": "Doom"},
+                "version_parent": {"name": "Doom"},
+                "dlcs": [{"name": "Doom - DLC Pack"}],
+                "expansions": [{"name": "Doom: Expansion"}],
+                "ports": [{"name": "Doom (Switch)"}],
                 "involved_companies": [
                     {"company": {"name": "id Software"}, "developer": True, "publisher": False},
-                    {"company": {"name": "Bethesda Softworks"}, "developer": False, "publisher": True},
+                    {
+                        "company": {"name": "Bethesda Softworks"},
+                        "developer": False,
+                        "publisher": True,
+                    },
                 ],
                 "external_games": [{"external_game_source": 1, "uid": "379720"}],
             }
@@ -208,6 +230,8 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
     assert enriched["IGDB_ID"] == "7351"
     assert enriched["IGDB_Name"] == "Doom"
     assert enriched["IGDB_Year"] == "2016"
+    assert enriched["IGDB_Summary"] == "Rip and tear until it is done."
+    assert "https://slayersclub.bethesda.net/" in enriched["IGDB_Websites"]
     assert enriched["IGDB_Platforms"] == "PC (Microsoft Windows)"
     assert enriched["IGDB_Genres"] == "Shooter"
     assert enriched["IGDB_Themes"] == "Action"
@@ -215,6 +239,11 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
     assert enriched["IGDB_Perspectives"] == "First person"
     assert enriched["IGDB_Franchise"] == "Doom"
     assert enriched["IGDB_Engine"] == "id Tech 6"
+    assert enriched["IGDB_ParentGame"] == "Doom"
+    assert enriched["IGDB_VersionParent"] == "Doom"
+    assert enriched["IGDB_DLCs"] == "Doom - DLC Pack"
+    assert enriched["IGDB_Expansions"] == "Doom: Expansion"
+    assert enriched["IGDB_Ports"] == "Doom (Switch)"
     assert enriched["IGDB_SteamAppID"] == "379720"
     assert enriched["IGDB_Developers"] == json.dumps(["id Software"], ensure_ascii=False)
     assert enriched["IGDB_Publishers"] == json.dumps(["Bethesda Softworks"], ensure_ascii=False)
@@ -247,22 +276,17 @@ def test_igdb_similarity_threshold_negative_cache(tmp_path, monkeypatch):
     assert calls["games"] == 1
 
 
-def test_wikidata_extract_fields_fixture(tmp_path, monkeypatch) -> None:
+def test_wikidata_extract_fields_fixture(tmp_path) -> None:
     from game_catalog_builder.clients.wikidata_client import WikidataClient
 
     client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
-
-    def fake_get_entities(qids, *, props):
-        assert props == "labels"
-        return {
-            "QDEV": {"labels": {"en": {"value": "id Software"}}},
-            "QPUB": {"labels": {"en": {"value": "GT Interactive"}}},
-            "QPLAT": {"labels": {"en": {"value": "PC (MS-DOS)"}}},
-            "QGENRE": {"labels": {"en": {"value": "first-person shooter"}}},
-            "QSER": {"labels": {"en": {"value": "Doom"}}},
-        }
-
-    monkeypatch.setattr(client, "_get_entities", fake_get_entities)
+    client._labels = {
+        "QDEV": "id Software",
+        "QPUB": "GT Interactive",
+        "QPLAT": "PC (MS-DOS)",
+        "QGENRE": "first-person shooter",
+        "QSER": "Doom",
+    }
 
     entity = {
         "id": "Q123",
@@ -363,6 +387,7 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
     assert data1["HLTB_Name"] == "Example Game"
     assert fake.calls == 1
 
+    client._cache_io.flush()
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
     assert raw["by_query"]["q:Example Game"][0]["game_id"] == 123
     assert raw["by_id"]["123"]["main_story"] == "10"
@@ -389,7 +414,7 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
     steam_out = tmp_path / "Provider_Steam.csv"
     steamspy_out = tmp_path / "Provider_SteamSpy.csv"
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         def _appids_from_url(u: str) -> list[str]:
             if "appids=" not in u:
                 return []
@@ -436,7 +461,7 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     process_steam_and_steamspy_streaming(
         input_csv=input_csv,

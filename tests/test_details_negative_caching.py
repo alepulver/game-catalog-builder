@@ -6,7 +6,7 @@ def test_steam_appdetails_success_false_is_negative_cached(tmp_path, monkeypatch
 
     calls = {"appdetails": 0}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         assert "appdetails" in url
         calls["appdetails"] += 1
 
@@ -23,7 +23,7 @@ def test_steam_appdetails_success_false_is_negative_cached(tmp_path, monkeypatch
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     assert client.get_app_details(999) is None
@@ -36,7 +36,7 @@ def test_igdb_get_by_id_missing_is_negative_cached(tmp_path, monkeypatch):
 
     calls = {"post": 0}
 
-    def fake_post(url, headers=None, data=None, timeout=None):
+    def fake_post(_self, url, headers=None, data=None, timeout=None):
         assert "/games" in url
         calls["post"] += 1
 
@@ -52,7 +52,7 @@ def test_igdb_get_by_id_missing_is_negative_cached(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("requests.sessions.Session.post", fake_post)
 
     client = IGDBClient(
         client_id="x",
@@ -73,7 +73,7 @@ def test_rawg_get_by_id_invalid_payload_is_negative_cached(tmp_path, monkeypatch
 
     calls = {"get": 0}
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         calls["get"] += 1
 
         class Resp:
@@ -88,7 +88,7 @@ def test_rawg_get_by_id_invalid_payload_is_negative_cached(tmp_path, monkeypatch
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     client = RAWGClient(api_key="k", cache_path=tmp_path / "rawg_cache.json", min_interval_s=0.0)
     assert client.get_by_id("999") is None

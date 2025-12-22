@@ -34,7 +34,7 @@ def test_steamspy_streaming_enqueues_existing_appids(tmp_path: Path, monkeypatch
         steam_out,
     )
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(_self, url, params=None, timeout=None):
         class Resp:
             def raise_for_status(self):
                 return None
@@ -52,7 +52,7 @@ def test_steamspy_streaming_enqueues_existing_appids(tmp_path: Path, monkeypatch
 
         return Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
     process_steam_and_steamspy_streaming(
         input_csv=input_csv,

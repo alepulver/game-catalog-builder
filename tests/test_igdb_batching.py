@@ -6,7 +6,7 @@ def test_igdb_get_by_ids_batches_single_request(tmp_path, monkeypatch):
 
     calls: list[str] = []
 
-    def fake_post(url, headers=None, data=None, timeout=None):
+    def fake_post(_self, url, headers=None, data=None, timeout=None):
         calls.append(str(data or ""))
         assert url.endswith("/v4/games")
         q = str(data).replace(" ", "").replace("\n", "")
@@ -28,7 +28,7 @@ def test_igdb_get_by_ids_batches_single_request(tmp_path, monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr("requests.post", fake_post)
+    monkeypatch.setattr("requests.sessions.Session.post", fake_post)
 
     client = IGDBClient(
         client_id="x",

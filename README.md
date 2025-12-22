@@ -93,6 +93,13 @@ This writes example files under `docs/examples/doom-2016/` (slugified from the i
 
 **Important**: Make sure your virtual environment is activated (see Setup step 2) before running commands.
 
+### Network failures vs “not found”
+
+- Provider “Not found …” warnings mean the provider responded but the game was not matched above the similarity threshold.
+- Network/HTTP failures are logged distinctly (`[NETWORK] ...`, `[HTTP] ...`), and on cache misses the tool fails fast so you don’t silently generate “not found” results while offline.
+- When a provider returns `429 Too Many Requests`, retries honor `Retry-After` when available. Provider cache stats append a `429=...` suffix only when it occurred.
+- Provider clients reuse a persistent `requests.Session()` (connection pooling) to reduce TLS/handshake overhead on long runs.
+
 ### Recommended Workflow (Spreadsheet Round-Trip)
 
 This project supports a round-trip workflow where you edit the enriched CSV in a spreadsheet, then
@@ -196,6 +203,20 @@ Note: `Steam_Publishers` / `Steam_Developers` are stored as JSON arrays in a CSV
 Steam notes:
 - Steam `appdetails` requests use `l=english&cc=us` (some AppIDs return `success=false` without a country code).
 - When `Steam_AppID` is empty but IGDB/RAWG exposes it, the importer may infer and pin it automatically.
+
+### Signals (reach / now / ratings)
+
+The enriched output also includes a small set of derived “signals” intended for sorting and prioritization:
+
+- Reach: `Reach_SteamSpyOwners_*`, `Reach_SteamReviews`, `Reach_RAWGRatingsCount`, `Reach_IGDBRatingCount`, `Reach_IGDBAggregatedRatingCount`, and a blended `Reach_Composite`.
+- Now (recent interest): `Now_SteamSpyPlayers2Weeks`, `Now_SteamSpyPlaytime*2Weeks`, `SteamSpy_CCU` (when present), and a blended `Now_Composite`.
+- Ratings: `CommunityRating_Composite_100` and `CriticRating_Composite_100` (best-effort blend across available sources).
+- Launch interest: `Launch_Interest_100` (best-effort, derived from existing counts/signals).
+
+Limitations:
+- These are **platform-biased** toward Steam/PC and Wikipedia availability; they are meant to be useful, not universally comparable across all platforms.
+- “Now” coverage is limited without additional first-party sources; we currently avoid scraping.
+- Wikidata “facts” like units sold/budget/awards are too sparse/inconsistent to treat as first-class numeric columns.
 
 ### Experiments (subsets / debugging)
 

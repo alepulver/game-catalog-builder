@@ -16,6 +16,7 @@ class MatchingConfig:
     min_score: int = 65
     suspicious_score: int = 90
     suggestions_limit: int = 10
+    year_hint_tolerance: int = 2
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,14 @@ class ValidationConfig:
 @dataclass(frozen=True)
 class RequestConfig:
     timeout_s: int = 10
+
+
+@dataclass(frozen=True)
+class CacheConfig:
+    # Minimum time between JSON cache rewrites per provider/client (throttled writes).
+    # A final flush is attempted at process exit.
+    save_min_interval_small_s: float = 10.0
+    save_min_interval_large_s: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -120,6 +129,7 @@ RETRY = RetryConfig()
 MATCHING = MatchingConfig()
 VALIDATION = ValidationConfig()
 REQUEST = RequestConfig()
+CACHE = CacheConfig()
 STEAM = SteamConfig()
 IGDB = IGDBConfig()
 RAWG = RAWGConfig()
