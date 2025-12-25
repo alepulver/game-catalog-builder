@@ -157,8 +157,6 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
     data = client.fetch(999)
     assert data == {
         "SteamSpy_Owners": "10,000 .. 20,000",
-        "SteamSpy_Players": "1234",
-        "SteamSpy_Players2Weeks": "",
         "SteamSpy_CCU": "12",
         "SteamSpy_PlaytimeAvg": "56",
         "SteamSpy_PlaytimeAvg2Weeks": "",

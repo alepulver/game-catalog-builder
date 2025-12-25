@@ -2,11 +2,24 @@
 
 This project enriches a “personal catalog” CSV (from MyVideoGameList) with metadata from multiple providers, then merges everything into a single output CSV.
 
+## Recommended workflow (spreadsheet round-trip)
+
+Keep one source-of-truth catalog, and treat enriched output as an editable view:
+
+1. `import` → create/update `data/input/Games_Catalog.csv` (adds stable `RowId`, proposes provider IDs, writes diagnostics).
+2. Optional `resolve` → mutate pins only when explicitly requested (repin-or-unpin) based on diagnostics.
+3. `enrich` → generate provider outputs + `data/output/Games_Enriched.csv` from pinned IDs.
+4. Optional user edits → edit `data/output/Games_Enriched.csv` (user fields and/or provider ID pins).
+5. `sync` → copy user-editable fields and provider ID pins back into `data/input/Games_Catalog.csv`.
+6. `enrich` again → regenerate public/provider columns after pin fixes or user edits.
+
+`Games_Catalog.csv` is the only file that should be treated as durable program input across runs.
+
 ## Overview
 
 1. Read the input CSV (must contain a `Name` column).
 2. Import (pin provider IDs + diagnostics) into `data/input/Games_Catalog.csv`.
-3. Optionally resolve (third pass): conservative auto-unpin + one-shot repin attempts.
+3. Optionally resolve (third pass): conservative repin-or-unpin + one-shot repin attempts.
 4. Run providers (RAWG, IGDB, Steam→SteamSpy, HLTB, Wikidata).
 3. Each provider:
    - searches by name (fuzzy match),
@@ -31,28 +44,31 @@ When a provider does not already have a cached ID for a given `Name`, it perform
 
 Because MyVideoGameList titles can be non-standard, the search step is treated as “best effort”; import diagnostics are the main tool for spotting when providers returned different games for the same row.
 
-## Import safety (avoid wrong pins)
+## Import warnings (review, no auto-unpin)
 
-The importer is conservative about pins:
+The importer is conservative about warnings:
 
 - Any non-100% match emits a `WARNING`.
-- If diagnostics identify a provider as `likely_wrong:<provider>` **and** there is a strict-majority
-  provider consensus (and the provider is tagged as the consensus outlier), the importer clears
-  that provider ID instead of keeping a likely-wrong pin.
+- When providers disagree on identity (title/year/platform/genre), the importer adds compact tags
+  in `ReviewTags` and a `MatchConfidence` level so you can review and pin IDs manually.
 
 ## Optional resolve pass (auto-resolve, explicit)
 
 The `resolve` command is an explicit third pass (off by default) that can:
 
-- re-run diagnostics + auto-unpin,
+- re-run diagnostics and, for pins that are tagged as likely wrong (strict-majority consensus + outlier),
+  attempt a single conservative repin; if no safe repin candidate exists, it unpins to avoid silently
+  enriching the wrong game,
 - attempt a single conservative repin per affected provider using the majority provider title and
   cached aliases (Wikidata aliases + IGDB alternative names),
 
 This keeps the default `import` predictable and avoids extra provider requests unless you opt in.
 
+Resolve is **dry-run by default**; pass `--apply` to write changes back to the catalog CSV.
+
 ## What’s implemented (quick index)
 
-- Third pass auto-resolve: `python run.py resolve` (conservative repin after auto-unpin)
+- Third pass auto-resolve: `python run.py resolve` (conservative repin-or-unpin)
 - Wikidata provider-backed resolver: uses SPARQL external IDs (`data/cache/wikidata_cache.json:by_hint`)
 - Review-aid fields:
   - Steam: `Steam_URL`, `Steam_Website`, `Steam_ShortDescription`, `Steam_StoreType`

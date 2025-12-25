@@ -9,13 +9,10 @@ from urllib.parse import quote
 
 import requests
 
-from ..config import REQUEST, RETRY
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
-    network_failures_count,
-    raise_on_new_network_failure,
-    with_retries,
 )
 from ..config import CACHE
 
@@ -75,19 +72,62 @@ class WikipediaPageviewsClient:
 
     def __init__(self, cache_path: str | Path, min_interval_s: float = 0.15):
         self._session = requests.Session()
+        base_http = HTTPJSONClient(self._session, stats=None)
         self.cache_path = Path(cache_path)
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
         self._by_query: dict[str, Any] = {}
+        # Built at load time for cheap fallback reuse of cached windows when offline. Keys:
+        #   (project, access, article, days) -> (request_key, start_date, end_date)
+        self._daily_index: dict[tuple[str, str, str, int], tuple[str, date, date]] = {}
         self.stats: dict[str, int] = {
             "by_query_hit": 0,
             "by_query_fetch": 0,
             "by_query_negative_hit": 0,
             "by_query_negative_fetch": 0,
+            "by_query_fallback_hit": 0,
             # HTTP request counters (attempts, including retries).
             "http_get": 0,
         }
-        self._cache_io = CacheIOTracker(self.stats, min_interval_s=CACHE.save_min_interval_large_s)
+        base_http.stats = self.stats
+        self._http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.ratelimiter,
+                # Pageviews are an auxiliary signal; retrying heavily doesn't help much and makes
+                # offline runs feel stuck. Keep retries low.
+                retries=1,
+                counter_key="http_get",
+                headers={"User-Agent": USER_AGENT},
+                status_handlers={404: {}},
+                context_prefix="Wikipedia pageviews",
+            ),
+        )
+        self._cache_io = CacheIOTracker(self.stats, min_interval_s=CACHE.save_min_interval_huge_s)
         self._load_cache(self._cache_io.load_json(self.cache_path))
+        # If a run is offline and a cache miss requires network, disable further fetch attempts to
+        # avoid spamming logs and spending time retrying.
+        self._fetch_disabled = False
+        self._fetch_disabled_logged = False
+
+    def _parse_daily_request_key(self, request_key: str) -> tuple[str, str, str, date, date, int] | None:
+        parts = str(request_key or "").split("|")
+        if len(parts) < 7:
+            return None
+        project = parts[0]
+        access = parts[1]
+        agent = parts[2]
+        granularity = parts[-3]
+        start_s = parts[-2]
+        end_s = parts[-1]
+        if agent != "user" or granularity != "daily":
+            return None
+        article = "|".join(parts[3:-3])
+        start = _parse_stamp_yyyymmdd00(start_s)
+        end = _parse_stamp_yyyymmdd00(end_s)
+        if start is None or end is None or end < start:
+            return None
+        days = (end - start).days + 1
+        return project, access, article, start, end, days
 
     def _load_cache(self, raw: Any) -> None:
         if not isinstance(raw, dict) or not raw:
@@ -95,6 +135,18 @@ class WikipediaPageviewsClient:
         by_query = raw.get("by_query")
         if isinstance(by_query, dict):
             self._by_query = {str(k): v for k, v in by_query.items()}
+        self._daily_index = {}
+        for key, payload in self._by_query.items():
+            if payload == {}:
+                continue
+            parsed = self._parse_daily_request_key(key)
+            if parsed is None:
+                continue
+            project, access, article, start, end, days = parsed
+            idx_key = (project, access, article, days)
+            existing = self._daily_index.get(idx_key)
+            if existing is None or end > existing[2]:
+                self._daily_index[idx_key] = (key, start, end)
 
     def _save_cache(self) -> None:
         self._cache_io.save_json({"by_query": self._by_query}, self.cache_path)
@@ -106,33 +158,26 @@ class WikipediaPageviewsClient:
             if cached == {}:
                 self.stats["by_query_negative_hit"] += 1
             return cached
-
-        def _request():
-            self.ratelimiter.wait()
-            self.stats["http_get"] += 1
-            r = self._session.get(
+        if self._fetch_disabled:
+            return None
+        try:
+            data = self._http.get_json(
                 url,
-                timeout=REQUEST.timeout_s,
-                headers={"User-Agent": USER_AGENT},
+                context="",
+                on_fail_return=None,
             )
-            if r.status_code == 404:
-                return {}
-            r.raise_for_status()
-            return r.json()
-
-        before_net = network_failures_count(self.stats)
-        data = with_retries(
-            _request,
-            retries=RETRY.retries,
-            on_fail_return=None,
-            context="Wikipedia pageviews",
-            retry_stats=self.stats,
-        )
+        except RuntimeError as e:
+            self._fetch_disabled = True
+            if not self._fetch_disabled_logged:
+                self._fetch_disabled_logged = True
+                logging.error(
+                    "[NETWORK] Wikipedia pageviews disabled for this run (cache-only). %s", e
+                )
+            return None
         if data is None:
             logging.warning(
                 "Wikipedia pageviews request failed (no response); not caching as not-found."
             )
-            raise_on_new_network_failure(self.stats, before=before_net, context="Wikipedia pageviews")
             return None
 
         self._by_query[request_key] = data
@@ -193,6 +238,17 @@ class WikipediaPageviewsClient:
         )
         request_key = f"{project}|{access}|user|{article_norm}|daily|{start_s}|{end_s}"
         payload = self._get_cached(request_key, url)
+        if payload is None and self._fetch_disabled:
+            cached = self._daily_index.get((project, access, article_norm, days))
+            if cached is not None:
+                cached_key, cached_start, cached_end = cached
+                cached_payload = self._by_query.get(cached_key)
+                if cached_payload not in (None, {}):
+                    self.stats["by_query_fallback_hit"] += 1
+                    daily = self._daily_views_for_range(
+                        cached_payload, start=cached_start, end=cached_end
+                    )
+                    return daily[-days:] if len(daily) >= days else daily
         if payload is None or payload == {}:
             return []
         return self._daily_views_for_range(payload, start=start, end=end)
@@ -343,11 +399,11 @@ class WikipediaPageviewsClient:
         base = (
             f"by_query hit={s['by_query_hit']} fetch={s['by_query_fetch']} "
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
-            f"http get={s['http_get']}, "
-            f"cache load_ms={int(s.get('cache_load_ms', 0) or 0)} "
-            f"saves={int(s.get('cache_save_count', 0) or 0)} "
-            f"save_ms={int(s.get('cache_save_ms', 0) or 0)}"
+            f"{HTTPJSONClient.format_timing(s, key='http_get')}, {CacheIOTracker.format_io(s)}"
         )
+        fb = int(s.get("by_query_fallback_hit", 0) or 0)
+        if fb:
+            base = base + f", fallback_hit={fb}"
         http_429 = int(s.get("http_429", 0) or 0)
         if http_429:
             return (

@@ -8,16 +8,14 @@ from typing import Any
 
 import requests
 
-from ..config import MATCHING, RAWG, REQUEST, RETRY
+from ..config import MATCHING, RAWG, RETRY
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
     extract_year_hint,
-    network_failures_count,
     normalize_game_name,
     pick_best_match,
-    raise_on_new_network_failure,
-    with_retries,
 )
 
 RAWG_API_URL = "https://api.rawg.io/api/games"
@@ -32,6 +30,7 @@ class RAWGClient:
         min_interval_s: float = RAWG.min_interval_s,
     ):
         self._session = requests.Session()
+        base_http = HTTPJSONClient(self._session, stats=None)
         self.api_key = api_key
         self.language = (language or "en").strip() or "en"
         self.cache_path = Path(cache_path)
@@ -47,6 +46,16 @@ class RAWGClient:
             # HTTP request counters (attempts, including retries).
             "http_get": 0,
         }
+        base_http.stats = self.stats
+        self._http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=None,  # set after RateLimiter init
+                retries=RETRY.retries,
+                counter_key="http_get",
+                context_prefix="RAWG",
+            ),
+        )
         self._by_id: dict[str, Any] = {}
         # Cache by the exact query string/params used, storing only a lightweight list of
         # candidates (id/name/released). Raw game payloads are cached by id in _by_id.
@@ -54,6 +63,7 @@ class RAWGClient:
         self._cache_io = CacheIOTracker(self.stats)
         self._load_cache(self._cache_io.load_json(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
+        self._http.defaults.ratelimiter = self.ratelimiter
 
     def _id_key(self, rawg_id: int | str) -> str:
         return f"{self.language}:{rawg_id}"
@@ -102,30 +112,12 @@ class RAWGClient:
         if isinstance(cached, dict):
             self.stats["by_id_hit"] += 1
             return cached
-
-        def _request():
-            self.ratelimiter.wait()
-            self.stats["http_get"] += 1
-            r = self._session.get(
-                f"{RAWG_API_URL}/{rawg_id_str}",
-                params={"key": self.api_key, "lang": self.language},
-                timeout=REQUEST.timeout_s,
-            )
-            r.raise_for_status()
-            return r.json()
-
-        before_net = network_failures_count(self.stats)
-        data = with_retries(
-            _request,
-            retries=RETRY.retries,
+        data = self._http.get_json(
+            f"{RAWG_API_URL}/{rawg_id_str}",
+            params={"key": self.api_key, "lang": self.language},
+            context=f"get_by_id id={rawg_id_str}",
             on_fail_return=None,
-            context=f"RAWG get_by_id id={rawg_id_str}",
-            retry_stats=self.stats,
         )
-        if data is None:
-            raise_on_new_network_failure(
-                self.stats, before=before_net, context=f"RAWG get_by_id id={rawg_id_str}"
-            )
         if isinstance(data, dict) and data.get("id") is not None:
             self._by_id[id_key] = data
             self._save_cache()
@@ -162,7 +154,7 @@ class RAWGClient:
             toks = normalize_game_name(term).split()
             out: set[str] = set()
             for t in toks:
-                if not t.isdigit():
+                if not t.isdecimal():
                     continue
                 if len(t) == 4 and t[:2] in {"19", "20"}:
                     continue
@@ -191,11 +183,14 @@ class RAWGClient:
             toks = normalize_game_name(name).split()
             out: set[int] = set()
             for t in toks:
-                if not t.isdigit():
+                if not t.isdecimal():
                     continue
                 if len(t) > 1 and t.startswith("0"):
                     continue
-                n = int(t)
+                try:
+                    n = int(t)
+                except ValueError:
+                    continue
                 if n == 0:
                     continue
                 if 1900 <= n <= 2100:
@@ -304,38 +299,21 @@ class RAWGClient:
                 if not cached:
                     self.stats["by_query_negative_hit"] += 1
                 return cached
-
-            before_net = network_failures_count(self.stats)
-
-            def _request():
-                self.ratelimiter.wait()
-                self.stats["http_get"] += 1
-                r = self._session.get(RAWG_API_URL, params=params, timeout=REQUEST.timeout_s)
-                r.raise_for_status()
-                return r.json()
-
-            got = with_retries(
-                _request,
-                retries=RETRY.retries,
+            got = self._http.get_json(
+                RAWG_API_URL,
+                params=params,
+                context=f"search term={str(params.get('search') or '')!r}",
                 on_fail_return=None,
-                context=f"RAWG search term={str(params.get('search') or '')!r}",
-                retry_stats=self.stats,
             )
-            if isinstance(got, dict):
-                candidates = _candidates_from_results(got.get("results") or [])
-                self._by_query[query_key] = candidates
-                self._save_cache()
-                self.stats["by_query_fetch"] += 1
-                if not candidates:
-                    self.stats["by_query_negative_fetch"] += 1
-                return candidates
-            if got is None:
-                raise_on_new_network_failure(
-                    self.stats,
-                    before=before_net,
-                    context=f"RAWG search term={str(params.get('search') or '')!r}",
-                )
-            return None
+            if not isinstance(got, dict):
+                return None
+            candidates = _candidates_from_results(got.get("results") or [])
+            self._by_query[query_key] = candidates
+            self._save_cache()
+            self.stats["by_query_fetch"] += 1
+            if not candidates:
+                self.stats["by_query_negative_fetch"] += 1
+            return candidates
 
         def _year_getter(obj: dict[str, Any]) -> int | None:
             released = str(obj.get("released", "") or "").strip()
@@ -436,13 +414,9 @@ class RAWGClient:
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
             f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
-            f"http get={s['http_get']}"
+            f"{HTTPJSONClient.format_timing(s, key='http_get')}"
         )
-        base += (
-            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
-            f" saves={int(s.get('cache_save_count', 0) or 0)}"
-            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
-        )
+        base += f", {CacheIOTracker.format_io(s)}"
         http_429 = int(s.get("http_429", 0) or 0)
         if http_429:
             return (

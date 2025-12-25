@@ -57,7 +57,6 @@ def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
         "CriticRating_Composite_100",
         "Production_Tier",
         "Production_TierReason",
-        "Now_SteamSpyPlayers2Weeks",
         "Now_SteamSpyPlaytimeAvg2Weeks",
         "Now_SteamSpyPlaytimeMedian2Weeks",
         "Now_Composite",

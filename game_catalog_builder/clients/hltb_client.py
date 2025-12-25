@@ -419,7 +419,5 @@ class HLTBClient:
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
             f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
-            f"cache load_ms={int(s.get('cache_load_ms', 0) or 0)} "
-            f"saves={int(s.get('cache_save_count', 0) or 0)} "
-            f"save_ms={int(s.get('cache_save_ms', 0) or 0)}"
+            f"{CacheIOTracker.format_io(s)}"
         )

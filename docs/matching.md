@@ -117,9 +117,12 @@ HLTB searches are slow relative to other providers, so the cache is designed to 
 ## Warnings and manual pinning
 
 - Any non-100% match emits a `WARNING` with alternatives.
-- Import safety: if diagnostics mark a provider as `likely_wrong:<provider>` and there is a strict-majority provider consensus (and the provider is tagged as the outlier), the importer clears that provider ID so enrichment won’t silently use a wrong pin.
-- Optional third pass (`resolve`): can retry repinning after auto-unpin using the majority title and
-  cached aliases (Wikidata aliases / IGDB alternative names). This is off by default.
+- `import` does not auto-unpin; it emits warnings and writes `ReviewTags`/`MatchConfidence` so you can pin IDs manually.
+- Optional third pass (`resolve`): if a pinned ID is tagged as likely wrong (strict-majority consensus + outlier),
+  it attempts a single conservative repin; if no safe repin candidate exists, it unpins. It also supports
+  optionally filling missing IDs when a strict consensus exists (`--retry-missing`).
+
+`resolve` is dry-run by default; pass `--apply` to write changes back to the catalog CSV.
 - When a match is wrong or ambiguous, pin the provider ID in `data/input/Games_Catalog.csv` rather than changing your original `Name` unless the rename is truly canonical for you.
 - Import diagnostics (`ReviewTags`) also include a few conservative cross-provider checks when cached details are available:
   - `year_disagree` (RAWG vs IGDB)

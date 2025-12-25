@@ -6,13 +6,11 @@ from typing import Any
 
 import requests
 
-from ..config import REQUEST, RETRY, STEAMSPY
+from ..config import RETRY, STEAMSPY
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
-    network_failures_count,
-    raise_on_new_network_failure,
-    with_retries,
 )
 
 STEAMSPY_URL = "https://steamspy.com/api.php"
@@ -25,6 +23,7 @@ class SteamSpyClient:
         min_interval_s: float = STEAMSPY.min_interval_s,
     ):
         self._session = requests.Session()
+        base_http = HTTPJSONClient(self._session, stats=None)
         self.cache_path = Path(cache_path)
         self.stats: dict[str, int] = {
             "by_id_hit": 0,
@@ -34,6 +33,7 @@ class SteamSpyClient:
             # HTTP request counters (attempts, including retries).
             "http_get": 0,
         }
+        base_http.stats = self.stats
         self._cache_io = CacheIOTracker(self.stats)
         raw = self._cache_io.load_json(self.cache_path)
         if isinstance(raw, dict) and isinstance(raw.get("by_id"), dict):
@@ -47,6 +47,15 @@ class SteamSpyClient:
             )
             self.cache = {}
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
+        self._http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.ratelimiter,
+                retries=RETRY.retries,
+                counter_key="http_get",
+                context_prefix="SteamSpy",
+            ),
+        )
 
     def _save_cache(self) -> None:
         self._cache_io.save_json({"by_id": self.cache}, self.cache_path)
@@ -64,29 +73,15 @@ class SteamSpyClient:
                 return None
             self.stats["by_id_hit"] += 1
             return self._extract_fields(cached)
-
-        def _request():
-            self.ratelimiter.wait()
-            self.stats["http_get"] += 1
-            r = self._session.get(
-                STEAMSPY_URL,
-                params={
-                    "request": "appdetails",
-                    "appid": appid,
-                },
-                timeout=REQUEST.timeout_s,
-            )
-            r.raise_for_status()
-            return r.json()
-
-        before_net = network_failures_count(self.stats)
-        data = with_retries(
-            _request, retries=RETRY.retries, on_fail_return=None, retry_stats=self.stats
+        data = self._http.get_json(
+            STEAMSPY_URL,
+            params={
+                "request": "appdetails",
+                "appid": appid,
+            },
+            context=f"appdetails appid={appid}",
+            on_fail_return=None,
         )
-        if data is None:
-            raise_on_new_network_failure(
-                self.stats, before=before_net, context=f"SteamSpy appdetails appid={appid}"
-            )
         if not data or not isinstance(data, dict):
             self.cache[key] = None
             self._save_cache()
@@ -122,8 +117,6 @@ class SteamSpyClient:
             score_100 = ""
         return {
             "SteamSpy_Owners": str(data.get("owners", "")),
-            "SteamSpy_Players": str(data.get("players_forever", "")),
-            "SteamSpy_Players2Weeks": str(data.get("players_2weeks", "")),
             "SteamSpy_CCU": str(data.get("ccu", "")),
             "SteamSpy_PlaytimeAvg": str(data.get("average_forever", "")),
             "SteamSpy_PlaytimeAvg2Weeks": str(data.get("average_2weeks", "")),
@@ -138,13 +131,9 @@ class SteamSpyClient:
         base = (
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
             f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
-            f"http get={s['http_get']}"
+            f"{HTTPJSONClient.format_timing(s, key='http_get')}"
         )
-        base += (
-            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
-            f" saves={int(s.get('cache_save_count', 0) or 0)}"
-            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
-        )
+        base += f", {CacheIOTracker.format_io(s)}"
         http_429 = int(s.get("http_429", 0) or 0)
         if http_429:
             return (

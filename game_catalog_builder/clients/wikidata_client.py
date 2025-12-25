@@ -8,14 +8,15 @@ from typing import Any
 
 import requests
 
-from ..config import MATCHING, REQUEST, RETRY, WIKIDATA
+from ..config import MATCHING, RETRY, WIKIDATA
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
+    IDENTITY_NOT_FOUND,
     fuzzy_score,
     iter_chunks,
     pick_best_match,
-    with_retries,
 )
 from ..config import CACHE
 
@@ -45,6 +46,7 @@ class WikidataClient:
         # Use a persistent session to avoid paying TLS handshake + connection setup cost on every
         # request. This matters a lot for label fetches during warm-cache import runs.
         self._session = requests.Session()
+        base_http = HTTPJSONClient(self._session, stats=None)
         self.stats: dict[str, int] = {
             "by_query_hit": 0,
             "by_query_fetch": 0,
@@ -72,7 +74,48 @@ class WikidataClient:
             "cache_save_count": 0,
             "cache_save_ms": 0,
         }
+        base_http.stats = self.stats
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
+        self._sparql_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.ratelimiter,
+                retries=RETRY.retries,
+                counter_key="http_sparql",
+                headers={"User-Agent": USER_AGENT, "Accept": "application/sparql-results+json"},
+                context_prefix="Wikidata SPARQL",
+            ),
+        )
+        self._wbsearch_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.ratelimiter,
+                retries=RETRY.retries,
+                counter_key="http_wbsearchentities",
+                headers={"User-Agent": USER_AGENT},
+                context_prefix="Wikidata wbsearchentities",
+            ),
+        )
+        self._wbgetentities_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.ratelimiter,
+                retries=RETRY.retries,
+                counter_key="http_wbgetentities",
+                headers={"User-Agent": USER_AGENT},
+                context_prefix="Wikidata wbgetentities",
+            ),
+        )
+        self._wbgetentities_labels_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.ratelimiter,
+                retries=RETRY.retries,
+                counter_key="http_wbgetentities_labels",
+                headers={"User-Agent": USER_AGENT},
+                context_prefix="Wikidata wbgetentities(labels)",
+            ),
+        )
         self._by_query: dict[str, list[dict[str, Any]]] = {}
         self._by_hint: dict[str, str] = {}
         self._by_id: dict[str, dict[str, Any]] = {}
@@ -81,7 +124,7 @@ class WikidataClient:
         # This keeps cache-only runs fast and avoids spending minutes retrying the same endpoint.
         self._labels_fetch_disabled = False
         self._by_id_negative: set[str] = set()
-        self._cache_io = CacheIOTracker(self.stats, min_interval_s=CACHE.save_min_interval_large_s)
+        self._cache_io = CacheIOTracker(self.stats, min_interval_s=CACHE.save_min_interval_huge_s)
         self._load_cache(self._cache_io.load_json(self.cache_path))
 
     def _load_cache(self, raw: Any) -> None:
@@ -98,11 +141,9 @@ class WikidataClient:
         if isinstance(raw.get("by_id"), dict):
             self._by_id = {str(k): v for k, v in raw["by_id"].items() if isinstance(v, dict)}
         if isinstance(raw.get("labels"), dict):
-            self._labels = {
-                str(k): str(v).strip()
-                for k, v in raw["labels"].items()
-                if str(k).strip() and str(v).strip()
-            }
+            # Keep empty strings: they are a negative-cache entry meaning "looked up but no
+            # English label available" (so we avoid refetching on every run).
+            self._labels = {str(k): str(v) for k, v in raw["labels"].items() if str(k).strip()}
         if isinstance(raw.get("by_id_negative"), list):
             self._by_id_negative = {str(x) for x in raw["by_id_negative"] if str(x).strip()}
 
@@ -136,34 +177,19 @@ class WikidataClient:
         }}
         LIMIT 10
         """.strip()
-
-        def _request():
-            self.ratelimiter.wait()
-            self.stats["http_sparql"] += 1
-            r = self._session.get(
+        try:
+            data = self._sparql_http.get_json(
                 WIKIDATA_SPARQL_URL,
                 params={"format": "json", "query": query},
-                timeout=REQUEST.timeout_s,
-                headers={"User-Agent": USER_AGENT, "Accept": "application/sparql-results+json"},
+                context=f"prop={p} value={v}",
+                on_fail_return=None,
             )
-            r.raise_for_status()
-            return r.json()
-
-        data = with_retries(
-            _request,
-            retries=RETRY.retries,
-            on_fail_return=None,
-            context=f"Wikidata SPARQL prop={p} value={v}",
-            retry_stats=self.stats,
-        )
+        except RuntimeError as e:
+            raise RuntimeError(
+                "Wikidata request failed due to network issues (SPARQL). "
+                "Enable internet access or rerun with a warm cache."
+            ) from e
         if not isinstance(data, dict):
-            # If a network failure occurred, abort the operation instead of silently turning
-            # this into "not found" results.
-            if int(self.stats.get("network_failures", 0) or 0) > 0:
-                raise RuntimeError(
-                    "Wikidata request failed due to network issues (SPARQL). "
-                    "Enable internet access or rerun with a warm cache."
-                )
             return []
         results = (data.get("results") or {}).get("bindings") or []
         if not isinstance(results, list):
@@ -245,10 +271,8 @@ class WikidataClient:
                 self.stats["by_query_negative_hit"] += 1
             return cached
 
-        def _request():
-            self.ratelimiter.wait()
-            self.stats["http_wbsearchentities"] += 1
-            r = self._session.get(
+        try:
+            data = self._wbsearch_http.get_json(
                 WIKIDATA_API_URL,
                 params={
                     "action": "wbsearchentities",
@@ -257,28 +281,18 @@ class WikidataClient:
                     "limit": WIKIDATA.search_limit,
                     "format": "json",
                 },
-                timeout=REQUEST.timeout_s,
-                headers={"User-Agent": USER_AGENT},
+                context="",
+                on_fail_return=None,
             )
-            r.raise_for_status()
-            return r.json()
-
-        data = with_retries(
-            _request,
-            retries=RETRY.retries,
-            on_fail_return=None,
-            context="Wikidata search",
-            retry_stats=self.stats,
-        )
+        except RuntimeError as e:
+            raise RuntimeError(
+                "Wikidata request failed due to network issues (search). "
+                "Enable internet access or rerun with a warm cache."
+            ) from e
         if data is None:
             logging.warning(
                 f"Wikidata search request failed for '{q}' (no response); not caching as not-found."
             )
-            if int(self.stats.get("network_failures", 0) or 0) > 0:
-                raise RuntimeError(
-                    "Wikidata request failed due to network issues (search). "
-                    "Enable internet access or rerun with a warm cache."
-                )
             return []
         if not isinstance(data, dict):
             self._by_query[query_key] = []
@@ -292,7 +306,12 @@ class WikidataClient:
         return items
 
     def _get_entities(
-        self, qids: list[str], *, props: str, purpose: str = "entities"
+        self,
+        qids: list[str],
+        *,
+        props: str,
+        purpose: str = "entities",
+        sitefilter: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """
         Fetch multiple entities in a single call.
@@ -300,41 +319,29 @@ class WikidataClient:
         ids = [q for q in qids if str(q).strip()]
         if not ids:
             return {}
-
-        def _request():
-            self.ratelimiter.wait()
-            if purpose == "labels":
-                self.stats["http_wbgetentities_labels"] += 1
-            else:
-                self.stats["http_wbgetentities"] += 1
-            r = self._session.get(
+        counter_key = "http_wbgetentities_labels" if purpose == "labels" else "http_wbgetentities"
+        http = self._wbgetentities_labels_http if purpose == "labels" else self._wbgetentities_http
+        try:
+            data = http.get_json(
                 WIKIDATA_API_URL,
                 params={
                     "action": "wbgetentities",
                     "ids": "|".join(ids),
                     "props": props,
                     "languages": "en",
+                    **({"sitefilter": sitefilter} if sitefilter else {}),
                     "format": "json",
                 },
-                timeout=REQUEST.timeout_s,
-                headers={"User-Agent": USER_AGENT},
+                counter_key=counter_key,
+                context="",
+                on_fail_return=None,
             )
-            r.raise_for_status()
-            return r.json()
-
-        data = with_retries(
-            _request,
-            retries=RETRY.retries,
-            on_fail_return=None,
-            context="Wikidata wbgetentities",
-            retry_stats=self.stats,
-        )
+        except RuntimeError as e:
+            raise RuntimeError(
+                "Wikidata request failed due to network issues (wbgetentities). "
+                "Enable internet access or rerun with a warm cache."
+            ) from e
         if not isinstance(data, dict):
-            if int(self.stats.get("network_failures", 0) or 0) > 0:
-                raise RuntimeError(
-                    "Wikidata request failed due to network issues (wbgetentities). "
-                    "Enable internet access or rerun with a warm cache."
-                )
             return {}
         entities = data.get("entities") or {}
         if not isinstance(entities, dict):
@@ -379,7 +386,12 @@ class WikidataClient:
         self.stats["labels_hit"] += len(ids) - len(missing)
         updated = False
         for chunk in iter_chunks(missing, WIKIDATA.labels_batch_size):
-            entities = self._get_entities(chunk, props="labels", purpose="labels")
+            # Some linked entities (notably platform items) may lack an English label but still have
+            # an English Wikipedia sitelink; include sitelinks so we can use enwiki title as a
+            # stable fallback label.
+            entities = self._get_entities(
+                chunk, props="labels|sitelinks", purpose="labels", sitefilter="enwiki"
+            )
             if not entities and chunk:
                 # Network is likely unavailable; stop trying for the remainder of this run and fail
                 # fast to avoid producing partially-resolved metadata.
@@ -389,9 +401,18 @@ class WikidataClient:
                     "Enable internet access or rerun with a warm cache."
                 )
             for k, v in entities.items():
+                qid = str(k).strip()
+                if not qid:
+                    continue
                 lbl = str((v.get("labels") or {}).get("en", {}).get("value") or "").strip()
-                if lbl:
-                    self._labels[str(k)] = lbl
+                if not lbl:
+                    enwiki_title = (
+                        ((v.get("sitelinks") or {}).get("enwiki") or {}).get("title") or ""
+                    )
+                    lbl = str(enwiki_title).strip().replace("_", " ")
+                prev = self._labels.get(qid)
+                if prev is None or (prev in {"", IDENTITY_NOT_FOUND} and lbl):
+                    self._labels[qid] = lbl if lbl else IDENTITY_NOT_FOUND
                     updated = True
         self.stats["labels_fetch"] += len(missing)
         if updated:
@@ -959,14 +980,12 @@ class WikidataClient:
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
             f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
             f"labels hit={s['labels_hit']} fetch={s['labels_fetch']}, "
-            f"http search={s['http_wbsearchentities']} getentities={s['http_wbgetentities']} "
-            f"labels={s['http_wbgetentities_labels']} sparql={s['http_sparql']}"
+            f"{HTTPJSONClient.format_timing(s, key='http_wbsearchentities')} "
+            f"{HTTPJSONClient.format_timing(s, key='http_wbgetentities')} "
+            f"{HTTPJSONClient.format_timing(s, key='http_wbgetentities_labels')} "
+            f"{HTTPJSONClient.format_timing(s, key='http_sparql')}"
         )
-        base += (
-            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
-            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
-            f" saves={int(s.get('cache_save_count', 0) or 0)}"
-        )
+        base += f", {CacheIOTracker.format_io(s)}"
         http_429 = int(s.get("http_429", 0) or 0)
         if http_429:
             return (

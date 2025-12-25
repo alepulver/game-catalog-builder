@@ -8,17 +8,15 @@ from typing import Any
 
 import requests
 
-from ..config import MATCHING, REQUEST, RETRY, STEAM
+from ..config import MATCHING, RETRY, STEAM
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
     extract_year_hint,
     iter_chunks,
-    network_failures_count,
     normalize_game_name,
     pick_best_match,
-    raise_on_new_network_failure,
-    with_retries,
 )
 
 STEAM_SEARCH_URL = "https://store.steampowered.com/api/storesearch"
@@ -33,6 +31,7 @@ class SteamClient:
         min_interval_s: float = STEAM.storesearch_min_interval_s,
     ):
         self._session = requests.Session()
+        base_http = HTTPJSONClient(self._session, stats=None)
         self.cache_path = Path(cache_path)
         self.stats: dict[str, int] = {
             "by_query_hit": 0,
@@ -52,6 +51,7 @@ class SteamClient:
             "http_appdetails": 0,
             "http_packagedetails": 0,
         }
+        base_http.stats = self.stats
         # Cache search results by exact query (list of {id,name,type}).
         self._by_query: dict[str, list[dict[str, Any]]] = {}
         # Cache raw appdetails payloads keyed by appid.
@@ -67,6 +67,35 @@ class SteamClient:
         self.storesearch_ratelimiter = RateLimiter(min_interval_s=min_interval_s)
         self.appdetails_ratelimiter = RateLimiter(
             min_interval_s=max(min_interval_s, STEAM.appdetails_min_interval_s)
+        )
+        self._storesearch_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.storesearch_ratelimiter,
+                retries=RETRY.retries,
+                counter_key="http_storesearch",
+                context_prefix="Steam storesearch",
+            ),
+        )
+        self._appdetails_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.appdetails_ratelimiter,
+                retries=RETRY.retries,
+                base_sleep_s=max(2.0, RETRY.base_sleep_s),
+                counter_key="http_appdetails",
+                context_prefix="Steam appdetails",
+            ),
+        )
+        self._packagedetails_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.appdetails_ratelimiter,
+                retries=RETRY.retries,
+                base_sleep_s=max(2.0, RETRY.base_sleep_s),
+                counter_key="http_packagedetails",
+                context_prefix="Steam packagedetails",
+            ),
         )
 
     def _load_cache(self, raw: Any) -> None:
@@ -132,28 +161,12 @@ class SteamClient:
         if isinstance(cached, dict):
             self.stats["by_package_hit"] += 1
             return cached
-
-        def _request():
-            self.appdetails_ratelimiter.wait()
-            self.stats["http_packagedetails"] += 1
-            url = f"{STEAM_PACKAGEDETAILS_URL}?packageids={packageid}&l=english&cc=us"
-            r = self._session.get(url, timeout=REQUEST.timeout_s)
-            r.raise_for_status()
-            return r.json()
-
-        before_net = network_failures_count(self.stats)
-        data = with_retries(
-            _request,
-            retries=RETRY.retries,
-            base_sleep_s=max(2.0, RETRY.base_sleep_s),
+        url = f"{STEAM_PACKAGEDETAILS_URL}?packageids={packageid}&l=english&cc=us"
+        data = self._packagedetails_http.get_json(
+            url,
+            context=f"packageid={packageid}",
             on_fail_return=None,
-            context=f"Steam packagedetails packageid={packageid}",
-            retry_stats=self.stats,
         )
-        if data is None:
-            raise_on_new_network_failure(
-                self.stats, before=before_net, context=f"Steam packagedetails packageid={packageid}"
-            )
         if not isinstance(data, dict):
             return None
         entry = data.get(str(packageid))
@@ -228,34 +241,16 @@ class SteamClient:
             query_key = f"l:english|cc:US|term:{term}"
             cached_items = self._by_query.get(query_key)
             if cached_items is None:
-                before_net = network_failures_count(self.stats)
-
-                def _request(term=term):
-                    self.storesearch_ratelimiter.wait()
-                    self.stats["http_storesearch"] += 1
-                    r = self._session.get(
-                        STEAM_SEARCH_URL,
-                        params={
-                            "term": term,
-                            "l": "english",
-                            "cc": "US",
-                        },
-                        timeout=REQUEST.timeout_s,
-                    )
-                    r.raise_for_status()
-                    return r.json()
-
-                data = with_retries(
-                    _request,
-                    retries=RETRY.retries,
+                data = self._storesearch_http.get_json(
+                    STEAM_SEARCH_URL,
+                    params={
+                        "term": term,
+                        "l": "english",
+                        "cc": "US",
+                    },
+                    context=f"term={term!r}",
                     on_fail_return=None,
-                    context=f"Steam storesearch term={term!r}",
-                    retry_stats=self.stats,
                 )
-                if data is None:
-                    raise_on_new_network_failure(
-                        self.stats, before=before_net, context=f"Steam storesearch term={term!r}"
-                    )
                 if isinstance(data, dict):
                     cached_items = [it for it in (data.get("items") or []) if isinstance(it, dict)]
                     # Cache empty results too (negative cache) by query key.
@@ -718,35 +713,15 @@ class SteamClient:
 
         def _fetch_chunk(chunk: list[int]) -> dict[str, Any] | None:
             ids = ",".join(str(i) for i in chunk)
-            before_net = network_failures_count(self.stats)
-
-            def _request():
-                self.appdetails_ratelimiter.wait()
-                self.stats["http_appdetails"] += 1
-                # Steam's appdetails endpoint does not reliably accept URL-encoded commas in the
-                # `appids` query param. Build the query string manually to keep commas literal.
-                url = f"{STEAM_APPDETAILS_URL}?appids={ids}&l=english&cc=us"
-                r = self._session.get(url, timeout=REQUEST.timeout_s)
-                # Some Steam IDs in the wild are not appids (e.g. package ids) and the endpoint
-                # can respond with 400 for multi-id requests. Treat 400 as a non-retriable miss
-                # (and for batches, fall back to single-id requests to salvage valid entries).
-                if r.status_code == 400:
-                    return {"__status": 400}
-                r.raise_for_status()
-                return {"__status": 200, "__data": r.json()}
-
-            got = with_retries(
-                _request,
-                retries=RETRY.retries,
-                base_sleep_s=max(2.0, RETRY.base_sleep_s),
+            # Steam's appdetails endpoint does not reliably accept URL-encoded commas in the
+            # `appids` query param. Build the query string manually to keep commas literal.
+            url = f"{STEAM_APPDETAILS_URL}?appids={ids}&l=english&cc=us"
+            got = self._appdetails_http.get_json(
+                url,
+                status_handlers={400: {"__status": 400}},
+                context=f"appids={ids}",
                 on_fail_return=None,
-                context=f"Steam appdetails appids={ids}",
-                retry_stats=self.stats,
             )
-            if got is None:
-                raise_on_new_network_failure(
-                    self.stats, before=before_net, context=f"Steam appdetails appids={ids}"
-                )
             if not isinstance(got, dict):
                 return None
             status = got.get("__status")
@@ -760,7 +735,7 @@ class SteamClient:
                     return merged
                 logging.warning(f"Steam appdetails rejected appid={ids} (HTTP 400); skipping")
                 return {}
-            return got.get("__data") if status == 200 else None
+            return got if status is None else None
 
         # Fetch missing IDs in small chunks to keep response sizes reasonable.
         wrote_negative = False
@@ -804,14 +779,11 @@ class SteamClient:
             f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
             f"by_package hit={s['by_package_hit']} fetch={s['by_package_fetch']} "
             f"(neg hit={s['by_package_negative_hit']} fetch={s['by_package_negative_fetch']}), "
-            f"http storesearch={s['http_storesearch']} appdetails={s['http_appdetails']} "
-            f"packagedetails={s['http_packagedetails']}"
+            f"{HTTPJSONClient.format_timing(s, key='http_storesearch')} "
+            f"{HTTPJSONClient.format_timing(s, key='http_appdetails')} "
+            f"{HTTPJSONClient.format_timing(s, key='http_packagedetails')}"
         )
-        base += (
-            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
-            f" saves={int(s.get('cache_save_count', 0) or 0)}"
-            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
-        )
+        base += f", {CacheIOTracker.format_io(s)}"
         http_429 = int(s.get("http_429", 0) or 0)
         if http_429:
             return (
@@ -895,7 +867,6 @@ class SteamClient:
             "Steam_Platforms": ", ".join(platform_names),
             "Steam_Tags": ", ".join(genres),
             "Steam_ReviewCount": str(review_count),
-            "Steam_ReviewPercent": "",  # Steam doesn't expose this directly without extra scraping
             "Steam_Price": price,
             "Steam_Categories": ", ".join(categories),
             "Steam_Metacritic": str(metacritic_score),

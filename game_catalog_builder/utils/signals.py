@@ -407,8 +407,7 @@ def apply_phase1_signals(
     out["Reach_IGDBRatingCount"] = out.get("IGDB_RatingCount", "")
     out["Reach_IGDBAggregatedRatingCount"] = out.get("IGDB_AggregatedRatingCount", "")
 
-    # --- Now (current interest): SteamSpy 2-week activity ---
-    out["Now_SteamSpyPlayers2Weeks"] = out.get("SteamSpy_Players2Weeks", "")
+    # --- Now (current interest): SteamSpy activity proxies ---
     out["Now_SteamSpyPlaytimeAvg2Weeks"] = out.get("SteamSpy_PlaytimeAvg2Weeks", "")
     out["Now_SteamSpyPlaytimeMedian2Weeks"] = out.get("SteamSpy_PlaytimeMedian2Weeks", "")
 
@@ -416,15 +415,6 @@ def apply_phase1_signals(
     now_comp: list[str] = []
     for _, r in out.iterrows():
         pairs: list[tuple[float, float]] = []
-
-        players2w = _parse_int(r.get("SteamSpy_Players2Weeks", ""))
-        players2w_score = _log_scale_0_100(
-            players2w,
-            log10_min=SIGNALS.now_players2w_log10_min,
-            log10_max=SIGNALS.now_players2w_log10_max,
-        )
-        if players2w_score is not None:
-            pairs.append((players2w_score, SIGNALS.w_players2w))
 
         ccu = _parse_int(r.get("SteamSpy_CCU", ""))
         ccu_score = _log_scale_0_100(

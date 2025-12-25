@@ -41,7 +41,6 @@ def test_apply_phase1_signals_adds_composites_and_reach_columns() -> None:
                 "SteamSpy_Positive": "90",
                 "SteamSpy_Negative": "10",
                 "Score_SteamSpy_100": "90",
-                "SteamSpy_Players2Weeks": "123",
                 "SteamSpy_PlaytimeAvg2Weeks": "15",
                 "SteamSpy_PlaytimeMedian2Weeks": "7",
                 "RAWG_Rating": "4.0",
@@ -72,7 +71,6 @@ def test_apply_phase1_signals_adds_composites_and_reach_columns() -> None:
     assert row["Reach_IGDBRatingCount"] == "10"
     assert row["Reach_IGDBAggregatedRatingCount"] == "55"
 
-    assert row["Now_SteamSpyPlayers2Weeks"] == "123"
     assert row["Now_SteamSpyPlaytimeAvg2Weeks"] == "15"
     assert row["Now_SteamSpyPlaytimeMedian2Weeks"] == "7"
 

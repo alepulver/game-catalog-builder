@@ -730,11 +730,27 @@ class CacheIOTracker:
         save_json_cache(cache, path)
         t1 = time.perf_counter()
         self._last_save_s = time.monotonic()
+        dur_ms = int(round((t1 - t0) * 1000.0))
         self.stats[f"{self.prefix}_save_count"] = int(
             self.stats.get(f"{self.prefix}_save_count", 0) or 0
         ) + 1
-        self.stats[f"{self.prefix}_save_ms"] = int(self.stats.get(f"{self.prefix}_save_ms", 0) or 0) + int(
-            round((t1 - t0) * 1000.0)
+        self.stats[f"{self.prefix}_save_ms"] = int(self.stats.get(f"{self.prefix}_save_ms", 0) or 0) + dur_ms
+
+        slow_ms = int(getattr(CACHE, "slow_save_log_ms", 0) or 0)
+        if slow_ms > 0 and dur_ms >= slow_ms:
+            logging.info(f"[CACHE] Wrote '{path.name}' in {dur_ms}ms")
+
+    @staticmethod
+    def format_io(stats: dict[str, Any] | None, *, prefix: str = "cache") -> str:
+        if not stats:
+            return "cache load_ms=0 saves=0 save_ms=0"
+        load_ms = int(stats.get(f"{prefix}_load_ms", 0) or 0)
+        save_count = int(stats.get(f"{prefix}_save_count", 0) or 0)
+        save_ms = int(stats.get(f"{prefix}_save_ms", 0) or 0)
+        return (
+            f"{prefix} load_ms={load_ms} "
+            f"saves={save_count} "
+            f"save_ms={save_ms}"
         )
 
 
@@ -798,97 +814,4 @@ def load_credentials(credentials_path: str | Path | None = None) -> dict[str, An
         return yaml.safe_load(f) or {}
 
 
-# ----------------------------
-# Default public columns (for merges)
-# ----------------------------
-
-PUBLIC_DEFAULT_COLS: dict[str, Any] = {
-    # Stable input row key
-    "RowId": "",
-    # RAWG
-    "RAWG_ID": "",
-    "RAWG_Name": "",
-    "RAWG_Released": "",
-    "RAWG_Year": "",
-    "RAWG_Website": "",
-    "RAWG_DescriptionRaw": "",
-    "RAWG_Genre": "",
-    "RAWG_Genre2": "",
-    "RAWG_Genres": "",
-    "RAWG_Platforms": "",
-    "RAWG_Tags": "",
-    "RAWG_ESRB": "",
-    "RAWG_Rating": "",
-    "Score_RAWG_100": "",
-    "RAWG_RatingsCount": "",
-    "RAWG_Metacritic": "",
-    # IGDB
-    "IGDB_ID": "",
-    "IGDB_Name": "",
-    "IGDB_Year": "",
-    "IGDB_Summary": "",
-    "IGDB_Websites": "",
-    "IGDB_Platforms": "",
-    "IGDB_Genres": "",
-    "IGDB_Themes": "",
-    "IGDB_GameModes": "",
-    "IGDB_Perspectives": "",
-    "IGDB_Franchise": "",
-    "IGDB_Engine": "",
-    "IGDB_ParentGame": "",
-    "IGDB_VersionParent": "",
-    "IGDB_DLCs": "",
-    "IGDB_Expansions": "",
-    "IGDB_Ports": "",
-    "IGDB_Companies": "",
-    "IGDB_SteamAppID": "",
-    "IGDB_Rating": "",
-    "IGDB_RatingCount": "",
-    "Score_IGDB_100": "",
-    "IGDB_AggregatedRating": "",
-    "IGDB_AggregatedRatingCount": "",
-    "Score_IGDBCritic_100": "",
-    # Steam
-    "Steam_AppID": "",
-    "Steam_Name": "",
-    "Steam_URL": "",
-    "Steam_Website": "",
-    "Steam_ShortDescription": "",
-    "Steam_StoreType": "",
-    "Steam_ReleaseYear": "",
-    "Steam_Platforms": "",
-    "Steam_Tags": "",
-    "Steam_ReviewCount": "",
-    "Steam_ReviewPercent": "",
-    "Steam_Price": "",
-    "Steam_Categories": "",
-    "Steam_Metacritic": "",
-    # SteamSpy
-    "SteamSpy_Owners": "",
-    "SteamSpy_Players": "",
-    "SteamSpy_Players2Weeks": "",
-    "SteamSpy_CCU": "",
-    "SteamSpy_PlaytimeAvg": "",
-    "SteamSpy_PlaytimeAvg2Weeks": "",
-    "SteamSpy_PlaytimeMedian2Weeks": "",
-    "SteamSpy_Positive": "",
-    "SteamSpy_Negative": "",
-    "Score_SteamSpy_100": "",
-    # HLTB
-    "HLTB_Name": "",
-    "HLTB_Main": "",
-    "HLTB_Extra": "",
-    "HLTB_Completionist": "",
-    "Score_HLTB_100": "",
-    # Wikidata
-    "Wikidata_QID": "",
-    "Wikidata_Label": "",
-    "Wikidata_Description": "",
-    "Wikidata_ReleaseYear": "",
-    "Wikidata_Developers": "",
-    "Wikidata_Publishers": "",
-    "Wikidata_Platforms": "",
-    "Wikidata_Series": "",
-    "Wikidata_Genres": "",
-    "Wikidata_Wikipedia": "",
-}
+from ..schema import PUBLIC_DEFAULT_COLS

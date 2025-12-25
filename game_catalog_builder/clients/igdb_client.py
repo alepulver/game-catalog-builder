@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,20 +11,19 @@ from typing import Any
 import requests
 
 from ..config import IGDB, MATCHING, REQUEST, RETRY
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
     extract_year_hint,
     iter_chunks,
-    network_failures_count,
     normalize_game_name,
     pick_best_match,
-    raise_on_new_network_failure,
-    with_retries,
 )
 
 TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 IGDB_API_URL = "https://api.igdb.com/v4"
+_IGDB_BAD_REQUEST = object()
 
 
 class IGDBClient:
@@ -36,6 +36,7 @@ class IGDBClient:
         min_interval_s: float = IGDB.min_interval_s,
     ):
         self._session = requests.Session()
+        base_http = HTTPJSONClient(self._session, stats=None)
         self.client_id = client_id
         self.client_secret = client_secret
         self.language = (language or "en").strip() or "en"
@@ -53,6 +54,7 @@ class IGDBClient:
             "http_oauth_token": 0,
             "http_post": 0,
         }
+        base_http.stats = self.stats
         # Cache raw IGDB game payloads keyed by id (language:id). Derived output fields are
         # computed on-demand to keep caches independent of code changes.
         self._by_id: dict[str, Any] = {}
@@ -62,6 +64,15 @@ class IGDBClient:
         self._cache_io = CacheIOTracker(self.stats)
         self._load_cache(self._cache_io.load_json(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
+        self._post_http = ConfiguredHTTPJSONClient(
+            base_http,
+            HTTPRequestDefaults(
+                ratelimiter=self.ratelimiter,
+                retries=RETRY.retries,
+                counter_key="http_post",
+                context_prefix="IGDB POST",
+            ),
+        )
 
         self._token: str | None = None
         # Token is acquired lazily on first API request. This allows cached-only re-runs to work
@@ -101,26 +112,18 @@ class IGDBClient:
     # Helpers IGDB
     # -------------------------------------------------
     def _post(self, endpoint: str, query: str):
-        def _request():
-            self._ensure_token()
-            self.ratelimiter.wait()
-            self.stats["http_post"] += 1
-            r = self._session.post(
-                f"{IGDB_API_URL}/{endpoint}",
-                headers=self._headers(),
-                data=query,
-                timeout=REQUEST.timeout_s,
-            )
-            r.raise_for_status()
-            return r.json()
-
-        return with_retries(
-            _request,
-            retries=RETRY.retries,
+        self._ensure_token()
+        resp = self._post_http.post_json(
+            f"{IGDB_API_URL}/{endpoint}",
+            headers=self._headers(),
+            data=query,
+            status_handlers={400: _IGDB_BAD_REQUEST},
+            context=f"/{endpoint}",
             on_fail_return=None,
-            context=f"IGDB POST /{endpoint}",
-            retry_stats=self.stats,
         )
+        if resp is _IGDB_BAD_REQUEST:
+            logging.error(f"[HTTP] IGDB POST: /{endpoint}: 400 Bad Request (query rejected)")
+        return resp
 
     def _post_cached(self, endpoint: str, query: str) -> Any:
         qkey = f"{self.language}:{endpoint}:{query.strip()}"
@@ -131,10 +134,8 @@ class IGDBClient:
                 self.stats["by_query_negative_hit"] += 1
             return cached
 
-        before_net = network_failures_count(self.stats)
         data = self._post(endpoint, query)
         if data is None:
-            raise_on_new_network_failure(self.stats, before=before_net, context=f"IGDB POST /{endpoint}")
             return None
         if not isinstance(data, list):
             return data
@@ -298,11 +299,14 @@ class IGDBClient:
             toks = normalize_game_name(name).split()
             out: set[int] = set()
             for t in toks:
-                if not t.isdigit():
+                if not t.isdecimal():
                     continue
                 if len(t) > 1 and t.startswith("0"):
                     continue
-                n = int(t)
+                try:
+                    n = int(t)
+                except ValueError:
+                    continue
                 if n == 0:
                     continue
                 if 1900 <= n <= 2100:
@@ -386,6 +390,12 @@ class IGDBClient:
         # IGDB search is often more reliable without a trailing year token; prefer a stripped
         # query, but keep the original name for cache keys and logging.
         search_text = stripped_name or str(game_name or "").strip()
+        # Normalize to NFKC to avoid odd Unicode digits (e.g. "²" -> "2") and compatibility chars.
+        search_text = unicodedata.normalize("NFKC", search_text)
+        # Remove control characters (including uncommon unicode separators) to avoid query errors.
+        search_text = "".join(
+            (" " if unicodedata.category(ch).startswith("C") else ch) for ch in search_text
+        )
         # IGDB uses a query DSL with `search "..."`; escape quotes/backslashes and strip control
         # characters to avoid 400s for odd titles.
         search_text = search_text.replace("\\", "\\\\").replace('"', '\\"')
@@ -445,6 +455,22 @@ class IGDBClient:
             limit {IGDB.search_limit};
             '''
             data = self._post_cached("games", query)
+        if data is _IGDB_BAD_REQUEST:
+            # Fallback: try a simpler normalized term to avoid DSL parsing issues.
+            fallback = normalize_game_name(stripped_name or str(game_name or "")).strip()
+            fallback = unicodedata.normalize("NFKC", fallback)
+            fallback = "".join(
+                (" " if unicodedata.category(ch).startswith("C") else ch) for ch in fallback
+            )
+            fallback = fallback.replace("\\", "\\\\").replace('"', '\\"')
+            fallback = re.sub(r"[\r\n\t]+", " ", fallback).strip()
+            if fallback and fallback != search_text:
+                query = f'''
+                search "{fallback}";
+                {base_fields}
+                limit {IGDB.search_limit};
+                '''
+                data = self._post_cached("games", query)
         if data is None:
             logging.warning(
                 f"IGDB search request failed for '{game_name}' (no response); "
@@ -502,13 +528,9 @@ class IGDBClient:
             f"(neg hit={s['by_query_negative_hit']} fetch={s['by_query_negative_fetch']}), "
             f"by_id hit={s['by_id_hit']} fetch={s['by_id_fetch']} "
             f"(neg hit={s['by_id_negative_hit']} fetch={s['by_id_negative_fetch']}), "
-            f"http oauth={s['http_oauth_token']} post={s['http_post']}"
+            f"http oauth={s['http_oauth_token']} {HTTPJSONClient.format_timing(s, key='http_post')}"
         )
-        base += (
-            f", cache load_ms={int(s.get('cache_load_ms', 0) or 0)}"
-            f" saves={int(s.get('cache_save_count', 0) or 0)}"
-            f" save_ms={int(s.get('cache_save_ms', 0) or 0)}"
-        )
+        base += f", {CacheIOTracker.format_io(s)}"
         http_429 = int(s.get("http_429", 0) or 0)
         if http_429:
             return (

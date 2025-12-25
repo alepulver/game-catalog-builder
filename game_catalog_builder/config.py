@@ -36,6 +36,10 @@ class CacheConfig:
     # A final flush is attempted at process exit.
     save_min_interval_small_s: float = 10.0
     save_min_interval_large_s: float = 60.0
+    # For very large caches (hundreds of MB), writes can still dominate runtime; throttle a bit.
+    save_min_interval_huge_s: float = 60.0
+    # Log cache writes that take longer than this threshold (milliseconds).
+    slow_save_log_ms: int = 2000
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,7 @@ class CLIConfig:
     igdb_flush_batch_size: int = 50
     steam_flush_batch_size: int = 25
     steam_streaming_flush_batch_size: int = 10
+    progress_every_n: int = 25
 
 
 @dataclass(frozen=True)

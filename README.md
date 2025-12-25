@@ -109,15 +109,19 @@ sync only user-editable fields back into the canonical catalog.
 # 1) import: create/update a stable, RowId-based catalog (source of truth) and match provider IDs
 python run.py import path/to/exported_user_sheet.csv --out data/input/Games_Catalog.csv
 
-# 2) enrich: generate provider outputs + an editable enriched sheet (does not modify the catalog)
+# 2) resolve (optional): third pass to repin-or-unpin likely-wrong pins based on diagnostics
+# (dry-run by default; pass --apply to persist changes)
+python run.py resolve --catalog data/input/Games_Catalog.csv --out data/input/Games_Catalog.csv --apply
+
+# 3) enrich: generate provider outputs + an editable enriched sheet (does not modify the catalog)
 python run.py enrich data/input/Games_Catalog.csv --source all
 
-# 3) edit: open `data/output/Games_Enriched.csv` in Google Sheets / Excel and edit your user fields
+# 4) edit: open `data/output/Games_Enriched.csv` in Google Sheets / Excel and edit your user fields
 
-# 4) sync: copy user-editable columns (and pinned provider IDs) back into the catalog by RowId
+# 5) sync: copy user-editable columns (and pinned provider IDs) back into the catalog by RowId
 python run.py sync data/input/Games_Catalog.csv data/output/Games_Enriched.csv
 
-# 5) enrich again (optional): regenerate public data after edits / pinned ID fixes
+# 6) enrich again (optional): regenerate public data after edits / pinned ID fixes
 python run.py enrich data/input/Games_Catalog.csv --source all
 ```
 
@@ -140,10 +144,9 @@ RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must 
 - Metadata outliers: `year_outlier:*`, `platform_outlier:*` (and `*_no_consensus`)
 - Actionable rollups: `likely_wrong:*`, `ambiguous_title_year`
 
-Import safety:
-- If import diagnostics identify a provider as `likely_wrong:<provider>` and there is a strict-majority
-  provider consensus (and the provider is the outlier), the importer clears that provider ID so
-  enrichment won’t silently use a wrong pin.
+Import notes:
+- `import` emits warnings and diagnostics but does not auto-unpin pins.
+- `resolve` is the optional third pass that can repin-or-unpin likely-wrong pins (and conservatively retry repins).
 
 It refreshes match diagnostics by fetching the provider name for any pinned IDs. Evaluation columns
 are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without evaluation

@@ -12,8 +12,9 @@ them without new evidence.
   minimal improvement in pin coverage on this dataset.
 - Decision: do not run “missing provider rescue” retries by default.
 
-Note: we do keep a narrow, safer retry: after an **auto-unpin** (strict majority consensus + outlier),
-the importer may attempt a single retry for that provider using the majority title and known aliases.
+Note: we do keep a narrow, safer retry: when a pin is tagged as likely wrong (strict majority consensus + outlier),
+the `resolve` pass attempts a single retry for that provider using the majority title and known aliases; if the retry
+does not meet the repin gate, it unpins.
 
 ### Wikipedia search as an automatic alias source
 - Idea: use Wikipedia search/redirects to source alternate titles, then retry provider searches.
