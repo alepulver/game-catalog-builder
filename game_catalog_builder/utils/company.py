@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Any
 
 _LEGAL_SUFFIX_RE = re.compile(
@@ -11,6 +12,7 @@ _LEGAL_SUFFIX_RE = re.compile(
         inc\.?|incorporated|llc|l\.l\.c\.|ltd\.?|limited|corp\.?|corporation|
         co\.?|company|gmbh|s\.a\.|s\.a|s\.r\.l\.|s\.r\.l|s\.p\.a\.|s\.p\.a|
         a/s|a\.s\.|ag|bv|oy|oyj|kg|k\.g\.|pte\.?\s+ltd\.?|
+        lda\.?|pty\.?(?:\s+ltd\.?)?|
         co\.,?\s*ltd\.?|co\.,?\s*limited|co\.,?\s*ltd
     )\s*$
     """
@@ -35,6 +37,21 @@ _GENERIC_SUFFIX_TOKENS = {
     "productions",
 }
 
+# Split multi-company strings (conservative): commas and slashes cover the common cases
+# ("Ubisoft Montreal, Massive Entertainment, Ubisoft Shanghai") without breaking legitimate
+# single-company names like "Running With Scissors" or "Power and Magic Development".
+
+def iter_company_name_variants(value: str) -> list[str]:
+    """
+    Return a small set of plausible company-name variants for tier matching:
+    - normalized original string
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    n0 = normalize_company_name(raw)
+    return [n0] if n0 else []
+
 
 def normalize_company_name(value: Any) -> str:
     """
@@ -54,6 +71,9 @@ def normalize_company_name(value: Any) -> str:
         prev = s
         s = _LEGAL_SUFFIX_RE.sub("", s).strip().rstrip(",").strip()
     s = _SPACE_RE.sub(" ", s).strip()
+    # Ignore labels that are effectively numeric/garbage (e.g. "2015", "3909", "2.21").
+    if not re.search(r"[A-Za-z]", s):
+        return ""
     return s
 
 
@@ -67,6 +87,10 @@ def company_key(value: Any) -> str:
     s = normalize_company_name(value)
     if not s:
         return ""
+    # Drop trademark/registered symbols before normalization so they don't affect the key.
+    s = s.replace("™", "").replace("®", "").replace("℠", "")
+    # Fold accents so "Montréal" and "Montreal" compare equal.
+    s = "".join(ch for ch in unicodedata.normalize("NFKD", s) if not unicodedata.combining(ch))
     # collapse punctuation to spaces, then compact.
     s = _KEY_CLEAN_RE.sub(" ", s).strip()
     s = _SPACE_RE.sub(" ", s).strip()

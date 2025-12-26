@@ -163,6 +163,7 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
         "SteamSpy_PlaytimeMedian2Weeks": "",
         "SteamSpy_Positive": "",
         "SteamSpy_Negative": "",
+        "SteamSpy_PositiveRate": "",
         "Score_SteamSpy_100": "",
     }
 
@@ -312,8 +313,8 @@ def test_wikidata_extract_fields_fixture(tmp_path) -> None:
     assert fields["Wikidata_Label"] == "Doom"
     assert fields["Wikidata_Description"] == "1993 video game"
     assert fields["Wikidata_ReleaseYear"] == "1993"
-    assert fields["Wikidata_Developers"] == "id Software"
-    assert fields["Wikidata_Publishers"] == "GT Interactive"
+    assert fields["Wikidata_Developers"] == '["id Software"]'
+    assert fields["Wikidata_Publishers"] == '["GT Interactive"]'
     assert fields["Wikidata_Platforms"] == "PC (MS-DOS)"
     assert fields["Wikidata_Series"] == "Doom"
     assert fields["Wikidata_Genres"] == "first-person shooter"
@@ -395,7 +396,7 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
 def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
     import csv
 
-    from game_catalog_builder.cli import process_steam_and_steamspy_streaming
+    from game_catalog_builder.pipelines.enrich_pipeline import process_steam_and_steamspy_streaming
 
     input_csv = tmp_path / "in.csv"
     with input_csv.open("w", newline="", encoding="utf-8") as f:

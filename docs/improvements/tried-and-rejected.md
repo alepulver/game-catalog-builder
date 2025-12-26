@@ -39,3 +39,15 @@ does not meet the repin gate, it unpins.
 - Idea: require IGDB’s Steam external mapping to drive Steam/SteamSpy.
 - Result: introduced ordering/coupling problems and made “run providers independently” harder.
 - Decision: keep IGDB Steam ID as a cross-check only (log/diagnostics), not as a hard dependency.
+
+## Signals / Enrichment
+
+### Wikipedia-based production tier classification
+- Idea: automatically classify publisher/developer “production tier” (AAA/AA/Indie) by looking up the company on
+  Wikipedia and inferring tier from the page extract (owned-by-major/independent/etc).
+- Result: unreliable and hard to make safe. Even with “video game” extract guards, it produced wrong entity picks
+  for ambiguous names (software/tools pages, animation studios, similarly-named companies), and tier inference from
+  short extracts is too noisy.
+- Decision: removed. We keep `Production_Tier` as a manual mapping (`data/production_tiers.yaml`) and provide an
+  offline collector (`collect-production-tiers`) to generate a YAML candidate list from the enriched CSV for
+  incremental curation.

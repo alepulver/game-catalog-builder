@@ -22,14 +22,31 @@ def test_parse_steamspy_owners_range() -> None:
 
 def test_compute_production_tier_prefers_publisher_then_developer() -> None:
     mapping = {
-        "publishers": {"BigPub": "AAA"},
-        "developers": {"SmallDev": "Indie"},
+        "publishers": {"bigpub": {"tier": "AAA", "label": "BigPub", "source": "test"}},
+        "developers": {"smalldev": {"tier": "Indie", "label": "SmallDev", "source": "test"}},
     }
     tier, reason = compute_production_tier(
         {"Steam_Publishers": '["Other","BigPub"]', "Steam_Developers": '["SmallDev"]'}, mapping
     )
     assert tier == "AAA"
     assert reason == "publisher:BigPub"
+
+
+def test_compute_production_tier_uses_non_steam_company_fields() -> None:
+    mapping = {
+        "publishers": {"rawgpub": {"tier": "AA", "label": "RAWGPub", "source": "test"}},
+        "developers": {},
+    }
+    tier, reason = compute_production_tier({"RAWG_Publishers": '["RAWGPub"]'}, mapping)
+    assert tier == "AA"
+    assert reason == "publisher:RAWGPub"
+
+
+def test_compute_production_tier_returns_unknown_when_company_present_but_unmapped() -> None:
+    mapping = {"publishers": {}, "developers": {}}
+    tier, reason = compute_production_tier({"IGDB_Developers": '["Some Studio"]'}, mapping)
+    assert tier in {"Unknown", ""}
+    assert reason in {"", "developer:Some Studio"}
 
 
 def test_apply_phase1_signals_adds_composites_and_reach_columns() -> None:
@@ -59,7 +76,7 @@ def test_apply_phase1_signals_adds_composites_and_reach_columns() -> None:
         ]
     )
 
-    out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.yaml")
+    out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.json")
     row = out.iloc[0].to_dict()
 
     assert row["Reach_SteamSpyOwners_Low"] == "1000"
@@ -77,3 +94,37 @@ def test_apply_phase1_signals_adds_composites_and_reach_columns() -> None:
     # sanity: composite fields exist and are numeric-ish
     assert row["CommunityRating_Composite_100"].isdigit()
     assert row["CriticRating_Composite_100"].isdigit()
+    # New consensus columns default to empty when not enough provider data exists.
+    assert row["Developers_ConsensusProviders"] == ""
+    assert row["Publishers_ConsensusProviders"] == ""
+
+
+def test_apply_phase1_signals_adds_content_type_consensus_from_steam() -> None:
+    from game_catalog_builder.utils.signals import apply_phase1_signals
+
+    df = pd.DataFrame([{"Name": "Example DLC", "Steam_StoreType": "dlc"}])
+    out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.json")
+    row = out.iloc[0].to_dict()
+    assert row["ContentType"] == "dlc"
+    assert row["ContentType_ConsensusProviders"] == "steam"
+    assert "steam:type=dlc" in row["ContentType_SourceSignals"]
+    assert row["ContentType_Conflict"] == ""
+
+
+def test_apply_phase1_signals_content_type_is_empty_when_no_consensus() -> None:
+    from game_catalog_builder.utils.signals import apply_phase1_signals
+
+    df = pd.DataFrame(
+        [
+            {
+                "Name": "Example",
+                "Steam_StoreType": "game",
+                "IGDB_VersionParent": "Example (1993)",
+            }
+        ]
+    )
+    out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.json")
+    row = out.iloc[0].to_dict()
+    assert row["ContentType"] == ""
+    assert row["ContentType_ConsensusProviders"] == ""
+    assert row["ContentType_Conflict"] == "YES"

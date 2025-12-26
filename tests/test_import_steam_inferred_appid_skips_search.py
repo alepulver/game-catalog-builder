@@ -7,6 +7,7 @@ import pandas as pd
 
 def test_import_inferred_steam_appid_does_not_overwrite_with_name_search(tmp_path, monkeypatch):
     from game_catalog_builder import cli as cli_mod
+    from game_catalog_builder.pipelines import context, provider_clients
 
     class FakeIGDBClient:
         def __init__(self, **_kwargs):
@@ -42,10 +43,12 @@ def test_import_inferred_steam_appid_does_not_overwrite_with_name_search(tmp_pat
         def format_cache_stats(self) -> str:
             return "by_query hit=0 fetch=0 (neg hit=0 fetch=0), by_id hit=0 fetch=0"
 
-    monkeypatch.setattr(cli_mod, "IGDBClient", FakeIGDBClient)
-    monkeypatch.setattr(cli_mod, "SteamClient", FakeSteamClient)
+    monkeypatch.setattr(provider_clients, "IGDBClient", FakeIGDBClient)
+    monkeypatch.setattr(provider_clients, "SteamClient", FakeSteamClient)
     monkeypatch.setattr(
-        cli_mod, "load_credentials", lambda _p: {"igdb": {"client_id": "x", "client_secret": "y"}}
+        context,
+        "load_credentials",
+        lambda _p: {"igdb": {"client_id": "x", "client_secret": "y"}},
     )
 
     input_csv = tmp_path / "Games_User.csv"

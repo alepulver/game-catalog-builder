@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class CacheStatsClient(Protocol):
+    def format_cache_stats(self) -> str: ...
+
+
+class RAWGClientLike(CacheStatsClient, Protocol):
+    def search(self, name: str, *, year_hint: int | None = None) -> dict[str, Any] | None: ...
+    def get_by_id(self, rawg_id: str) -> dict[str, Any] | None: ...
+
+
+class IGDBClientLike(CacheStatsClient, Protocol):
+    def search(self, name: str, *, year_hint: int | None = None) -> dict[str, Any] | None: ...
+    def get_by_id(self, igdb_id: str) -> dict[str, Any] | None: ...
+
+
+class SteamClientLike(CacheStatsClient, Protocol):
+    def search_appid(self, name: str, *, year_hint: int | None = None) -> dict[str, Any] | None: ...
+    def get_app_details(self, appid: int) -> dict[str, Any] | None: ...
+
+
+class HLTBClientLike(CacheStatsClient, Protocol):
+    def search(
+        self, game_name: str, *, query: str | None = None, hltb_id: str | None = None
+    ) -> dict[str, Any] | None: ...
+
+    def get_by_id(self, hltb_id: str) -> dict[str, Any] | None: ...
+
+
+class WikidataClientLike(CacheStatsClient, Protocol):
+    def search(self, name: str, *, year_hint: int | None = None) -> dict[str, Any] | None: ...
+    def get_by_id(self, qid: str) -> dict[str, Any] | None: ...
+

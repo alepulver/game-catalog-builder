@@ -10,7 +10,7 @@ def test_steamspy_streaming_enqueues_existing_appids(tmp_path: Path, monkeypatch
     Regression test: if Steam_AppID is already present in Provider_Steam.csv, the streaming pipeline
     must still enqueue those rows so SteamSpy can populate Provider_SteamSpy.csv.
     """
-    from game_catalog_builder.cli import process_steam_and_steamspy_streaming
+    from game_catalog_builder.pipelines.enrich_pipeline import process_steam_and_steamspy_streaming
     from game_catalog_builder.utils.utilities import write_csv
 
     input_csv = tmp_path / "Games_User.csv"

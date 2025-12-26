@@ -31,6 +31,13 @@ Keep one source-of-truth catalog, and treat enriched output as an editable view:
 
 Providers run in parallel at the CLI level, but each provider client itself is synchronous (no async in clients).
 
+Logging defaults to `INFO` with periodic progress lines (e.g. `25/958`); per-row provider “Processing …” lines are `DEBUG` (enable with `--debug`).
+
+`Games_Enriched.csv` includes derived identity/consistency helpers such as:
+
+- `ContentType`: best-effort classification (`base_game|dlc|expansion|port|collection|demo|soundtrack`) from provider signals (e.g. Steam store type + IGDB relationships).
+- `ContentType_ConsensusProviders`, `ContentType_SourceSignals`, `ContentType_Conflict`: supporting provenance/consensus fields to help spot edition/DLC mismatches without adding many extra boolean columns.
+
 ## Matching (search-by-name)
 
 When a provider does not already have a cached ID for a given `Name`, it performs a search using the raw `Name` text and chooses the best match using fuzzy scoring.
@@ -182,29 +189,30 @@ The tool is designed to be resumable, so it persists both caches and intermediat
 
 ## Production tier mapping (AAA/AA/Indie)
 
-`Production_Tier` is driven by a simple, project-specific mapping file:
+`Production_Tier` is driven by a simple, project-specific YAML mapping file (local, git-ignored):
 
-- `data/production_tiers.yaml` maps exact `Steam_Publishers` / `Steam_Developers` names to a coarse tier.
-- You can update/extend the mapping automatically from an existing enriched CSV using Wikipedia lookups:
-  - Dry-run (prints suggestions + logs details):
-    - `python run.py production-tiers data/output/Games_Enriched.csv`
-  - Apply updates (adds new entries; does not overwrite existing tiers by default):
-    - `python run.py production-tiers data/output/Games_Enriched.csv --apply`
+- `data/production_tiers.yaml` maps publisher/developer names to a coarse tier (`AAA` / `AA` / `Indie`).
+- Start by copying the checked-in baseline:
+  - `cp data/production_tiers.example.yaml data/production_tiers.yaml`
+- To generate a focused TODO list from an existing enriched CSV (offline; no network):
+  - `./.venv/bin/python run.py collect-production-tiers data/output/Games_Enriched.csv --only-missing --out data/production_tiers.todo.yaml --base data/production_tiers.yaml`
 
 Notes:
-- This tool is intentionally conservative: if Wikipedia suggests a different tier for an existing entry,
-  it logs a conflict and keeps your YAML unless you pass `--update-existing`.
-- By default it also ensures completeness: after trying Wikipedia for the most frequent unknown entities,
-  it fills all remaining publishers/developers from the CSV with `Unknown` so nothing is blank.
-- Network access is required. Wikipedia responses are cached under:
-  - pageviews: `data/cache/wiki_pageviews_cache.json`
-  - summaries: `data/cache/wiki_summary_cache.json`
-- Steam publisher/developer lists are stored as JSON arrays in a CSV cell (e.g. `["Company, Inc."]`),
-  so company suffix punctuation remains intact.
+- The collector scans all available `*_Publishers` / `*_Developers` columns (Steam/IGDB/RAWG/Wikidata) in the
+  enriched CSV.
+- `data/production_tiers.yaml` is intentionally simple and stable (tiers only, no catalog-dependent counts).
+- The TODO file is catalog-dependent and includes `count`/`examples` to help prioritize.
+
+Recommended workflow (keep enrich deterministic and read-only):
+
+1. Run `enrich` to populate `*_Publishers` / `*_Developers`.
+2. Run `collect-production-tiers` to generate/update the TODO list (only entities missing tiers):
+   - `./.venv/bin/python run.py collect-production-tiers data/output/Games_Enriched.csv --only-missing --out data/production_tiers.todo.yaml --base data/production_tiers.yaml`
+3. Curate tiers in `data/production_tiers.yaml` (`AAA` / `AA` / `Indie`), then re-run `enrich` to recompute `Production_Tier`.
 
 ## Logs (how to read them)
 
-- Each run writes a separate log file under `data/logs/` (or `data/experiments/logs/` for experiment inputs).
+- Each run writes a separate log file under `<run-dir>/logs/` (default `data/logs/`).
 - Providers emit `Cache stats` summary lines at completion (hits vs fetches, including negative-cache counts).
 - When requests fail after retries (e.g. no internet), the logs include distinct error markers:
   - `[NETWORK] ...` (connection/timeout/SSL)

@@ -9,6 +9,7 @@ def test_import_ignores_pinned_steam_appid_when_appdetails_missing_and_researche
     tmp_path, monkeypatch
 ):
     from game_catalog_builder import cli as cli_mod
+    from game_catalog_builder.pipelines import context, provider_clients
 
     class FakeSteamClient:
         def __init__(self, **_kwargs):
@@ -28,8 +29,8 @@ def test_import_ignores_pinned_steam_appid_when_appdetails_missing_and_researche
         def format_cache_stats(self) -> str:
             return "ok"
 
-    monkeypatch.setattr(cli_mod, "SteamClient", FakeSteamClient)
-    monkeypatch.setattr(cli_mod, "load_credentials", lambda _p: {})
+    monkeypatch.setattr(provider_clients, "SteamClient", FakeSteamClient)
+    monkeypatch.setattr(context, "load_credentials", lambda _p: {})
 
     input_csv = tmp_path / "Games_Catalog.csv"
     output_csv = tmp_path / "Games_Catalog.csv"

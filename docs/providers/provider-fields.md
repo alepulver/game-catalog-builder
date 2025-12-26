@@ -242,8 +242,8 @@ Current output columns:
 | `Wikidata_Description` | `descriptions.en.value` | English description |
 | `Wikidata_ReleaseYear` | `claims.P577[*].time` | Publication date year (best effort) |
 | `Wikidata_ReleaseDate` | `claims.P577[*].time` | Publication date (best effort, YYYY-MM-DD) |
-| `Wikidata_Developers` | `claims.P178` | Developer(s) (labels resolved) |
-| `Wikidata_Publishers` | `claims.P123` | Publisher(s) (labels resolved) |
+| `Wikidata_Developers` | `claims.P178` | JSON array of developer labels |
+| `Wikidata_Publishers` | `claims.P123` | JSON array of publisher labels |
 | `Wikidata_Platforms` | `claims.P400` | Platforms (labels resolved) |
 | `Wikidata_Series` | `claims.P179` | Series/franchise (labels resolved) |
 | `Wikidata_Genres` | `claims.P136` | Genres (labels resolved) |

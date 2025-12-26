@@ -847,9 +847,47 @@ class SteamClient:
         if isinstance(publishers, str):
             publishers = [publishers]
 
-        dev_list = [str(x).strip() for x in (developers or []) if str(x).strip()] if isinstance(
-            developers, list
-        ) else []
+        def _split_listish_company_string(value: str) -> list[str]:
+            """
+            Steam sometimes returns a single developer string containing multiple studios,
+            e.g. "Ubisoft Montreal, Massive Entertainment, and Ubisoft Shanghai".
+            Keep this conservative to avoid splitting legitimate company names.
+            """
+            s = str(value or "").strip()
+            if not s:
+                return []
+            # Avoid splitting porting labels like "Aspyr (Mac, Linux)".
+            if "(" in s or ")" in s:
+                return [s]
+            # Only split when it clearly looks like a list (2+ commas).
+            if s.count(",") < 2:
+                return [s]
+            parts = [p.strip() for p in s.split(",") if p.strip()]
+            parts = [re.sub(r"(?i)^and\s+", "", p).strip() for p in parts]
+            # Special-case Ubisoft location lists like "... Red Storm, Shanghai, Toronto, Kiev"
+            # without inventing new entities for non-location names.
+            if parts and parts[0].casefold().startswith("ubisoft "):
+                ubisoft_locations = {"shanghai", "toronto", "kiev", "kyiv", "quebec", "québec", "montreal", "montréal"}
+                out: list[str] = []
+                for p in parts:
+                    if p.casefold().startswith("ubisoft "):
+                        out.append(p)
+                        continue
+                    # If it's a 1-token location, prefix with Ubisoft.
+                    if p.casefold() in ubisoft_locations:
+                        out.append(f"Ubisoft {p}")
+                    else:
+                        out.append(p)
+                return [x for x in out if x]
+            return [p for p in parts if p]
+
+        dev_list: list[str] = []
+        if isinstance(developers, list):
+            for x in developers:
+                for v in _split_listish_company_string(str(x).strip()):
+                    if v and v not in dev_list:
+                        dev_list.append(v)
+
         pub_list = [str(x).strip() for x in (publishers or []) if str(x).strip()] if isinstance(
             publishers, list
         ) else []

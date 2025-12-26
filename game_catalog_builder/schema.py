@@ -114,6 +114,30 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
 # Provider column prefixes used to strip derived/public fields on in-place enrich.
 PROVIDER_PREFIXES = ("RAWG_", "IGDB_", "Steam_", "SteamSpy_", "HLTB_", "Wikidata_")
 
+# CLI/provider selection
+SOURCE_ALIASES: dict[str, list[str]] = {"core": ["igdb", "rawg", "steam"]}
+IMPORT_ALLOWED_SOURCES = {"igdb", "rawg", "steam", "hltb", "wikidata"}
+ENRICH_ALLOWED_SOURCES = {"igdb", "rawg", "steam", "steamspy", "hltb", "wikidata"}
+RESOLVE_ALLOWED_SOURCES = {"igdb", "rawg", "steam", "hltb", "wikidata"}
+
+# Base columns included in every provider output.
+PROVIDER_BASE_COLS = ("RowId", "Name")
+
+
+def provider_output_columns(
+    df_columns: list[str], *, prefix: str, extra: tuple[str, ...] = ()
+) -> list[str]:
+    """
+    Build a stable provider output column list: base cols + provider-prefixed cols (+ extras).
+    """
+    cols = set(df_columns)
+    out: list[str] = [c for c in PROVIDER_BASE_COLS if c in cols]
+    out.extend([c for c in df_columns if c.startswith(prefix)])
+    for c in extra:
+        if c in cols and c not in out:
+            out.append(c)
+    return out
+
 # Columns that pin identity per provider.
 PINNED_ID_COLS = {
     "RAWG_ID",

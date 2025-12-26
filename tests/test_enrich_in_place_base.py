@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def test_build_personal_base_for_enrich_strips_provider_columns() -> None:
-    from game_catalog_builder.cli import build_personal_base_for_enrich
+    from game_catalog_builder.pipelines.enrich_pipeline import build_personal_base_for_enrich
 
     df = pd.DataFrame(
         [

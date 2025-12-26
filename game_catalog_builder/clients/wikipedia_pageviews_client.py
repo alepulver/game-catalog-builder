@@ -17,7 +17,7 @@ from ..utils.utilities import (
 from ..config import CACHE
 
 WIKIMEDIA_PAGEVIEWS_API = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
-USER_AGENT = "game-catalog-builder/1.0 (contact: alepulver@protonmail.com)"
+USER_AGENT = "game-catalog-builder/1.0"
 
 
 @dataclass(frozen=True)

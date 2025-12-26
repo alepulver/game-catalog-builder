@@ -24,8 +24,11 @@ ENV/
 !/data/**/.gitkeep
 !/data/credentials.example.yaml
 !/data/production_tiers.example.yaml
-!/data/production_tiers.yaml
 /output/
+
+# Local experiment runs (generated/local)
+/experiments/**
+!/experiments/.gitkeep
 
 # Old modules (replaced by package structure)
 modules/

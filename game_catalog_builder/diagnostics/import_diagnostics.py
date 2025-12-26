@@ -192,9 +192,6 @@ def fill_eval_tags(
             out_set.add(normalize_game_name(part))
         return {x for x in out_set if x}
 
-    from ..utils.company import company_set_from_json_array_cell
-    from ..utils.consistency import company_disagreement_tags
-
     def _platforms_from_steam(details: object) -> set[str]:
         if not isinstance(details, dict):
             return set()
@@ -218,6 +215,7 @@ def fill_eval_tags(
 
         name = str(row.get("Name", "") or "").strip()
         year_hint = _int_year(row.get("YearHint", "")) or _int_year(row.get("Year", ""))
+        steam_missing_expected = False
 
         if include_rawg:
             rawg_id = str(row.get("RAWG_ID", "") or "").strip()
@@ -247,8 +245,7 @@ def fill_eval_tags(
             if steam_id == IDENTITY_NOT_FOUND:
                 tags.append("steam_not_found")
             elif not steam_id and steam_expected:
-                tags.append("missing_steam")
-                has_missing_provider = True
+                steam_missing_expected = True
                 rejected = str(row.get("Steam_RejectedReason", "") or "").strip()
                 if rejected:
                     tags.append("steam_rejected")
@@ -309,6 +306,7 @@ def fill_eval_tags(
         years: dict[str, int] = {}
         platforms: dict[str, set[str]] = {}
         genres: dict[str, set[str]] = {}
+        igdb_payload: dict[str, object] | None = None
 
         if clients and isinstance(clients, dict):
             if include_rawg:
@@ -328,6 +326,7 @@ def fill_eval_tags(
                     igdb_client = clients.get("igdb")
                     igdb_obj = igdb_client.get_by_id(igdb_id) if igdb_client else None
                     if isinstance(igdb_obj, dict):
+                        igdb_payload = igdb_obj
                         y = _int_year(igdb_obj.get("IGDB_Year", ""))
                         if y is not None:
                             years["igdb"] = y
@@ -359,6 +358,18 @@ def fill_eval_tags(
                             years["hltb"] = y
                         platforms["hltb"] = _platforms_from_hltb(hltb_obj)
 
+        if steam_missing_expected:
+            other_plats = set()
+            for p, s in platforms.items():
+                if p == "steam":
+                    continue
+                other_plats |= (s or set())
+            if other_plats and "pc" not in other_plats:
+                tags.append("missing_steam_nonpc")
+            else:
+                tags.append("missing_steam")
+                has_missing_provider = True
+
         year_tags = year_outlier_tags(years, max_diff=1, ignore_providers_for_consensus={"steam"})
         if year_tags:
             tags.extend(year_tags)
@@ -369,47 +380,27 @@ def fill_eval_tags(
             tags.extend(plat_tags)
             has_low_issue = True
 
+        # Edition/port suspicion: if Steam's year is an outlier but IGDB indicates the match is a
+        # port/edition/alternate version, tag it as informational rather than a generic mismatch.
+        if "year_outlier:steam" in year_tags and igdb_payload:
+            if any(
+                str(igdb_payload.get(k) or "").strip()
+                for k in (
+                    "IGDB_ParentGame",
+                    "IGDB_VersionParent",
+                    "IGDB_DLCs",
+                    "IGDB_Expansions",
+                    "IGDB_Ports",
+                )
+            ):
+                tags.append("edition_or_port_suspected")
+
         # Genre disagreements: use RAWG/IGDB (and optional Steam tags) as a high-signal check.
         if genres.get("rawg") and genres.get("igdb"):
             inter = genres["rawg"] & genres["igdb"]
             if not inter:
                 tags.append("genre_disagree")
                 has_medium_issue = True
-
-        # Developer/publisher cross-checks if available in row (enriched caching may provide these).
-        # These are stored as JSON arrays for Steam and comma/JSON strings for others.
-        steam_devs = company_set_from_json_array_cell(row.get("Steam_Developers", ""))
-        steam_pubs = company_set_from_json_array_cell(row.get("Steam_Publishers", ""))
-        # Prefer explicit IGDB dev/publisher arrays (when present), else fall back to older
-        # IGDB_Companies column if it exists in the CSV.
-        igdb_devs = company_set_from_json_array_cell(row.get("IGDB_Developers", ""))
-        igdb_pubs = company_set_from_json_array_cell(row.get("IGDB_Publishers", ""))
-        igdb_companies = company_set_from_json_array_cell(row.get("IGDB_Companies", ""))
-        rawg_devs = company_set_from_json_array_cell(row.get("RAWG_Developers", ""))
-        rawg_pubs = company_set_from_json_array_cell(row.get("RAWG_Publishers", ""))
-
-        dev_tags = company_disagreement_tags(
-            {
-                "steam": steam_devs,
-                "igdb": igdb_devs or igdb_companies,
-                "rawg": rawg_devs,
-            },
-            kind="developer",
-        )
-        pub_tags = company_disagreement_tags(
-            {
-                "steam": steam_pubs,
-                "igdb": igdb_pubs or igdb_companies,
-                "rawg": rawg_pubs,
-            },
-            kind="publisher",
-        )
-        if dev_tags:
-            tags.extend(dev_tags)
-            has_low_issue = True
-        if pub_tags:
-            tags.extend(pub_tags)
-            has_low_issue = True
 
         # Actionable mismatches: roll up outlier patterns into a few tags.
         titles: dict[str, str] = {}

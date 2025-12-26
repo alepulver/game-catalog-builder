@@ -56,24 +56,25 @@ def extract_year_hint(text: str) -> int | None:
 @dataclass(frozen=True)
 class ProjectPaths:
     root: Path
+    data_root: Path
     data_input: Path
     data_cache: Path
     data_output: Path
     data_logs: Path
-    data_experiments: Path
-    data_experiments_logs: Path
+    experiments_root: Path
 
     @staticmethod
     def from_root(root: str | Path) -> ProjectPaths:
         rootp = Path(root).resolve()
+        data_root = rootp / "data"
         return ProjectPaths(
             root=rootp,
-            data_input=rootp / "data" / "input",
-            data_cache=rootp / "data" / "cache",
-            data_output=rootp / "data" / "output",
-            data_logs=rootp / "data" / "logs",
-            data_experiments=rootp / "data" / "experiments",
-            data_experiments_logs=rootp / "data" / "experiments" / "logs",
+            data_root=data_root,
+            data_input=data_root / "input",
+            data_cache=data_root / "cache",
+            data_output=data_root / "output",
+            data_logs=data_root / "logs",
+            experiments_root=rootp / "experiments",
         )
 
     def ensure(self) -> None:
@@ -81,8 +82,42 @@ class ProjectPaths:
         self.data_cache.mkdir(parents=True, exist_ok=True)
         self.data_output.mkdir(parents=True, exist_ok=True)
         self.data_logs.mkdir(parents=True, exist_ok=True)
-        self.data_experiments.mkdir(parents=True, exist_ok=True)
-        self.data_experiments_logs.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass(frozen=True)
+class RunPaths:
+    """
+    Per-run folder layout.
+
+    A "run dir" contains:
+      - input/
+      - output/
+      - cache/
+      - logs/
+    """
+
+    run_dir: Path
+    input_dir: Path
+    output_dir: Path
+    cache_dir: Path
+    logs_dir: Path
+
+    @staticmethod
+    def from_run_dir(run_dir: str | Path) -> RunPaths:
+        base = Path(run_dir).resolve()
+        return RunPaths(
+            run_dir=base,
+            input_dir=base / "input",
+            output_dir=base / "output",
+            cache_dir=base / "cache",
+            logs_dir=base / "logs",
+        )
+
+    def ensure(self) -> None:
+        self.input_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
 
 # ----------------------------

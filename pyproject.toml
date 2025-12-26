@@ -29,7 +29,14 @@ dev = [
 gcb = "game_catalog_builder.cli:main"
 
 [tool.setuptools]
-packages = ["game_catalog_builder", "game_catalog_builder.clients", "game_catalog_builder.utils"]
+packages = [
+    "game_catalog_builder",
+    "game_catalog_builder.clients",
+    "game_catalog_builder.diagnostics",
+    "game_catalog_builder.pipelines",
+    "game_catalog_builder.tools",
+    "game_catalog_builder.utils",
+]
 
 [tool.ruff]
 line-length = 100

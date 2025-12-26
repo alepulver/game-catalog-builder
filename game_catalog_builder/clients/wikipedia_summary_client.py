@@ -15,7 +15,7 @@ from ..utils.utilities import (
 )
 
 WIKIPEDIA_SUMMARY_API = "https://en.wikipedia.org/api/rest_v1/page/summary"
-USER_AGENT = "game-catalog-builder/1.0 (contact: alepulver@protonmail.com)"
+USER_AGENT = "game-catalog-builder/1.0"
 
 
 class WikipediaSummaryClient:

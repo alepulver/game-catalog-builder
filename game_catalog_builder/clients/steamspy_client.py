@@ -107,14 +107,18 @@ class SteamSpyClient:
         positive = data.get("positive", "")
         negative = data.get("negative", "")
         score_100 = ""
+        rate = ""
         try:
             pos_i = int(str(positive))
             neg_i = int(str(negative))
             denom = pos_i + neg_i
             if denom > 0:
-                score_100 = str(int(round(pos_i / denom * 100.0)))
+                rate_f = pos_i / denom
+                rate = f"{rate_f:.4f}"
+                score_100 = str(int(round(rate_f * 100.0)))
         except Exception:
             score_100 = ""
+            rate = ""
         return {
             "SteamSpy_Owners": str(data.get("owners", "")),
             "SteamSpy_CCU": str(data.get("ccu", "")),
@@ -123,6 +127,7 @@ class SteamSpyClient:
             "SteamSpy_PlaytimeMedian2Weeks": str(data.get("median_2weeks", "")),
             "SteamSpy_Positive": str(positive),
             "SteamSpy_Negative": str(negative),
+            "SteamSpy_PositiveRate": rate,
             "Score_SteamSpy_100": score_100,
         }
 

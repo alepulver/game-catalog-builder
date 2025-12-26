@@ -1,22 +1,2053 @@
-# Optional mapping for `Production_Tier` classification.
-#
-# Copy to `data/production_tiers.yaml` and edit as desired.
-# That file is intentionally git-ignored.
-#
-# Supported tiers are free-form strings, but recommended values are:
-#   - AAA
-#   - AA
-#   - Indie
-#
-# Matching is exact against extracted provider strings (currently Steam dev/pub):
-#   - `Steam_Publishers` (comma-separated)
-#   - `Steam_Developers` (comma-separated)
-#
-# Example:
-# publishers:
-#   "Bethesda Softworks": "AAA"
-# developers:
-#   "id Software": "AAA"
-
-publishers: {}
-developers: {}
+publishers:
+  10 Tons: Indie
+  10tacle Studios: AA
+  10tons: Indie
+  10tons Entertainment: Indie
+  11 bit studios: AA
+  1C: AA
+  1C Entertainment: AA
+  1C Game Studios: AA
+  1C-777: AA
+  1C-SoftClub: AA
+  2&30 Software: AA
+  2K: AAA
+  2K Games: AAA
+  2K Sports: AAA
+  3000AD: AA
+  3D Realms: AA
+  505 Game Street: AA
+  505 Games: AA
+  5pb.Inc.: AA
+  777 Studios: AA
+  Abylight: Indie
+  Access Software: AA
+  Acclaim: AAA
+  Acclaim Entertainment: AAA
+  ACE Team: AA
+  Acer: AA
+  Acer TWP: AA
+  Acid Wizard Studio: AA
+  Active: Indie
+  Active Gaming Media: Indie
+  Activision: AAA
+  Activision Blizzard: AAA
+  Activision Publishing: AAA
+  Activision Value: AAA
+  Activision Value Publishing: AAA
+  Activison: AAA
+  Adult Swim Games: Indie
+  AGM PLAYISM: AA
+  ak tronic: AA
+  ak tronic Software & Services: AA
+  Akella: AA
+  Aksys Games: AA
+  Aksys Games Localization: AA
+  Akupara Games: AA
+  Alice & Smith: AA
+  Alientrap: AA
+  Alientrap Games: Indie
+  Alientrap Software: Indie
+  All 4 Games: Indie
+  All in! Games: AA
+  Alt Shift: Indie
+  Altron: AA
+  Angry Demon Studio: AA
+  Another Indie: Indie
+  Anuman Interactive: AA
+  Apogee: AA
+  Apogee Entertainment: AA
+  Apogee Software: AA
+  App Holdings: AA
+  Aras Okatan: AA
+  Arbitrary Metric: Indie
+  Arc System Works: AA
+  Arkane Studios: AA
+  Armor Games Studios: AA
+  Arush Entertainment: AA
+  ASC Games: AA
+  Ascaron Entertainment: AA
+  ASCII: AA
+  ASCII Entertainment: AA
+  Aspyr: AA
+  Aspyr Media: AA
+  Astrum Entertainment: AA
+  Asymmetric: AA
+  Asymmetric Publications: Indie
+  Atari: AA
+  Atari Europe: AA
+  Atari Games: AA
+  Atlus: AA
+  Atlus USA: AAA
+  BadFly Interactive: AA
+  Baltoro Games: Indie
+  Bam Entertainment: AA
+  Bandai: AAA
+  Bandai Namco Entertainment: AAA
+  Bandai Namco Entertainment America: AAA
+  BANDAI NAMCO Entertainment Europe: AAA
+  BANDAI NAMCO Entertainment US: AAA
+  Bandai Namco Holdings: AAA
+  Baroque Decay: Indie
+  Battle State games: AA
+  Battlestate Games: AA
+  Beamdog: AA
+  Beem Media: AA
+  Beep Japan: AA
+  Bethesda: AAA
+  Bethesda Softworks: AAA
+  Bifrost Ent.: Indie
+  Bifrost Entertainment: AA
+  Big Fan Games: AA
+  Big Robot: Indie
+  Bigben Interactive: AA
+  BitComposer: AA
+  bitComposer Entertainment: AA
+  bitComposer Games: AA
+  Black Tabby Games: AA
+  Blackpowder Games: AA
+  BlitWorks: Indie
+  Blizzard Entertainment: AA
+  Bloober Team: AA
+  Bloober Team NA: AA
+  Bloober Team SA: AA
+  Blue Byte Software: AAA
+  Blue Manchu: AA
+  Blue Moon Red Owl: Indie
+  Bluehole: AA
+  Bluehole Studio: AA
+  BMG Interactive: AA
+  Bohemia Interactive: AA
+  Bohemia Interactive Studio: AA
+  Born Ready Games: AA
+  BRA: AA
+  Brian J. Lancaster: AA
+  Brian Lancaster: Indie
+  Bros Before Giraffes: AA
+  Buka Entertainment: AA
+  Bullet-Proof Software: AA
+  Bungie: AA
+  Burning Daylight Team: AA
+  C's ware: Indie
+  caerux.co.ltd: Indie
+  California Dreams: AA
+  Campo Santo: AA
+  Capcom: AAA
+  Capstone Software: AA
+  Captionshiner: Indie
+  Carrot Studios: Indie
+  Casual Stuff: Indie
+  CD Projekt: AAA
+  CD Projekt RED: AAA
+  cdp.pl: AA
+  CDV Software: AA
+  cdv Software Entertainment: AA
+  CFK: Indie
+  Channel 4: AA
+  ChaosForge: Indie
+  Christine Love: Indie
+  Chucklefish: AA
+  Chucklefish Games: AA
+  CI Games: AA
+  clickBOOM: AA
+  Co.: AA
+  Coconut Island Games: AA
+  Codemasters: AA
+  Cold Enemy Gaming: Indie
+  Compulsion Games: AA
+  concluse_dev: AA
+  Corey Hardman: AA
+  Corporation Polytron: Indie
+  Corvostudio di Amadei Marco: Indie
+  Cosmic Void: AA
+  Crave: AA
+  Crave Entertainment: AA
+  Crayon: Indie
+  Crazy Monkey: Indie
+  Crazy Monkey Studios: Indie
+  Creaky Corpse: Indie
+  Croteam: AA
+  Crowbar Collective: AA
+  Crunching Koalas: AA
+  Crystal Dynamics: AA
+  Crytek: AA
+  Curio Productions: AA
+  CurnurX: Indie
+  Curve Digital: Indie
+  Curve Games: AA
+  CyberFront: AA
+  D3 Publisher: AA
+  D3PUBLISHER: AA
+  D4 Enterprise: AA
+  Daedalic Entertainment: AA
+  Daedalic Studio West: AA
+  DANGEN Entertainment: AA
+  Daniel Mullins Games: AA
+  Darkseas Games: Indie
+  DC Entertainment: AAA
+  DDD Wares: AA
+  Dead Mage: Indie
+  Dead Thread Games: AA
+  Dead Thread Games Team: Indie
+  Deep Silver: AA
+  Degica: AA
+  Demruth: AA
+  DeNA: AAA
+  Denki Gaka: Indie
+  Destination Software: AA
+  Destineer: AA
+  Destructive Creations: AA
+  Devolver Digital: Indie
+  Digerati: Indie
+  Digerati Distribution: Indie
+  Digital Bento: AA
+  Dingaling Productions: Indie
+  Disney: AAA
+  Disney Interactive: AAA
+  Distractionware: Indie
+  Doborog Games: AA
+  doekuramori: AA
+  Domark: AA
+  Domark Software: AA
+  Dong Seo Interactive: AA
+  Doomster Entertainment: AA
+  DotEmu: AA
+  Double Damage Games.: AA
+  Double Eleven: AA
+  Double Fine Productions: AA
+  Dovetail Games - Flight: AA
+  Dr. Puzzler: AA
+  Draw Me A Pixel: AA
+  Dread XP: Indie
+  DreadXP: AA
+  Dreamatrix: AA
+  DreamCatcher Games: AA
+  DreamCatcher Interactive: AA
+  E-Frontier: AA
+  EA Games: AAA
+  EA Sports: AAA
+  Eagle Dynamics: AA
+  EDK Games: AA
+  Edmund McMillen: AA
+  Egmont Interactive: AA
+  Egmont International Holding: AA
+  Egosoft: AA
+  Eidos Interactive: AAA
+  Eidos Montréal: AAA
+  Electronic Arts: AAA
+  Electronic Arts Victor: AAA
+  Empire Interactive: AA
+  Empire Interactive Entertainment: AA
+  Encore: AA
+  Enlight Software: AA
+  Epic Games: AAA
+  Eric Chahi: Indie
+  Everything Unlimited: Indie
+  Excalibur Games: AA
+  Facepalm Games: AA
+  Fangamer: Indie
+  Fargus Multimedia: AA
+  Feardemic: Indie
+  Fellow Traveller: AA
+  Feral Interactive: AA
+  Fictions: Indie
+  Finji: Indie
+  Fireshine Games: AA
+  FISHLABS: AA
+  Flow Fire Games: AA
+  Flying Wild Hog: AA
+  Focus Entertainment: AA
+  Focus Home Interactive: AA
+  Focus Multimedia: AA
+  FOR-GAMES CR: Indie
+  Forever Entertainment: AA
+  Forever Entertainment S. A.: AA
+  FormGen: AA
+  Fox Interactive: AAA
+  Fraoula: AA
+  Freebird Games: AA
+  Frictional Games: AA
+  FromSoftware: AA
+  Frontier Developments: AA
+  Frozenbyte: AA
+  Fulqrum Publishing: AA
+  Fummy: Indie
+  Funbox Media: Indie
+  Funcom: AA
+  FYQD-Studio: AA
+  Gaijin Entertainment: AA
+  GaijinDistribution: AA
+  Gambitious: Indie
+  Gambitious Digital Entertainment: Indie
+  Gamebank: AA
+  Gameloft: AAA
+  GameLoop: Indie
+  Games Farm: AA
+  Games Operators: AA
+  gaming: Indie
+  Gamirror Games: AA
+  Gathering: AA
+  Gathering of Developers: AA
+  GD Studio: Indie
+  Gearbox Publishing: AA
+  Gearbox Software: AA
+  General Arcade: AA
+  Genki: AA
+  GEORGIOS SYKIOTIS: Indie
+  GHI Media: Indie
+  GIBBING TREE: AA
+  GIGA Team Baldrhead: Indie
+  Gizmondo Games: AA
+  GOG.com: AA
+  Golden Disc Electronic: Indie
+  Good Shepherd Entertainment: AA
+  Got Game Entertainment: AA
+  Gradiente: AA
+  GRASSHOPPER MANUFACTURE: AA
+  Green Man Gaming Publishing: Indie
+  GreenOrb: Indie
+  Greylock Studio: AA
+  Grip Digital: Indie
+  Grip Digital sro: Indie
+  Groombridge34: AA
+  Groove Games: AA
+  GSC Game World: AA
+  GSC World Publishing: AA
+  GT Interactive: AA
+  GT Interactive Software: AA
+  GT Interactive Software Europe: AA
+  Haage & Partner: AA
+  HAMSTER: AA
+  Hard Copy Games: Indie
+  Harvester Games: Indie
+  Hasbro Interactive: AAA
+  HD Interactive: AA
+  HE SAW: AA
+  Headup: AA
+  Heart Machine: AA
+  Hello There: Indie
+  Hello There Games: AA
+  Hello There Holding: Indie
+  Hempuli: Indie
+  Hi-Bit Studios: AA
+  Himeya Soft: Indie
+  Hitcents: AA
+  Hitcents.com: Indie
+  Homeless Unicorn: Indie
+  Hooded Horse: AA
+  Hopoo Games: AA
+  Hothead Games: Indie
+  Humble Bundle: Indie
+  Humble Games: Indie
+  Hyperion Entertainment: AA
+  Hyperstrange: AA
+  HypeTrain Digital: AA
+  Hyundai: AAA
+  iam8bit: Indie
+  icculus.org: Indie
+  Ice-Pick Lodge: AA
+  Iceberg Interactive: AA
+  id Software: AA
+  Ignition Entertainment: AA
+  Illusion Ray: AA
+  Image Space: Indie
+  Imagineer: AA
+  IMGN.PRO: Indie
+  Immanitas Entertainment: Indie
+  indie.io: Indie
+  indienova: AA
+  Indietopia Games: AA
+  Infinitap Games: AA
+  Infogames: AA
+  Infogrames: AA
+  Infogrames Entertainment: AA
+  Innersloth: AA
+  Interactive Fate: AA
+  Interceptor Entertainment: Indie
+  Interplay: AA
+  Interplay Entertainment: AA
+  Interplay Productions: AA
+  INTRAGAMES: AA
+  IO Interactive: AA
+  IPACS: AA
+  Isometric Dreams: Indie
+  Ivan Zanotti's MyMadness Works: Indie
+  Ivan Zanotti's MyMadnessWorks: AA
+  Jesse Makkonen: AA
+  Joey Drew Studios: AA
+  JoWooD Entertainment: AA
+  JoWooD Productions: AA
+  JoWooD Productions Software: AA
+  Kadokawa Shoten: AAA
+  Kaigan Games: Indie
+  KAIGAN GAMES OUe: Indie
+  Kaigan Games OÜ: AA
+  KaiPrime: Indie
+  Kalypso Media: AA
+  Kalypso Media Digital: AA
+  KillHouse Games: AA
+  Killmonday Games: Indie
+  Killmonday Games AB: AA
+  Killmonday Games HB: Indie
+  King Records: AAA
+  KIRA: AA
+  Kiss: AA
+  Klabater: Indie
+  Klei Entertainment: AA
+  Klei Publishing: AA
+  Knight-HD: Indie
+  Koch Media: AAA
+  Konami: AAA
+  Konami Digital Entertainment: AAA
+  Konami Digital Entertainment-US: AAA
+  kouri: Indie
+  KRAFTON: AA
+  Kunos Simulazioni: AA
+  L.INC: AA
+  Laminar Research: AA
+  Laughing Coyote Software: AA
+  Legacy Interactive: AA
+  Lever Games: AA
+  Libredia: AA
+  Lichthund: AA
+  Lichtund: Indie
+  Lighthouse Interactive: AA
+  LilithGame: AA
+  Limited Run Games: AA
+  Linux Game Publishing: Indie
+  Lionsgate: AAA
+  Little Green Men Games: AA
+  Little Green Men Games - Intercorona: Indie
+  Livedoor: AAA
+  Liveware: AA
+  LLP "Rhinotales": Indie
+  Lo-Fi People: AA
+  Logicware: Indie
+  Loki Software: AA
+  LOOT Interactive: Indie
+  Loveshack Entertainment: Indie
+  LucasArts: AAA
+  LucasArts Entertainment: AAA
+  Lucasfilm: AA
+  Lucasfilm Games: AAA
+  Ludomo Gamestudio: Indie
+  Lupus Studios: Indie
+  MachineWorks Northwest: Indie
+  Macmillan: AA
+  Macmillan Digital Publishing: AAA
+  MacPlay: AA
+  MacSoft: AA
+  MacSoft Games: AA
+  Mad Dog Games: AA
+  Maddy Makes Games: Indie
+  MAGES: AA
+  Majesco Entertainment: AA
+  Majesco Sales: AA
+  Manaccom: Indie
+  Mandragora: Indie
+  Marevo Collective: AA
+  Marvelous: AA
+  Marvelous Entertainment: AAA
+  Marvelous Europe: AA
+  Marvelous USA: AA
+  Mastertronic Group: AA
+  Matrix Games: AA
+  Matt Makes Games: Indie
+  MC2 France: AA
+  MC2-Microïds: AA
+  Means Interactive: AA
+  MediaQuest Holdings: AA
+  Mega Crit: AA
+  Mega Crit Games: Indie
+  Mega Enterprise: AA
+  Megamedia: AA
+  Merge Games: Indie
+  Meridian4: Indie
+  Michael Todd Games: Indie
+  Microids: AA
+  MicroProse: AA
+  MicroProse Software: AA
+  Microsoft: AAA
+  Microsoft Game Studios: AAA
+  Microsoft Studios: AAA
+  Midway: AA
+  Midway Games: AA
+  Midway Home Entertainment: AA
+  Midway Home Entertainment.inc: AA
+  Mighty Rocket Studio: AA
+  Mighty Rocket Studios: Indie
+  Milkstone Studios: AA
+  Mindscape: AA
+  Missing Link Games: AA
+  Mobila Interactive: Indie
+  MOBIRIX: Indie
+  Mode 7: AA
+  Modus Games: AA
+  Mojo Games: Indie
+  Moment Games: Indie
+  Monolith Productions: AA
+  Moonana: AA
+  Mooneye Studios: AA
+  Mossmouth: AA
+  Motion Twin: AA
+  Movie Games: Indie
+  Mugen Creations: Indie
+  My.Com: AA
+  MY.GAMES: AA
+  MyMadnessWorks: Indie
+  NA PUBLISHING: AA
+  Nacon: AA
+  Namco Bandai Partners: AAA
+  Namco Hometek: AAA
+  Nanovation: Indie
+  Nazca: AA
+  ND Games: Indie
+  Ndemic Creations: AA
+  Neon Doctrine: AA
+  Neowiz: AAA
+  Netflix: AAA
+  New Blood Interactive: Indie
+  Nexon: AAA
+  NGD Studios: Indie
+  Nicalis: AA
+  Night Dive Studios: AA
+  Night School: Indie
+  Night School Studio: AA
+  Night School Studios: Indie
+  Nightdive Studios: AA
+  Nimble Giant Entertainment: AA
+  Ninja Theory: AA
+  Nintendo: AAA
+  Nippon Ichi Software: AA
+  NIS America: AA
+  Nival Interactive: AA
+  Nobilis: AA
+  Noble Empire: Indie
+  Nobody Studio: Indie
+  Noise Factory: AA
+  Nokia: AAA
+  Noodlecake Studios: Indie
+  Nordic Games Publishing: AA
+  Not a Sailor Studios: AA
+  NovaLogic: AA
+  Noviy Disk: AA
+  Number None: AA
+  NVIDIA: AAA
+  NVIDIA Lightspeed Studios: AAA
+  O3 Entertainment: Indie
+  Ocean: AA
+  Ocean Software: AA
+  Ocelot Society: AA
+  Oddworld Inhabitants: AA
+  Odyssia: Indie
+  Offworld: AA
+  Offworld Industries: AA
+  Origin Systems: AAA
+  Osumia Games: AA
+  Otaku Publishing: Indie
+  Over The Moon: AA
+  Over The Moon Games: Indie
+  Overhaul Games: AA
+  Overlord: Indie
+  O~3 Entertainment: Indie
+  PAL: AA
+  Panic: AA
+  Panorama: AA
+  Paradox Interactive: AA
+  People Can Fly: AA
+  Philips Interactive Media: AA
+  Philly Games: Indie
+  PhillyGames: AA
+  Phoenix Online Publishing: AA
+  Phoenix Online Studios: Indie
+  Pinkapp games: Indie
+  Piranha Bytes: AA
+  Piranha Games: AA
+  Plan 1: Indie
+  Playcast-media: AA
+  Playdead: Indie
+  Playdigious: Indie
+  Playism: Indie
+  Playlogic Entertainment: AA
+  Playmates Interactive Entertainment: AA
+  Playmore: AA
+  PlayStation Publishing: AAA
+  Playtronic: AA
+  PlayWay: AA
+  Plug In Digital: Indie
+  PM Studios: AA
+  Polytron: Indie
+  Portable Moose: AA
+  Powerslave Software: Indie
+  Pracy Studios: AA
+  Prime Matter: AA
+  Prism Entertainment: AA
+  Private Division: AA
+  Proein: AA
+  Psygnosis: AAA
+  Pulse Interactive: AA
+  Puppet Combo: Indie
+  PXL computers: AA
+  Quantic Dream: AA
+  QubicGames: Indie
+  Raiser Games: AA
+  Ratalaika Games: Indie
+  Ravensburger Interactive Media: AA
+  Raw Fury: AA
+  Rayark: Indie
+  Rayark International: Indie
+  Rebellion: AA
+  Rebellion Developments: AA
+  Red Beat: AA
+  Red Candle Games: Indie
+  Red Hook Studios: AA
+  Red Storm Entertainment: AAA
+  Red Thread Games: AA
+  RedCandleGames: AA
+  Reef Entertainment: AA
+  Reflexive Entertainment: AA
+  Reforged Studios: AA
+  Reiza Studios: AA
+  Relic Entertainment: AA
+  Remedy Entertainment: AA
+  Reset Media: Indie
+  Retroism: Indie
+  Retrovibe: AA
+  Rhinotales: AA
+  Riot Games: AAA
+  Ripcord Games: Indie
+  Rising Star Games: AA
+  Robot Gentleman: AA
+  Robot Gentleman Studios: Indie
+  Rock Pocket Games: Indie
+  ROCKFISH Games: AA
+  Rockstar Games: AAA
+  Rogueside: AA
+  Rooster Teeth Games: Indie
+  Route 59: AA
+  Run and jump games: AA
+  Running With Scissors: AA
+  Russel: Indie
+  Russobit-M: AA
+  S2 Games: AA
+  Saber Interactive: AA
+  Saibot Studios: AA
+  SakuraGame: Indie
+  Sam Barlow: AA
+  Sand Sailor Studio: Indie
+  SCi Entertainment Group: AA
+  SCi Games: AA
+  Scolaro Games: AA
+  Screen 7: AA
+  Scumhead: AA
+  sebagamesdev: AA
+  Sega: AAA
+  Sega Enterprises: AAA
+  Sega Europe: AAA
+  Sega Games: AAA
+  Sega of America: AAA
+  Sekai Project: AA
+  Selecta Visión: AA
+  Serenity Forge: AA
+  Seven Sails Games: AA
+  Shiny Entertainment: AA
+  Sierra Entertainment: AA
+  Sierra Lee: AA
+  Sierra On-Line: AA
+  Sierra Online: AA
+  Sierra Studios: AA
+  Sigma Team: Indie
+  Silver Dollar Games: AA
+  SimBin: AA
+  Sirhaian: AA
+  Ska Studios: AA
+  SkyZone Entertainment: AA
+  Sledgehammer Games: AAA
+  Slightly Mad Studios: AA
+  SNEG: AA
+  SNK: AA
+  SNK Playmore: AA
+  SOEDESCO Publishing: AA
+  Soft Bank: AAA
+  SoftBank: AAA
+  Softclub: AA
+  Softdisk: AA
+  Softdisk Publishing: Indie
+  Sold Out: AA
+  Sold Out Sales: Indie
+  Sold Out Sales & Marketing: Indie
+  Sold Out Software: Indie
+  SONKA: Indie
+  Sony Computer Entertainment: AAA
+  Sony Computer Entertainment of America: AAA
+  Sony Interactive Entertainment: AAA
+  Sourcenext: AA
+  South East Games: AA
+  SouthPeak Games: AA
+  Southpeak Interactive: AA
+  Sowoke Entertainment Bureau: Indie
+  Spawn Studios: AA
+  Spike: AA
+  Spike Chunsoft: AA
+  Spooky Doorway: Indie
+  Squad: Indie
+  Square: AAA
+  Square Electronic Arts: AAA
+  Square Enix: AAA
+  Square Enix Collective: AA
+  Square Enix Europe: AAA
+  Starbreeze: AA
+  Starbreeze Entertainment: AA
+  Starbreeze Studios: AA
+  StarWraith 3D Games: Indie
+  Starz Entertainment: AA
+  Statespace: AA
+  Steedie: AA
+  SteelRaven7: AA
+  Stellar Jockeys: AA
+  Steve Gabry: Indie
+  Strategy First: AA
+  Streum On Studio: AA
+  Studio 397: AA
+  Studio MDHR: Indie
+  Studio MDHR Entertainment: Indie
+  Studio Snowspot: Indie
+  Studio Trophis: Indie
+  Studio Trophis Production: Indie
+  StudioMDHR Entertainment: Indie
+  STuNT: AA
+  Subset Games: AA
+  Suntendy Interactive Multimedia: Indie
+  Superflat Games: AA
+  Supergiant Games: Indie
+  SUPERHOT: Indie
+  SUPERHOT Team: AA
+  Surprise Attack: AA
+  Surprise Attack Games: AA
+  Suspicious Developments: AA
+  Svavelstickan: AA
+  Sven Co-op Team: Indie
+  Syfy Games: AAA
+  Taito: AAA
+  Take Two Interactive: AAA
+  Tapwave: AA
+  TCH Scarlet: AA
+  Team Cherry: AA
+  Team GrisGris: AA
+  Team Meat: AA
+  Team Psykskallar: AA
+  Team Salvato: AA
+  Team Xonotic: Indie
+  Team17: Indie
+  Team17 Digital: AA
+  Tec Toy: AA
+  Techland: AA
+  Techland Publishing: AA
+  TecMagik: AA
+  Tectoy: AA
+  Tencent: AAA
+  Tencent Games: AAA
+  Tencent Holdings: AAA
+  Tequilabyte Studio: Indie
+  Terry Cavanagh: AA
+  The 3DO: AA
+  The Behemoth: AA
+  THE BROTHERHOOD: AA
+  The Brotherhood Games: Indie
+  The Digital Lounge: AA
+  The Farm 51: AA
+  The Fighter Collection: AA
+  The Game Kitchen: AA
+  The GD Studio: Indie
+  The Iterative Collective: AA
+  The Secret Experiment: AA
+  The Sexy Chinaman: Indie
+  Thekla: AA
+  TheMeatly Games: Indie
+  Third Wire: Indie
+  Third Wire Productions: Indie
+  Thomas Happ Games: AA
+  THQ: AA
+  THQ Nordic: AA
+  Throwback Entertainment: AA
+  Thunder Lotus: AA
+  Thunder Lotus Games: Indie
+  Thunderful: AA
+  Thunderful Publishing: AA
+  tinyBuild: Indie
+  tinyBuild Games: AA
+  Titan Computer: AA
+  Titus Interactive: AA
+  Titus Software: AA
+  Toby Fox: Indie
+  tobyfox: AA
+  Top Hat Studios: Indie
+  TORTURE STAR VIDEO: Indie
+  Toxic Games: AA
+  Transhuman Design: Indie
+  Trapdoor: AA
+  Triangle Studios: Indie
+  Tribute Games: AA
+  Trilobyte: AA
+  Trilobyte Games: AA
+  Trion Worlds: AA
+  Tripwire Interactive: AA
+  Tripwire Presents: AA
+  Tyler Glaiel: AA
+  Typha: Indie
+  U.S. Gold: AA
+  Ubisoft: AAA
+  Ubisoft Blue Byte: AAA
+  Ubisoft Entertainment: AA
+  Ultimate Games: Indie
+  Ultimate Publishing: AA
+  ULTRA ULTRA: AA
+  Unfold Games: AA
+  Universal Interactive Studios: AAA
+  Uppercut Games: Indie
+  Vagabond Dog: AA
+  Vaka Game Magazine: AA
+  Valkyrie Initiative: Indie
+  Valve: AAA
+  Vblank Entertainment: AA
+  Veewo Games: AA
+  Victor Interactive Software: AA
+  Virgin: AA
+  Virgin Games: AA
+  Virgin Interactive: AA
+  Virgin Interactive Entertainment: AA
+  Virtual Programming: Indie
+  Virtual Studios: Indie
+  Viva Media: AA
+  Vivendi: AAA
+  Vivendi Games: AAA
+  Vivendi Universal: AAA
+  Vivendi Universal Games: AAA
+  Vlambeer: AA
+  Wadjet Eye Games: AA
+  Wales Interactive: AA
+  Walkabout: AA
+  Walkabout Games: Indie
+  Warner Bros. Games: AAA
+  Warner Bros. Interactive: AAA
+  Warner Bros. Interactive Entertainment: AAA
+  WB Games: AAA
+  Whiptail Interactive: AA
+  WhisperGames: AA
+  WhitePeach: AA
+  Wildlands Interactive: AA
+  Williams Entertainment: AA
+  Winterveil Studios: Indie
+  Wiz Technology: AA
+  Wizard Fu: AA
+  Wizard Fu Games: Indie
+  WizardWorks: AA
+  WizardWorks Group: AA
+  WizardWorks Software: AA
+  WMS Industries: AA
+  Wolfire: Indie
+  Wolfire Games: AA
+  X.D. Network: Indie
+  Xbox Game Studios: AAA
+  Xbox Games Studios: AA
+  Xicat Interactive: AA
+  XS Games: AA
+  XSEED Games: AA
+  Yacht Club Games: AA
+  Yooreka Studio: Indie
+  Ysbryd Games: AA
+  Zachtronics: AA
+  Zachtronics Industries: Indie
+  Zan: Indie
+  Ziggurat: AA
+  Ziggurat Interactive: AA
+  Zodttd: Indie
+  Zoo: AA
+  Zoo Digital: AA
+  ZOO Digital Publishing: AA
+  '{CRYTIME}': Indie
+developers:
+  10 Tons: Indie
+  10tons: Indie
+  10tons Entertainment: Indie
+  11 Bit Studios: AA
+  1C: AA
+  1C Game Studios: Indie
+  1C-777: AA
+  '1C: Maddox Games': AA
+  2K: AAA
+  2K Australia: Indie
+  2K Boston: Indie
+  2K China: Indie
+  2K Czech: Indie
+  2K Marin: Indie
+  3000AD: Indie
+  343 Industries: Indie
+  3D Realms: Indie
+  4A Games: AA
+  4EversGames: Indie
+  4J Studios: AA
+  505 Games: AA
+  5pb.Inc.: AA
+  777 Studios: Indie
+  8Floor: Indie
+  Aardvark Software: AA
+  Abbey 'Scruncho' Smith: Indie
+  Abstraction: AA
+  Abylight: Indie
+  Access Software: AA
+  Acclaim Cheltenham: AA
+  Acclaim Studios: AA
+  ACE Team: Indie
+  Acid Wizard: Indie
+  Acid Wizard Studio: Indie
+  Action Forms: Indie
+  Active Gaming Media: Indie
+  Activision: AAA
+  Activision Publishing: AAA
+  Activision Shanghai: Indie
+  Adeline Software International: AA
+  AGM PLAYISM: Indie
+  Airdorf: Indie
+  Airdorf Games: Indie
+  Akabaka: Indie
+  Aksys Games Localization: AA
+  Akuma Kira: Indie
+  Alexander Bruce: Indie
+  Alice & Smith: Indie
+  Alientrap: Indie
+  Alientrap Games: Indie
+  All in! Games: Indie
+  Allods Team: AA
+  Alt Shift: Indie
+  Amaze Entertainment: AA
+  Amusement Vision: AAA
+  Ancient: AA
+  Andrey Rumak: Indie
+  Angry Demon Studio: Indie
+  Anshar Studios: Indie
+  AnyaFR: Indie
+  Apogee Software: Indie
+  App Holdings: Indie
+  Appaloosa Interactive: AA
+  Aras Okatan: Indie
+  Arbitrary Metric: Indie
+  ArbitraryMetric: Indie
+  Arc System Works: AA
+  Archpray: Indie
+  Arkane Studios: AAA
+  Armature Studio: AA
+  Armor Games Studios: Indie
+  ArtPlay: Indie
+  Ascaron: AA
+  Ascaron Entertainment: AA
+  Askiisoft: Indie
+  Asobo Studio: Indie
+  Aspyr: AA
+  Aspyr Media: AA
+  Astrum Entertainment: AA
+  Asymmetric: Indie
+  Asymmetric Publications: Indie
+  Atari: AA
+  Atlus U.S.A: AA
+  Atojesi: Indie
+  Atomic Wolf: Indie
+  Aurora Studio: Indie
+  Avalanche Software: AAA
+  Avalanche Studios: AA
+  Avalanche Studios Group: AA
+  Backbone Entertainment: AA
+  BadFly Interactive: Indie
+  Baeto: Indie
+  Bandai Namco Entertainment: AAA
+  BANDAI NAMCO Entertainment America: AAA
+  Bandai Namco Studios: Indie
+  Barking Dog Studios: AAA
+  Baroque Decay: Indie
+  Bathysfear Labs: Indie
+  Battle State games: AA
+  Battlestate Games: Indie
+  Beamdog: Indie
+  Beem Media: Indie
+  Beenox: AAA
+  Beenox Studios: AAA
+  BenCourtemanche: Indie
+  Bend Studio: Indie
+  Benedykt Szneider: Indie
+  Bennett Foddy: Indie
+  Bethesda Game Studios: AAA
+  Bethesda Softworks: AAA
+  Bifrost Entertainment: Indie
+  Big Bang: Indie
+  Big Huge Games: AA
+  Big Robot: Indie
+  BioWare: AAA
+  BioWare Edmonton: AAA
+  BioWare Montréal: AAA
+  Bithell Games: Indie
+  Black Box Games: AAA
+  Black Forest Games: Indie
+  Black Isle Studios: AAA
+  Black Tabby Games: Indie
+  Blackpowder Games: Indie
+  Blazingstardude: Indie
+  Blimey! Games: AA
+  Blink Studios: Indie
+  BlitWorks: AA
+  Blizzard Albany: AAA
+  Blizzard Entertainment: AAA
+  Blizzard North: AAA
+  Bloober Team: Indie
+  Bloober Team SA: Indie
+  Blue Manchu: Indie
+  Bluehole: AA
+  Bohemia Interactive: AA
+  Bohemia Interactive Studio: AA
+  Bombservice: Indie
+  bombsfall: Indie
+  Born Ready Games: AA
+  Bounding Box Software: Indie
+  BreakAway Games: AA
+  BrezzaSoft: Indie
+  Brian J. Lancaster: Indie
+  Brian Lancaster: Indie
+  Broken Rules: Indie
+  Bros Before Giraffes: Indie
+  Buckshot Software: Indie
+  Budcat Creations: AA
+  Bugbear Entertainment: Indie
+  Bulkypix: Indie
+  Bullfrog Productions: Indie
+  Bungie: AAA
+  Burning Daylight Team: Indie
+  Burut Creative Team: AA
+  Burut CT: Indie
+  Buzz Monkey Software: AA
+  C's ware: Indie
+  caerux.co.ltd: Indie
+  Campo Santo: Indie
+  Capcom: AAA
+  Capcom Development Division 1: AAA
+  Capcom Planning Room 2: AAA
+  Capcom Production Studio 1: AAA
+  Capcom Production Studio 4: AAA
+  Capcom U.S.A: AAA
+  Capstone Software: Indie
+  Captionshiner: Indie
+  CaptureAge: Indie
+  Carlo Castellano: Indie
+  Carrot Studios: Indie
+  Casali brothers: Indie
+  Casual Stuff: Indie
+  Cauldron: AA
+  Cauldron HQ: AA
+  Cavetap: Indie
+  CD PROJEKT: AAA
+  CD Projekt RED: AAA
+  Certain Affinity: AA
+  ChAIR Entertainment: Indie
+  ChAIR Entertainment Group: AA
+  Channel 4: AA
+  ChaosForge: Indie
+  Cherrymochi: Indie
+  chipzel: Indie
+  Christine Love: Indie
+  Chucklefish: Indie
+  Chucklefish Games: AA
+  Chunsoft: AA
+  CI Games: Indie
+  Claeys Brothers: Indie
+  Claeysbrothers: Indie
+  clickBOOM Entertainment: AA
+  Climax Group: AA
+  Climax LA: AA
+  Climax UK: AA
+  Clover Studio: AAA
+  Cobble Games: Indie
+  Coconut Island dba Shanghai Kena Information Technology: Indie
+  Code Mystics: AA
+  Codemasters: AA
+  Codemasters Southam: AA
+  Compile: AA
+  Compulsion Games: Indie
+  concluse_dev: Indie
+  Convoy Games: Indie
+  Core Design: AA
+  Corey Hardman: Indie
+  Cosmic Void: Indie
+  Counterplay Games: AA
+  Crazy Monkey Studios: Indie
+  Creaky Corpse: Indie
+  Creative Assembly: AAA
+  Creatures: AAA
+  Criterion Games: AAA
+  Croteam: Indie
+  Crowbar Collective: Indie
+  Crunching Koalas: Indie
+  Crystal Dynamics: AAA
+  Crytek: AA
+  Crytek Budapest: AAA
+  Crytek Frankfurt: AAA
+  Crytek Kiev: AA
+  Crytek Studios: AA
+  Crytek UK: AA
+  CtrlMovie: Indie
+  Curio Productions: Indie
+  CurnurX: Indie
+  Curve Digital: Indie
+  Curve Games: AA
+  Curve Studios: AA
+  Cyanide: AA
+  Cyanide Studio: AA
+  Cyber752: Indie
+  CyberConnect2: AA
+  Cygnus Software: AA
+  Daedalic Entertainment: Indie
+  Danger Close: AAA
+  Danger Close Games: AAA
+  Daniel Mullins Games: Indie
+  Dark Seas Interactive: Indie
+  Darkside Game Studios: AA
+  Darkworks: Indie
+  Dave Seaman: Indie
+  Davey Wreden: Indie
+  David A. Palmer Productions: Indie
+  David Szymanski: Indie
+  dawman1031: Indie
+  Day 1 Studios: Indie
+  DDD Wares: Indie
+  Dead Mage: Indie
+  Dead Thread Games: Indie
+  Dead Thread Games Team: Indie
+  Deadline Games: AA
+  Deadtoast: Indie
+  DeadToast Entertainment: Indie
+  Deck Nine: Indie
+  Deck13: Indie
+  Deck13 Interactive: AA
+  Deconstructeam: Indie
+  Deep Silver: AA
+  Deep Silver Fishlabs: Indie
+  Deep Silver Volition: AA
+  Demiurge Studios: AA
+  Demonware: Indie
+  Den-fami Nico Game Magazine: Indie
+  Denki Gaka: Indie
+  Dennaton Games: AA
+  Dennispr33: Indie
+  Derek Yu: Indie
+  Destroyer Studios: Indie
+  Destructive Creations: Indie
+  DeveloperJake: Indie
+  Devil's Details: Indie
+  Devolver: Indie
+  Devolver Digital: Indie
+  DICE: AAA
+  Dico: AA
+  Digital Anvil: AA
+  Digital Bento: Indie
+  Digital Eclipse: AA
+  Digital Extremes: Indie
+  Digital Illusions: AAA
+  Digital Illusions Canada: AAA
+  Digital Illusions CE: AAA
+  'Digital Illusions CE: Canada': AAA
+  Digital Image Design: AA
+  Digital Sun: Indie
+  Digital Sun Games: Indie
+  Dimps: AA
+  Dingaling: Indie
+  dingalingboy: Indie
+  Disaster Studio: Indie
+  Distractionware: Indie
+  DMA Design: AAA
+  DO MY BEST: Indie
+  Do My Best Games: Indie
+  Doborog Games: Indie
+  Doctor Entertainment: AA
+  Dodge Roll: Indie
+  doekuramori: Indie
+  Doekuramuri: Indie
+  doinksoft: Indie
+  DON'T NOD: AA
+  Dontnod Eleven: AA
+  DONTNOD Entertainment: Indie
+  Doomgriever: Indie
+  Doomster Entertainment: Indie
+  Doseone: Indie
+  DotEmu: AA
+  Double Damage Games: Indie
+  Double Eleven: AA
+  Double Fine: AA
+  Double Fine Productions: AAA
+  Double Helix Games: AA
+  Double Helix GamesFoundation 9: AA
+  Dr. Puzzler: Indie
+  Draw Me A Pixel: Indie
+  Dread XP: Indie
+  DreadXP: Indie
+  Dreamatrix: Indie
+  Dreamatrix Game Studios: Indie
+  DreamForge Intertainment: AA
+  Dreamworks Interactive: AAA
+  Dukope1: Indie
+  EA Black Box: AAA
+  EA Canada: AAA
+  EA Digital Illusions CE: AAA
+  EA Gothenburg: AAA
+  EA Los Angeles: AAA
+  EA Redwood Shores: AAA
+  EA Seattle: AAA
+  EA Sports: AAA
+  EA Vancouver: AAA
+  Eagle Dynamics: AA
+  Eden Games: AA
+  Eden Studios: AA
+  Edge of Reality: AA
+  EDK Games: Indie
+  Edmund McMillen: Indie
+  Egosoft: AA
+  Eidos Interactive: AAA
+  Eidos Montreal: AAA
+  Elder Games: Indie
+  Electronic Arts: AAA
+  Electronic Arts Bellevue: AAA
+  Electronic Arts Black Box: AAA
+  Electronic Arts Canada: AAA
+  Electronic Arts DICE: AAA
+  Electronic Arts Los Angeles: AAA
+  Electronic Arts Redwood Shores: AAA
+  Electronic Arts Seattle: AAA
+  Electronic Arts Sports: AAA
+  Engine Software: AA
+  Epic Games: AAA
+  Epic MegaGames: AAA
+  EQ Games: Indie
+  Eric Chahi: Indie
+  Escalation Studios: AA
+  Eurocom: AA
+  Eurocom Entertainment Software: AA
+  Everything Unlimited: Indie
+  Evil Empire: Indie
+  Exakt Entertainment: Indie
+  EXNOA: AAA
+  Extremely OK Games: Indie
+  Facepalm Games: Indie
+  Fatshark: Indie
+  feel plus: AA
+  Feral Interactive: AA
+  Finji: Indie
+  Firebrand Games: Indie
+  Fishlabs: AA
+  Fishlabs Entertainment: AA
+  FloodGate Entertainment: AA
+  Flow Fire Games: Indie
+  Fluid Studios: Indie
+  Flying Wild Hog: AA
+  Focus Entertainment: AA
+  Focus Home Interactive: AA
+  Forgotten Empires: Indie
+  Fox Interactive: AAA
+  Fraoula: Indie
+  Freddie The Potato: Indie
+  Free Lives: Indie
+  Free Lives Games: Indie
+  Free Radical Design: Indie
+  Freebird Games: Indie
+  Frictional Games: Indie
+  FromSoftware: Indie
+  Frontier Developments: Indie
+  Frozenbyte: Indie
+  Fuchs+Dachs: Indie
+  Fummy: Indie
+  Funcom: AAA
+  FYQD-Studio: Indie
+  Gabe Cuzillo: Indie
+  Gabe Cuzzillo: Indie
+  Gaijin Entertainment: AA
+  Gainax Network Systems: AA
+  Gambitious: Indie
+  Game Freak: AAA
+  Gameloft: AAA
+  GameLoop: Indie
+  Games Farm: Indie
+  Games Operators: AA
+  GameStar: AA
+  Gaming Minds Studios: AA
+  Gausswerks: Indie
+  GD Studio: Indie
+  Gearbox Publishing: AAA
+  Gearbox Software: AA
+  General Arcade: Indie
+  GEORGIOS SYKIOTIS: Indie
+  GIBBING TREE: Indie
+  Giga: Indie
+  GIGA Team Baldrhead: Indie
+  GlyphX: AA
+  GlyphX Games: Indie
+  GOG: AA
+  Good Gate Media: Indie
+  Good Shepherd Entertainment: Indie
+  Goodbye Kansas Games: AA
+  Grasshopper Manufacture: AA
+  Gray Matter Interactive: AA
+  Gray Matter Studios: Indie
+  GreenOrb: Indie
+  Greg Pryjmachuk: Indie
+  Gremlin Interactive: Indie
+  Greylock Studio: Indie
+  Grezzo: AAA
+  GRIN: AA
+  Grip Digital: Indie
+  Griptonite Games: AA
+  GrisGris: Indie
+  Ground Shatter: Indie
+  Grove Street Games: AA
+  GSC Game World: AA
+  Guard Crush: Indie
+  Guard Crush Games: Indie
+  H.I.C.: Indie
+  Haemimont Games: Indie
+  Halo Studios: AAA
+  Hammerhead: AA
+  HAMSTER: AA
+  Hangar 13: AAA
+  Harvester Games: Indie
+  HE SAW: Indie
+  Headfirst Productions: Indie
+  HeadGames: Indie
+  Headgate Studios: AA
+  Headup Games: AA
+  Heart Machine: Indie
+  Hello There: Indie
+  Hello There Games: Indie
+  Hempuli: Indie
+  HeSaw: Indie
+  Hi-Bit Studios: Indie
+  Hidden Path Entertainment: AA
+  High Moon Studios: Indie
+  High Voltage Software: Indie
+  Hitcents.com: Indie
+  Hitmaker: AA
+  Hologryph: Indie
+  Homegrown Games: Indie
+  Homeless Unicorn: Indie
+  Hopoo Games: Indie
+  Hoshikuzu KRNKRN: Indie
+  Hothead Games: Indie
+  Hudson Soft: AAA
+  Human Head Studios: AA
+  Humble Bundle: Indie
+  HWY1 Productions: Indie
+  Hydravision Entertainment: AA
+  Hyperion Entertainment: Indie
+  HypeTrain Digital: Indie
+  ibbivlogs: Indie
+  Ice-Pick Lodge: Indie
+  id Software: AAA
+  Idol FX: Indie
+  Iguana Entertainment: Indie
+  Iguana Entertainment UK: AA
+  Illusion Ray: Indie
+  Illusion Ray Studio: Indie
+  Illusion Softworks: Indie
+  Image Space: Indie
+  Imagitec Design: AA
+  Implicit Conversions: Indie
+  Incuvo: Indie
+  Indefatigable: Indie
+  Indie Built: AA
+  indieszero: AA
+  Infinitap Games: Indie
+  Infinite Fall: Indie
+  InfiniteAmmo: Indie
+  Infinity: Indie
+  Infinity Ward: AAA
+  Infogrames: AA
+  Ink Stains Games: Indie
+  Insomniac Games: AAA
+  Interactive Fate: Indie
+  Interceptor Entertainment: Indie
+  Interplay: Indie
+  Interplay Entertainment: AA
+  Interplay Productions: AA
+  Inti Creates: AA
+  Invader Studios: Indie
+  IO Interactive: AA
+  Ion Storm: AA
+  IPACS: Indie
+  Iron Galaxy: AA
+  Iron Galaxy Studios: Indie
+  Irrational Games: AAA
+  Isbit Games: AA
+  Ivan Zanotti's MyMadness Works: Indie
+  Ivan Zanotti's MyMadnessWorks: Indie
+  JAM Productions: Indie
+  jamesgraz2012: Indie
+  Jasper Byrne: Indie
+  Jesse Makkonen: Indie
+  Jetpack Interactive: AA
+  Joakim Sandberg: Indie
+  Joey Drew Studios: Indie
+  John Szymanski: Indie
+  Jonathan Blow: Indie
+  Jordan Freeman Group: Indie
+  Joshua Neurnberger: Indie
+  Joshua Nuernberger: Indie
+  Jupiter: AA
+  Just Add Water (Developments): AA
+  K2: AA
+  KADOKAWA: AA
+  Kadokawa Games: AA
+  Kaigan Games: Indie
+  Kaigan Games OÜ: Indie
+  KaiPrime: Indie
+  Kalypso Media: AA
+  Kaos Studios: Indie
+  kikiyama: Indie
+  KillHouse Games: Indie
+  Killmonday Games: Indie
+  Killmonday Games AB: Indie
+  Killmonday Games HB: Indie
+  Kinesoft: Indie
+  KIRA: Indie
+  Kittehface: Indie
+  Klei Entertainment: Indie
+  Knight-HD: Indie
+  Kojima Productions: AAA
+  Konami: AAA
+  Konami Computer Entertainment Japan: AAA
+  Konami Digital Entertainment: AAA
+  Konfa Games: Indie
+  kouri: Indie
+  Krafton: AAA
+  Kronos Digital Entertainment: AA
+  Kroyer Films: Indie
+  KT Racing: Indie
+  Kudosoft: Indie
+  Kuju Entertainment: AA
+  Kunos Simulazioni: AA
+  Kverta: Indie
+  Kylotonn: AA
+  Kylotonn Entertainment: AA
+  Kylotonn Games: AA
+  L.INC: Indie
+  Laminar Research: Indie
+  Landfall: Indie
+  Landfall Games: Indie
+  Laughing Coyote Software: Indie
+  LC Soft: Indie
+  Le Cartel: Indie
+  Le Cartel Studio: Indie
+  Legend Entertainment: AA
+  Lemon & Plum: Indie
+  Lemon Sky Studios: Indie
+  Lichthund: Indie
+  Lichtund: Indie
+  Lilith Games: AA
+  Lilithgames: AA
+  Linux Game Publishing: Indie
+  Lion Entertainment: Indie
+  Little Green Men Games: Indie
+  Little Jade Productions: Indie
+  Little Stone Software: Indie
+  Lizardcube: AA
+  Lo-Fi People: Indie
+  Lobotomy Software: Indie
+  Locked Door Puzzle: Indie
+  Logical Design Works: Indie
+  Logicware: Indie
+  Loki Software: AA
+  Looking Glass Studios: Indie
+  LOOT™ Interactive: Indie
+  Love Conquers All Games: Indie
+  Lovely Hellplace: Indie
+  Loveshack Entertainment: Indie
+  Lucas Pope: Indie
+  LucasArts: AAA
+  LucasArts Entertainment: AAA
+  Lucasfilm: AAA
+  Lucasfilm Games: AAA
+  Ludomo Gamestudio: Indie
+  M2: AA
+  Machine Games: AAA
+  MachineGames: AAA
+  MachineWorks Northwest: Indie
+  MacSoft Games: AA
+  Maddy Makes Games: Indie
+  MAGES: AA
+  Magic Partners: Indie
+  Mahelyk: Indie
+  Makoto Sanada: Indie
+  Mandragora: Indie
+  Marco Amadei: Indie
+  Marcus Bromander: Indie
+  Marevo Collective: Indie
+  Marlowe Dobbe: Indie
+  Marvel Comics: AAA
+  Marvelous Entertainment: AA
+  Marvelous USA: AAA
+  Mass Media: AA
+  Massive Bear Studios: AA
+  Massive Development: Indie
+  Massive Entertainment: AAA
+  Matt Dabrowski: Indie
+  Matt Makes Games: Indie
+  Maxi Boch: Indie
+  MC2: Indie
+  Mega Crit: Indie
+  Mega Crit Games: Indie
+  Mega Enterprise: AA
+  MegaPixel Studio: AA
+  MegaPixel Studio S. A.: Indie
+  Mengo: Indie
+  Mercury Steam Entertainment: AA
+  MercurySteam: AA
+  Merge Games: Indie
+  Mesa Logic: Indie
+  Metropolis Software: AA
+  Michael Todd Games: Indie
+  MichaelToddGames: Indie
+  Microids: AA
+  Microsoft Game Studios: AAA
+  Midway: AA
+  Midway Austin: AA
+  Midway Chicago: AA
+  Midway Games: AA
+  Midway Home Entertainment: AA
+  Midway Studios Austin: AA
+  Midway Studios Chicago: AA
+  Midway Studios San Diego: AA
+  Mighty Morgan: Indie
+  Mighty Rocket Studio: Indie
+  Milkstone Studios: Indie
+  Mindware Studios: Indie
+  Ministry of Broadcast: Indie
+  Ministry of Broadcast Studios: Indie
+  Minskworks: Indie
+  MNM Software: Indie
+  MOBIRIX: Indie
+  Mode 7: Indie
+  Modern Dream: Indie
+  Modulaatio Games: Indie
+  Moment Games: Indie
+  Momentum Games: Indie
+  Monolith: AA
+  Monolith Productions: AA
+  Moon Studios: AA
+  Moonana: Indie
+  Mooneye Studios: Indie
+  Moppin: Indie
+  Morgan Games: Indie
+  Mossmouth: Indie
+  Motion Twin: Indie
+  Motive Studios: AAA
+  MY.COM: AA
+  MY.GAMES: Indie
+  MyMadnessWorks: Indie
+  n-Space: AA
+  Nanovation: Indie
+  Naughty Dog: AAA
+  Nazca: AA
+  Ndemic Creations: Indie
+  NeoBards Entertainment: AA
+  Neon Giant: Indie
+  Nephilim Games: Indie
+  Nerve Software: AA
+  NetherRealm Studios: AAA
+  Neversoft Entertainment: AAA
+  New World Interactive: Indie
+  Next Level Games: AAA
+  Nextech: Indie
+  Nicalis: Indie
+  Night Dive Studios: AA
+  Night School Studio: Indie
+  Night School Studios: Indie
+  Nightdive Studios: Indie
+  Ninja Theory: AA
+  Nintendo: AAA
+  Nintendo EAD: AAA
+  Nintendo Entertainment Analysis & Development: AAA
+  Nintendo R&D4: AAA
+  NIS America: AA
+  Nixxes: AA
+  Nixxes Software: Indie
+  No Code: Indie
+  No More Room in Hell Team: Indie
+  Noble Empire: Indie
+  Nobody Studio: Indie
+  NoClip: Indie
+  Noel: Indie
+  Noise Factory: AA
+  Nomada Studio: Indie
+  Noodlecake Studios: Indie
+  Not a Sailor Studios: Indie
+  NovaLogic: Indie
+  Number None: Indie
+  NVIDIA Lightspeed Studios: AA
+  Obsidian Entertainment: AAA
+  Ocean Software: AA
+  Ocelot Society: Indie
+  oddbreeze: Indie
+  Oddworld Inhabitants: AA
+  Offworld: Indie
+  Offworld Industries: AA
+  okuzen_hirosi: Indie
+  Oleg Sergeev: Indie
+  Olli Harjola: Indie
+  Olli Harjola, Otto Hantula, Tom Jubert, Carlo Castellano: Indie
+  One More Level: Indie
+  ONEONE1: Indie
+  Opus: Indie
+  Origin Systems: AAA
+  Oskar Stålberg: Indie
+  Osumia Games: Indie
+  Otto Hantula: Indie
+  Over The Moon: Indie
+  Overhaul Games: AA
+  OVERKILL - a Starbreeze Studio.: Indie
+  Overkill Software: AA
+  Overlord: Indie
+  P.Z.Karen Co. Development Group: Indie
+  Page 44 Studios: AA
+  PAM Development: AA
+  Panda: Indie
+  Pandemic Studios: AAA
+  Panic Button: AA
+  panstasz: Indie
+  Paradox Interactive: AA
+  Paragon 5: Indie
+  Parallax: Indie
+  Parallax Software: AA
+  Particle Systems: AA
+  Passion Republic Games: AA
+  People Can Fly: AA
+  Petroglyph: Indie
+  Petroglyph Games: AA
+  Philly Games: Indie
+  PhillyGames: Indie
+  Phobia Game Studio: Indie
+  Phoenix Online Studios: Indie
+  Pinokl Games: Indie
+  Pipe Dream Interactive: Indie
+  Pipeworks Software: AA
+  Piranha Bytes: AA
+  Piranha Games: AA
+  Pivotal Games: Indie
+  Pixel Crow: Indie
+  Pixel Dash Studios: Indie
+  Pixel Dash Studios, EQ: Indie
+  Pixel Pushers Union 512: Indie
+  Pixel Titans: Indie
+  PixelShard: Indie
+  Planet Moon Studios: Indie
+  Platinum Games: AAA
+  PlatinumGames: AAA
+  Plausible Concept: Indie
+  Playdead: Indie
+  Playdigious: Indie
+  PLAYISM: Indie
+  Playmore: AA
+  Plug In Digital: Indie
+  Pocket Studios: Indie
+  Pocketeers: Indie
+  Polygon Magic: AA
+  Polytron: Indie
+  Portable Moose: Indie
+  Power and Magic Development: AA
+  Pracy Studios: Indie
+  Presage Software: AA
+  Probe Entertainment: Indie
+  Protocol Games: Indie
+  PUBG: AA
+  PUBG Studios: AAA
+  PuffballsUnited: Indie
+  Pyro Studios: Indie
+  QLOC: AA
+  Quantic Dream: AA
+  Radical: AA
+  Radical Entertainment: Indie
+  Rage Software: AA
+  Raster Productions: AA
+  Ratalaika Games: Indie
+  Raven Software: AA
+  RavenSoft: Indie
+  Raw Fury: AA
+  Rawhand Games: Indie
+  Rayark International: Indie
+  rdein: Indie
+  Reactor Zero: Indie
+  Realtime Associates: AA
+  Rebellion: Indie
+  Rebellion Developments: AA
+  Reckoner Industries: Indie
+  Recoil Mojo: Indie
+  Red Beat: Indie
+  Red Candle Games: Indie
+  Red Dot Games: Indie
+  Red Fly Studio: AA
+  Red Hook Studios: Indie
+  Red Storm: Indie
+  Red Storm Entertainment: AAA
+  Red Thread Games: AA
+  RedCandleGames: Indie
+  Redemption Road: Indie
+  Redline Games: Indie
+  Reflections: Indie
+  Reikon Games: Indie
+  Reiza Studios: Indie
+  Relic Entertainment: AA
+  Remedy Entertainment: AA
+  RESET MEDIA: Indie
+  Respawn: Indie
+  Respawn Entertainment: AAA
+  Rhinotales: Indie
+  Riot Games: AAA
+  Ripple Effect Studios: AAA
+  Ritual Entertainment: AA
+  Robot Gentleman: Indie
+  Robot Gentleman Studios: Indie
+  Rock Pocket Games: Indie
+  ROCKFISH Games: Indie
+  Rockstar Games: AAA
+  Rockstar Leeds: AAA
+  Rockstar London: AAA
+  Rockstar New England: AAA
+  Rockstar North: AAA
+  Rockstar San Diego: AAA
+  Rockstar Studios: AAA
+  Rockstar Toronto: AAA
+  Rockstar Vancouver: AAA
+  Rockstar Vienna: AAA
+  Rocksteady Studios: AAA
+  Rogue Entertainment: AA
+  Rogueside: Indie
+  Roll 7: Indie
+  Roll7: Indie
+  Rooster Teeth Productions: Indie
+  Route 59: Indie
+  Rovio Mobile: AAA
+  Ruffian Games: Indie
+  Run and jump games: Indie
+  Runecraft: Indie
+  Runesoft: Indie
+  Runner Duck: Indie
+  Running With Scissors: Indie
+  Ryu Ga Gotoku Studios: AAA
+  S2 Games: Indie
+  Saber Interactive: AA
+  Sabotage: Indie
+  Sabotage Studio: Indie
+  Sacnoth: AA
+  Saffire: Indie
+  Saffire Association: Indie
+  Saibot Studios: Indie
+  Salt Lake Games Studio: AA
+  Sam Barlow: Indie
+  Sand Sailor Studio: Indie
+  Santa Cruz Games: AA
+  Santa Monica Studio: AAA
+  Sanzaru Games: AA
+  Savage Entertainment: AA
+  SCE Santa Monica Studio: AAA
+  Scolaro Games: Indie
+  Scriptwelder: Indie
+  Scriptwelder Studio: Indie
+  Sculptured Software: AA
+  Scumhead: Indie
+  Scythe Dev Team: Indie
+  sebagamesdev: Indie
+  Secret Cow Level: Indie
+  SEGA: AAA
+  SEGA AM1: AAA
+  Sega AM2: AAA
+  Sega AM3: AAA
+  Sega Enterprises: AAA
+  Sega Sports R&D: AAA
+  Sega Technical Institute: AAA
+  Sega Wow: AA
+  Sekai Project: Indie
+  Sen: Indie
+  Seven Sails Games: Indie
+  Shaba Games: AA
+  Shiba Satomi: Indie
+  Shift: AA
+  Shiny Entertainment: Indie
+  Shiny Shoe: Indie
+  Shout! Designworks: Indie
+  SIE Bend Studio: AAA
+  Sierra Entertainment: AA
+  Sierra Lee: Indie
+  Sierra Northwest: AA
+  Sierra Studios: AA
+  Sigma Team: Indie
+  Silicon Knights: AA
+  Silver Dollar Games: Indie
+  SimBin: AA
+  SimBin Studios: AA
+  SimBin Studios AB: Indie
+  Simis: Indie
+  SIMS: AA
+  Sirhaian: Indie
+  Six by nine: Indie
+  Ska Studios: Indie
+  Sledgehammer Games: AAA
+  Slightly Mad Studios: AA
+  Slipgate Ironworks™: Indie
+  Smilebit: AAA
+  Smilegate: AAA
+  SNK: AA
+  SNK Playmore: AA
+  Snowhound Games: Indie
+  Snowrunner Games: Indie
+  Sonic Team: AAA
+  Sony Computer Entertainment America: AAA
+  Sony Interactive Entertainment: AAA
+  Soundelux: AA
+  South East Games: Indie
+  South Park Digital Studios: AA
+  Sowoke Entertainment Bureau: Indie
+  Spawn Studios: Indie
+  Spicy Horse: Indie
+  Spicy Horse Games: Indie
+  Spiders: Indie
+  Spike Chunsoft: AA
+  Spiky Crumb: Indie
+  Spiral House: Indie
+  Splash Damage: AA
+  Splendy Games: Indie
+  Splendy Interactive: Indie
+  Spooky Doorway: Indie
+  Squad: Indie
+  Square: AAA
+  Square Enix: AAA
+  Square Enix Business Division 6: AAA
+  Square Enix Europe: AAA
+  Square Product Development Division 5: AAA
+  Square USA: AAA
+  STALKER: Indie
+  Starbreeze Studios: AA
+  StarWraith 3D Games: Indie
+  Statespace: Indie
+  Steedie: Indie
+  SteelRaven7: Indie
+  Stellar Jockeys: Indie
+  Steve Gabry: Indie
+  Stormling Studios: Indie
+  Strange Scaffold: Indie
+  Streum On Studio: Indie
+  Studio 397: Indie
+  Studio MDHR: Indie
+  Studio MDHR Entertainment: Indie
+  Studio Snowspot: Indie
+  Studio Trophis: Indie
+  Studio Trophis Production: Indie
+  Stunlock Studios: AA
+  STuNT: Indie
+  Subset Games: Indie
+  SUKEBAN: Indie
+  Sukeban Games: Indie
+  Sumo Digital: AA
+  Sunstorm Interactive: AA
+  Superflat Games: Indie
+  Supergiant Games: Indie
+  SUPERHOT: Indie
+  SUPERHOT Team: Indie
+  Supermassive Games: Indie
+  Surreal Software: AA
+  Suspicious Developments: Indie
+  Svavelstickan: Indie
+  Sven Co-op Team: Indie
+  Swingin' Ape Studios: AA
+  T Allen Studios: Indie
+  T-Nugget: Indie
+  Tamsoft: Indie
+  Tango Gameworks: AAA
+  Tantalus: AA
+  Tantalus Media: Indie
+  Tarsier Studios: Indie
+  Team Cherry: Indie
+  Team Fusion Simulations: Indie
+  Team GrisGris: Indie
+  Team Meat: Indie
+  Team Psykskallar: Indie
+  Team Rez: Indie
+  Team Salvato: Indie
+  Team Shifty: Indie
+  Team Silent: AA
+  Team Viewtiful: AAA
+  Team Xonotic: Indie
+  Team17: Indie
+  Team17 Digital: AA
+  Team17 Software: AA
+  TeamTNT: Indie
+  Techland: Indie
+  Tectoy: AA
+  teedoubleu: Indie
+  Tencent Aurora Studios: AAA
+  Tencent Games: AAA
+  Tequilabyte Studio: Indie
+  Terminal Reality: AA
+  Terri Vellmann: Indie
+  Terry Cavanagh: Indie
+  Teyon: Indie
+  The 3DO: AA
+  The Behemoth: Indie
+  THE BROTHERHOOD: Indie
+  The Brotherhood Games: Indie
+  The Bruce Artwick Organization: AA
+  The Coalition: AAA
+  The Code Monkeys: Indie
+  The Creative Assembly: AAA
+  The Digital Lounge: AA
+  The Farm 51: Indie
+  The Fizz Factor: AA
+  The Game Kitchen: Indie
+  The GD Studio: Indie
+  The Secret Experiement: Indie
+  The Secret Experiment: Indie
+  The Sexy Chinaman: Indie
+  Thekla: Indie
+  TheMeatly Games: Indie
+  ThePhaseCat: Indie
+  Third Wire: Indie
+  Third Wire Productions: Indie
+  Thomas Happ Games: AA
+  THQ: AA
+  THQ Nordic: AA
+  Three Swords Studio: Indie
+  Threewave Software: AA
+  Thunder Lotus: Indie
+  Thunder Lotus Games: Indie
+  Thunderful Publishing: AA
+  Tiger Hill Entertainment: AA
+  Tigon Studios: AA
+  Timegate: Indie
+  TimeGate Studios: AA
+  tinyBuild: Indie
+  Titan Computer: AA
+  Toby Fox: Indie
+  tobyfox: Indie
+  Tom Jubert: Indie
+  Tomasz Wacławek: Indie
+  Top Hat Studios: Indie
+  Torple Dook: Indie
+  Torus Games: AA
+  Tose: AA
+  Toxic Games: Indie
+  Toylogic: AA
+  Toys for Bob: AAA
+  TransGaming: AA
+  TransGaming Technologies: AA
+  Transhuman Design: Indie
+  Traveller's Tales: AAA
+  Treyarch: AAA
+  Tribute Games: Indie
+  Trilobyte: AA
+  Trilobyte Games: AA
+  triptych: AA
+  Triptych Games: AA
+  Tripwire Interactive: AA
+  Triumph Studios: Indie
+  Troika Games: Indie
+  Tuna Technologies: Indie
+  Turn 10 Studios: AAA
+  Turtle Rock Studios: AA
+  Twin Petes: Indie
+  Tyler Glaiel: Indie
+  Typha: Indie
+  Ubi Soft Milan: AAA
+  Ubisoft: AAA
+  Ubisoft Annecy: AAA
+  Ubisoft Barcelona: AAA
+  Ubisoft Belgrade: AAA
+  Ubisoft Bucharest: AAA
+  Ubisoft Casablanca: AAA
+  Ubisoft Entertainment: AAA
+  Ubisoft Kiev: AAA
+  Ubisoft Kyiv: AAA
+  Ubisoft Milan: AAA
+  Ubisoft Montpellier: AAA
+  Ubisoft Montreal: AAA
+  Ubisoft Paris: AAA
+  Ubisoft Paris Studio: AAA
+  Ubisoft Québec: AAA
+  Ubisoft Reflections: AAA
+  Ubisoft Romania: AAA
+  Ubisoft San Francisco: AAA
+  Ubisoft Shanghai: AAA
+  Ubisoft Singapore: AAA
+  Ubisoft Toronto: AAA
+  Ultra Ultra: Indie
+  Undead Labs: Indie
+  Unfold Games: Indie
+  Uppercut Games: Indie
+  Uprise: Indie
+  Uri: Indie
+  Uri Games: Indie
+  Vagabond Dog: Indie
+  Vaka Game Magazine: Indie
+  Valve: AAA
+  Valve Software: AAA
+  Vblank Entertainment: Indie
+  Veewo: Indie
+  Veewo Games: Indie
+  Vicarious Visions: Indie
+  Vidas Salavejus: Indie
+  Virtual Programming: Indie
+  Virtuos: AA
+  Visceral: AAA
+  Visceral Games: AAA
+  Vivendi Universal Games: AAA
+  Vlambeer: Indie
+  Voidpoint: Indie
+  Volition: AA
+  Wadjet Eye Games: Indie
+  Wales Interactive: Indie
+  Wanako Games: AA
+  Wanako Studios: AA
+  Wargaming West: AA
+  Warner Bros. Games: AAA
+  Warner Bros. Interactive: AAA
+  Warthog: AA
+  Warthog Games: AA
+  Warthog PLC: AA
+  Wayward Preacher: Indie
+  WB Games Montreal: AAA
+  Westlake Interactive: AA
+  White Owls: AA
+  WhitePeach: Indie
+  Wicked Witch: Indie
+  Wicked Witch Software: AA
+  Wideload Games: AA
+  Wild Tangent: AA
+  Williams Entertainment: AA
+  Winterveil Studios: Indie
+  Wither Studios: Indie
+  Wizard Fu: Indie
+  Wizard Fu Games: Indie
+  Wizard Fu Studios: Indie
+  WizardWorks: AA
+  Wolfgame: Indie
+  Wolfire: Indie
+  Wolfire Games: Indie
+  World's Edge: Indie
+  WOW Entertainment: AA
+  X.D. Network: AA
+  Xatrix Entertainment: AA
+  Xbox Game Studios: AAA
+  XPEC: AA
+  XPEC Entertainment: AA
+  XSEED Games: AA
+  Yacht Club Games: Indie
+  YAGER: AA
+  Yager Development: AA
+  Yingpei Games: AA
+  Ysbryd Games Worldwide: Indie
+  Zachary Barth: Indie
+  Zachtronics: Indie
+  Zachtronics Industries: Indie
+  Zan: Indie
+  Zoetrope Interactive: AA
+  Zonic: Indie
+  ZOOM Platform Media: Indie
+  '{CRYTIME}': Indie

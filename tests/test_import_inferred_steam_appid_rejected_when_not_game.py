@@ -7,6 +7,7 @@ import pandas as pd
 
 def test_import_rejects_inferred_steam_appid_when_appdetails_not_game(tmp_path, monkeypatch):
     from game_catalog_builder import cli as cli_mod
+    from game_catalog_builder.pipelines import context, provider_clients
 
     class FakeIGDBClient:
         def __init__(self, **_kwargs):
@@ -43,10 +44,10 @@ def test_import_rejects_inferred_steam_appid_when_appdetails_not_game(tmp_path, 
         def format_cache_stats(self) -> str:
             return "ok"
 
-    monkeypatch.setattr(cli_mod, "IGDBClient", FakeIGDBClient)
-    monkeypatch.setattr(cli_mod, "SteamClient", FakeSteamClient)
+    monkeypatch.setattr(provider_clients, "IGDBClient", FakeIGDBClient)
+    monkeypatch.setattr(provider_clients, "SteamClient", FakeSteamClient)
     monkeypatch.setattr(
-        cli_mod,
+        context,
         "load_credentials",
         lambda _p: {"igdb": {"client_id": "x", "client_secret": "y"}},
     )

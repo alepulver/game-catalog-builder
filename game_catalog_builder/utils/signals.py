@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from pathlib import Path
@@ -10,33 +11,7 @@ import pandas as pd
 import yaml
 
 from ..config import SIGNALS
-from .company import normalize_company_name
-
-_COMPANY_SPLIT_RE = re.compile(r"(?i)\s*(?:,|/|&|\band\b|\bwith\b|\+)\s*")
-
-
-def iter_company_name_variants(value: str) -> list[str]:
-    """
-    Return a small set of plausible company-name variants for matching tiers:
-    - normalized original string
-    - if the value looks like multiple companies joined in one string, split and normalize parts
-    """
-    raw = str(value or "").strip()
-    if not raw:
-        return []
-    out: list[str] = []
-    n0 = normalize_company_name(raw)
-    if n0:
-        out.append(n0)
-
-    # Heuristic: if it's long and contains separators, it might be multiple studios.
-    if len(raw) >= 18 and _COMPANY_SPLIT_RE.search(raw):
-        parts = [p.strip() for p in _COMPANY_SPLIT_RE.split(raw) if p.strip()]
-        for p in parts:
-            np = normalize_company_name(p)
-            if np and np not in out:
-                out.append(np)
-    return out
+from .company import iter_company_name_variants, normalize_company_name
 
 
 def _parse_int(value: Any) -> int | None:
@@ -136,26 +111,58 @@ def _log_scale_0_100(value: int | None, *, log10_min: float, log10_max: float) -
     return t * 100.0
 
 
-def load_production_tiers(path: str | Path) -> dict[str, dict[str, str]]:
+def load_production_tiers(path: str | Path) -> dict[str, dict[str, object]]:
     """
-    Load a production tier mapping file.
+    Load a manual production tiers YAML mapping.
 
-    Format:
+    Expected format:
       publishers:
-        \"Publisher Name\": \"AAA\"
+        "Company Name": {tier: "AAA|AA|Indie"}  # extra fields allowed
       developers:
-        \"Developer Name\": \"Indie\"
+        "Company Name": {tier: "AAA|AA|Indie"}
+
+    Values may also be plain strings (tier).
     """
     p = Path(path)
     if not p.exists():
         return {"publishers": {}, "developers": {}}
-    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    pubs = data.get("publishers") if isinstance(data, dict) else {}
-    devs = data.get("developers") if isinstance(data, dict) else {}
-    return {
-        "publishers": pubs if isinstance(pubs, dict) else {},
-        "developers": devs if isinstance(devs, dict) else {},
-    }
+    try:
+        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {"publishers": {}, "developers": {}}
+    pubs_in = data.get("publishers") if isinstance(data, dict) else {}
+    devs_in = data.get("developers") if isinstance(data, dict) else {}
+    pubs_in = pubs_in if isinstance(pubs_in, dict) else {}
+    devs_in = devs_in if isinstance(devs_in, dict) else {}
+
+    def _tier(v: Any) -> str:
+        if isinstance(v, dict):
+            return str(v.get("tier") or "").strip()
+        if isinstance(v, str):
+            return v.strip()
+        return ""
+
+    pubs: dict[str, object] = {}
+    devs: dict[str, object] = {}
+    for label, v in pubs_in.items():
+        tier = _tier(v)
+        if not tier:
+            continue
+        n = normalize_company_name(label)
+        if not n:
+            continue
+        pubs[n.casefold()] = {"tier": tier, "label": str(label or "").strip()}
+
+    for label, v in devs_in.items():
+        tier = _tier(v)
+        if not tier:
+            continue
+        n = normalize_company_name(label)
+        if not n:
+            continue
+        devs[n.casefold()] = {"tier": tier, "label": str(label or "").strip()}
+
+    return {"publishers": pubs, "developers": devs}
 
 
 def _split_csv_list(s: Any) -> list[str]:
@@ -176,11 +183,194 @@ def _split_csv_list(s: Any) -> list[str]:
     return [str(x).strip() for x in parsed if str(x).strip()]
 
 
+def _company_sets_by_provider(
+    row: dict[str, Any], *, kind: str
+) -> tuple[dict[str, set[str]], dict[str, dict[str, str]]]:
+    """
+    Extract normalized company-name sets from provider cells.
+
+    Returns:
+      - provider -> set(normalized_company_key)
+      - provider -> {normalized_company_key -> original_name} (best-effort for display)
+    """
+    if kind not in {"developer", "publisher"}:
+        raise ValueError("kind must be developer or publisher")
+
+    cols_by_provider: dict[str, str] = {
+        "steam": "Steam_Developers" if kind == "developer" else "Steam_Publishers",
+        "rawg": "RAWG_Developers" if kind == "developer" else "RAWG_Publishers",
+        "igdb": "IGDB_Developers" if kind == "developer" else "IGDB_Publishers",
+        "wikidata": "Wikidata_Developers" if kind == "developer" else "Wikidata_Publishers",
+    }
+
+    sets: dict[str, set[str]] = {}
+    originals: dict[str, dict[str, str]] = {}
+
+    for prov, col in cols_by_provider.items():
+        raw_list = _split_csv_list(row.get(col, ""))
+        prov_set: set[str] = set()
+        prov_map: dict[str, str] = {}
+        for raw in raw_list:
+            n = normalize_company_name(raw)
+            if not n:
+                continue
+            key = n.casefold()
+            prov_set.add(key)
+            prov_map.setdefault(key, raw)
+        if prov_set:
+            sets[prov] = prov_set
+            originals[prov] = prov_map
+    return sets, originals
+
+
+def _company_strict_majority_consensus(
+    company_sets: dict[str, set[str]],
+) -> tuple[tuple[str, ...], list[str]]:
+    """
+    Conservative dev/pub consensus:
+      - require a strict-majority overlap component, and
+      - require a non-empty intersection across that component.
+    """
+    present = [p for p, s in company_sets.items() if s]
+    if len(present) < 2:
+        return (), []
+
+    parent: dict[str, str] = {p: p for p in present}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i, a in enumerate(present):
+        for b in present[i + 1 :]:
+            if not company_sets[a].isdisjoint(company_sets[b]):
+                union(a, b)
+
+    comps: dict[str, set[str]] = {}
+    for p in present:
+        comps.setdefault(find(p), set()).add(p)
+    groups = list(comps.values())
+    groups.sort(key=lambda s: (-len(s), "+".join(sorted(s))))
+    best = groups[0]
+    if len(best) <= len(present) / 2:
+        return (), []
+
+    providers = tuple(sorted(best))
+    inter = set.intersection(*(company_sets[p] for p in providers))
+    if not inter:
+        return (), []
+    return providers, [x for x in sorted(inter)]
+
+
+def _content_type_from_steam(row: dict[str, Any]) -> str:
+    st = str(row.get("Steam_StoreType", "") or "").strip().lower()
+    if not st:
+        return ""
+    if st == "game":
+        return "base_game"
+    if st == "dlc":
+        return "dlc"
+    if st == "demo":
+        return "demo"
+    if st == "soundtrack":
+        return "soundtrack"
+    if st == "bundle":
+        return "collection"
+    return ""
+
+
+def _content_type_from_igdb(row: dict[str, Any]) -> str:
+    # Relationship-only heuristics (no extra endpoints/fields):
+    # - version_parent implies this title is a version/edition/port of another
+    # - parent_game implies this title is a child (DLC/expansion/etc)
+    if str(row.get("IGDB_VersionParent", "") or "").strip():
+        return "port"
+    if str(row.get("IGDB_ParentGame", "") or "").strip():
+        return "dlc"
+    return ""
+
+
+def _content_type_source_signals(row: dict[str, Any]) -> list[str]:
+    """
+    Return compact, human-readable tags describing the source signals.
+
+    These are meant for review/debugging, not for strict parsing.
+    """
+    out: list[str] = []
+    st = str(row.get("Steam_StoreType", "") or "").strip().lower()
+    if st:
+        out.append(f"steam:type={st}")
+    if str(row.get("IGDB_VersionParent", "") or "").strip():
+        out.append("igdb:version_parent")
+    if str(row.get("IGDB_ParentGame", "") or "").strip():
+        out.append("igdb:parent_game")
+    if str(row.get("IGDB_DLCs", "") or "").strip():
+        out.append("igdb:has_dlcs")
+    if str(row.get("IGDB_Expansions", "") or "").strip():
+        out.append("igdb:has_expansions")
+    if str(row.get("IGDB_Ports", "") or "").strip():
+        out.append("igdb:has_ports")
+    return out
+
+
+def _content_type_consensus(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    """
+    Compute (content_type, consensus_providers, source_signals, conflict) conservatively.
+
+    - Uses only explicit signals:
+      - Steam_StoreType
+      - IGDB relationships (VersionParent/ParentGame)
+    - Returns empty content_type when providers disagree (no strict majority).
+    """
+    votes: list[tuple[str, str]] = []
+    s = _content_type_from_steam(row)
+    if s:
+        votes.append(("steam", s))
+    i = _content_type_from_igdb(row)
+    if i:
+        votes.append(("igdb", i))
+
+    if not votes:
+        return ("", "", ", ".join(_content_type_source_signals(row)), "")
+
+    counts: dict[str, int] = {}
+    providers_by_type: dict[str, list[str]] = {}
+    for prov, v in votes:
+        counts[v] = counts.get(v, 0) + 1
+        providers_by_type.setdefault(v, []).append(prov)
+
+    best_type, best_count = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
+    if best_count <= len(votes) / 2:
+        # If we had multiple explicit votes but no majority, surface a conflict flag.
+        conflict = "YES" if len(votes) >= 2 else ""
+        return ("", "", ", ".join(_content_type_source_signals(row)), conflict)
+    return (
+        best_type,
+        "+".join(sorted(providers_by_type.get(best_type, []))),
+        ", ".join(_content_type_source_signals(row)),
+        "",
+    )
+
+
 def compute_production_tier(
-    row: dict[str, Any], mapping: dict[str, dict[str, str]]
+    row: dict[str, Any], mapping: dict[str, dict[str, object]]
 ) -> tuple[str, str]:
     """
-    Compute (tier, reason) using Steam developer/publisher names.
+    Compute (tier, reason) using available developer/publisher names.
+
+    Priority order:
+      - publishers (Steam → IGDB → RAWG → Wikidata)
+      - developers (Steam → IGDB → RAWG → Wikidata)
+
+    If no non-Unknown tier is found but at least one company name is present,
+    returns ("Unknown", "...") so the column isn't blank for known-company rows.
     """
     pubs = mapping.get("publishers", {}) if isinstance(mapping, dict) else {}
     devs = mapping.get("developers", {}) if isinstance(mapping, dict) else {}
@@ -197,42 +387,61 @@ def compute_production_tier(
             return 0
         return -1
 
-    pubs_norm: dict[str, tuple[str, str]] = {}
-    for k, v in pubs.items():
-        nk = normalize_company_name(k)
-        tier = str(v or "").strip()
-        if not nk or not tier:
-            continue
-        key = nk.casefold()
-        prev = pubs_norm.get(key)
-        if prev is None or _tier_rank(tier) > _tier_rank(prev[0]):
-            pubs_norm[key] = (tier, str(k))
+    def _lookup(store: dict[str, object], key: str) -> tuple[str, str]:
+        """
+        Return (tier, label) for a normalized key.
 
-    devs_norm: dict[str, tuple[str, str]] = {}
-    for k, v in devs.items():
-        nk = normalize_company_name(k)
-        tier = str(v or "").strip()
-        if not nk or not tier:
-            continue
-        key = nk.casefold()
-        prev = devs_norm.get(key)
-        if prev is None or _tier_rank(tier) > _tier_rank(prev[0]):
-            devs_norm[key] = (tier, str(k))
+        Supports both:
+          - new JSON object values: {"tier": "...", "label": "..."}
+          - legacy plain string values: "AAA"
+        """
+        obj = store.get(key)
+        if isinstance(obj, dict):
+            tier = str(obj.get("tier") or "").strip()
+            label = str(obj.get("label") or "").strip()
+            return (tier, label)
+        if isinstance(obj, str):
+            return (obj.strip(), "")
+        return ("", "")
 
-    for pub in _split_csv_list(row.get("Steam_Publishers", "")):
+    def _iter_company_field(*cols: str) -> list[str]:
+        out: list[str] = []
+        for c in cols:
+            out.extend(_split_csv_list(row.get(c, "")))
+        return out
+
+    publisher_cols = ("Steam_Publishers", "IGDB_Publishers", "RAWG_Publishers", "Wikidata_Publishers")
+    developer_cols = ("Steam_Developers", "IGDB_Developers", "RAWG_Developers", "Wikidata_Developers")
+
+    saw_any_company = False
+    saw_unknown: tuple[str, str] | None = None
+
+    for pub in _iter_company_field(*publisher_cols):
+        saw_any_company = True
         for pub_n in iter_company_name_variants(pub):
-            if pub_n.startswith(("Feral Interactive", "Aspyr")):
+            if pub_n.casefold().startswith(("feral interactive", "aspyr")):
                 continue
-            tier, key = pubs_norm.get(pub_n.casefold(), ("", ""))
+            tier, label = _lookup(pubs, pub_n.casefold())
             if tier and tier != "Unknown":
-                return (tier, f"publisher:{key}")
-    for dev in _split_csv_list(row.get("Steam_Developers", "")):
+                return (tier, f"publisher:{label or pub}")
+            if tier == "Unknown" and saw_unknown is None:
+                saw_unknown = ("Unknown", f"publisher:{label or pub}")
+
+    for dev in _iter_company_field(*developer_cols):
+        saw_any_company = True
         for dev_n in iter_company_name_variants(dev):
-            if dev_n.startswith(("Feral Interactive", "Aspyr")):
+            if dev_n.casefold().startswith(("feral interactive", "aspyr")):
                 continue
-            tier, key = devs_norm.get(dev_n.casefold(), ("", ""))
+            tier, label = _lookup(devs, dev_n.casefold())
             if tier and tier != "Unknown":
-                return (tier, f"developer:{key}")
+                return (tier, f"developer:{label or dev}")
+            if tier == "Unknown" and saw_unknown is None:
+                saw_unknown = ("Unknown", f"developer:{label or dev}")
+
+    if saw_unknown is not None:
+        return saw_unknown
+    if saw_any_company:
+        return ("Unknown", "")
     return ("", "")
 
 
@@ -390,8 +599,90 @@ def apply_phase1_signals(
         igdb_critic_scores.append(str(int(round(f))) if f is not None else "")
     out["Score_IGDBCritic_100"] = pd.Series(igdb_critic_scores)
 
+    # --- Developer/publisher consensus (derived, conservative) ---
+    dev_cons_prov: list[str] = []
+    dev_cons_names: list[str] = []
+    dev_cons_count: list[str] = []
+    pub_cons_prov: list[str] = []
+    pub_cons_names: list[str] = []
+    pub_cons_count: list[str] = []
+
+    for _, r in out.iterrows():
+        row = r.to_dict()
+
+        dev_sets, dev_originals = _company_sets_by_provider(row, kind="developer")
+        pub_sets, pub_originals = _company_sets_by_provider(row, kind="publisher")
+
+        dev_providers, dev_keys = _company_strict_majority_consensus(dev_sets)
+        pub_providers, pub_keys = _company_strict_majority_consensus(pub_sets)
+
+        dev_cons_prov.append("+".join(dev_providers) if dev_providers else "")
+        pub_cons_prov.append("+".join(pub_providers) if pub_providers else "")
+        dev_cons_count.append(str(len(dev_providers)) if dev_providers else "")
+        pub_cons_count.append(str(len(pub_providers)) if pub_providers else "")
+
+        def _display(
+            keys: list[str], originals: dict[str, dict[str, str]], providers: tuple[str, ...]
+        ) -> str:
+            if not keys or not providers:
+                return ""
+            out_list: list[str] = []
+            for k in keys:
+                chosen = ""
+                for prov in ("steam", "igdb", "rawg", "wikidata"):
+                    if prov not in providers:
+                        continue
+                    chosen = str((originals.get(prov) or {}).get(k, "") or "").strip()
+                    if chosen:
+                        break
+                out_list.append(chosen or k)
+            return json.dumps(out_list, ensure_ascii=False)
+
+        dev_cons_names.append(_display(dev_keys, dev_originals, dev_providers))
+        pub_cons_names.append(_display(pub_keys, pub_originals, pub_providers))
+
+    out["Developers_ConsensusProviders"] = pd.Series(dev_cons_prov)
+    out["Developers_Consensus"] = pd.Series(dev_cons_names)
+    out["Developers_ConsensusProviderCount"] = pd.Series(dev_cons_count)
+    out["Publishers_ConsensusProviders"] = pd.Series(pub_cons_prov)
+    out["Publishers_Consensus"] = pd.Series(pub_cons_names)
+    out["Publishers_ConsensusProviderCount"] = pd.Series(pub_cons_count)
+
+    # --- Content type (derived consensus) ---
+    content_types: list[str] = []
+    content_type_prov: list[str] = []
+    content_type_signals: list[str] = []
+    content_type_conflict: list[str] = []
+    for _, r in out.iterrows():
+        ct, prov, signals, conflict = _content_type_consensus(r.to_dict())
+        content_types.append(ct)
+        content_type_prov.append(prov)
+        content_type_signals.append(signals)
+        content_type_conflict.append(conflict)
+    out["ContentType"] = pd.Series(content_types)
+    out["ContentType_ConsensusProviders"] = pd.Series(content_type_prov)
+    out["ContentType_SourceSignals"] = pd.Series(content_type_signals)
+    out["ContentType_Conflict"] = pd.Series(content_type_conflict)
+
     # --- Production tier (optional mapping) ---
     mapping = load_production_tiers(production_tiers_path)
+    pubs_map = mapping.get("publishers", {}) if isinstance(mapping, dict) else {}
+    devs_map = mapping.get("developers", {}) if isinstance(mapping, dict) else {}
+    if not pubs_map and not devs_map:
+        # Best-effort hint: if Steam dev/pub exists but no tiers store, suggest the updater command.
+        has_steam_companies = False
+        for col in ("Steam_Publishers", "Steam_Developers"):
+            if col in out.columns and bool(out[col].astype(str).str.strip().ne("").any()):
+                has_steam_companies = True
+                break
+        if has_steam_companies:
+            logging.info(
+                "Production tiers mapping is empty/missing; run "
+                "`python run.py collect-production-tiers data/output/Games_Enriched.csv`, "
+                "edit tiers in `data/production_tiers.yaml` (start from "
+                "`cp data/production_tiers.example.yaml data/production_tiers.yaml`), "
+                "then re-run `enrich`."
+            )
     tiers: list[str] = []
     reasons: list[str] = []
     for _, r in out.iterrows():

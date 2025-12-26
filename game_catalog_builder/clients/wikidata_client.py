@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -22,7 +23,7 @@ from ..config import CACHE
 
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
-USER_AGENT = "game-catalog-builder/1.0 (contact: alepulver@protonmail.com)"
+USER_AGENT = "game-catalog-builder/1.0"
 
 # External identifier properties (Wikidata wdt:Pxxxx).
 # Keep these centralized so we can adjust if needed.
@@ -942,6 +943,12 @@ class WikidataClient:
             names = [n for n in names if n]
             return ", ".join(sorted(dict.fromkeys(names)))
 
+        def _labels_list(prop: str) -> list[str]:
+            ids = _qids(prop)
+            names = [label_map.get(i, "") for i in ids]
+            names = [n for n in names if n]
+            return sorted(dict.fromkeys(names))
+
         wikipedia = ""
         enwiki_title = ""
         sitelinks = entity.get("sitelinks") or {}
@@ -960,8 +967,8 @@ class WikidataClient:
             "Wikidata_Description": desc,
             "Wikidata_ReleaseYear": release_year,
             "Wikidata_ReleaseDate": release_date,
-            "Wikidata_Developers": _labels("P178"),
-            "Wikidata_Publishers": _labels("P123"),
+            "Wikidata_Developers": json.dumps(_labels_list("P178"), ensure_ascii=False),
+            "Wikidata_Publishers": json.dumps(_labels_list("P123"), ensure_ascii=False),
             "Wikidata_Platforms": _labels("P400"),
             "Wikidata_Series": _labels("P179"),
             "Wikidata_Genres": _labels("P136"),
