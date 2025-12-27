@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -190,7 +190,9 @@ class ConfiguredHTTPJSONClient:
         on_fail_return: Any = None,
     ) -> Any:
         merged_headers = self.defaults.headers if headers is None else headers
-        merged_status = self.defaults.status_handlers if status_handlers is None else status_handlers
+        merged_status = (
+            self.defaults.status_handlers if status_handlers is None else status_handlers
+        )
         return self.http.get_json(
             url,
             params=params,
@@ -219,7 +221,9 @@ class ConfiguredHTTPJSONClient:
         on_fail_return: Any = None,
     ) -> Any:
         merged_headers = self.defaults.headers if headers is None else headers
-        merged_status = self.defaults.status_handlers if status_handlers is None else status_handlers
+        merged_status = (
+            self.defaults.status_handlers if status_handlers is None else status_handlers
+        )
         return self.http.post_json(
             url,
             data=data,

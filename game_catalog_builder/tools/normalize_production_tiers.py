@@ -54,7 +54,7 @@ def _pick_canonical_label(labels: list[str]) -> str:
         penalty += 5 if "™" in s else 0
         penalty += 5 if "®" in s else 0
         # Prefer shorter punctuation.
-        punct = sum(1 for ch in s if ch in "!?;:\"")
+        punct = sum(1 for ch in s if ch in '!?;:"')
         penalty += punct * 2
         # Prefer longer (avoid overly short/abbreviated) when tied.
         return (penalty, -len(s), s.count(" "), s.count("&"), s.casefold())
@@ -88,7 +88,9 @@ def _load_yaml_mapping(path: Path) -> dict[str, dict[str, str]]:
     return {"publishers": _as_tier_map(pubs), "developers": _as_tier_map(devs)}
 
 
-def normalize_production_tiers_yaml(*, in_yaml: Path, out_yaml: Path | None = None) -> NormalizeProductionTiersResult:
+def normalize_production_tiers_yaml(
+    *, in_yaml: Path, out_yaml: Path | None = None
+) -> NormalizeProductionTiersResult:
     """
     Deduplicate a production tiers YAML by `company_key` and rewrite it in a canonical form.
 
@@ -110,7 +112,7 @@ def normalize_production_tiers_yaml(*, in_yaml: Path, out_yaml: Path | None = No
         conflicts = 0
         out_map: dict[str, str] = {}
 
-        for key, items in by_key.items():
+        for _key, items in by_key.items():
             labels = [label for label, _ in items]
             tiers = [tier for _, tier in items]
             canonical = _pick_canonical_label(labels)
@@ -149,4 +151,3 @@ def normalize_production_tiers_yaml(*, in_yaml: Path, out_yaml: Path | None = No
         publishers_conflicts=pubs_conflicts,
         developers_conflicts=devs_conflicts,
     )
-

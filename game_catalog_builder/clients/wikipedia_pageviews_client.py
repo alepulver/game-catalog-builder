@@ -9,12 +9,12 @@ from urllib.parse import quote
 
 import requests
 
-from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
+from ..config import CACHE
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
 )
-from ..config import CACHE
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 WIKIMEDIA_PAGEVIEWS_API = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
 USER_AGENT = "game-catalog-builder/1.0"
@@ -109,7 +109,9 @@ class WikipediaPageviewsClient:
         self._fetch_disabled = False
         self._fetch_disabled_logged = False
 
-    def _parse_daily_request_key(self, request_key: str) -> tuple[str, str, str, date, date, int] | None:
+    def _parse_daily_request_key(
+        self, request_key: str
+    ) -> tuple[str, str, str, date, date, int] | None:
         parts = str(request_key or "").split("|")
         if len(parts) < 7:
             return None
@@ -385,7 +387,9 @@ class WikipediaPageviewsClient:
         if days <= 0:
             return None
         summary = self.get_pageviews_launch_summary_enwiki(
-            enwiki_title=enwiki_title, release_date=release_date, earliest_supported=earliest_supported
+            enwiki_title=enwiki_title,
+            release_date=release_date,
+            earliest_supported=earliest_supported,
         )
         if days <= 30:
             return summary.days_30

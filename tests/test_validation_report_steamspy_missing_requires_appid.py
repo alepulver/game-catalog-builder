@@ -29,4 +29,3 @@ def test_validation_report_does_not_mark_steamspy_missing_without_steam_appid():
     tags1 = report.loc[1, "ValidationTags"]
     assert "missing:SteamSpy" not in tags0
     assert "missing:SteamSpy" in tags1
-

@@ -56,7 +56,11 @@ def test_collect_production_tiers_only_missing_filters_filled(tmp_path: Path) ->
     )
 
     collect_production_tiers_yaml(
-        enriched_csv=enriched, out_yaml=out_yaml, max_examples=1, keep_existing=True, only_missing=True
+        enriched_csv=enriched,
+        out_yaml=out_yaml,
+        max_examples=1,
+        keep_existing=True,
+        only_missing=True,
     )
     parsed = yaml.safe_load(out_yaml.read_text(encoding="utf-8"))
     assert "Pub A" not in parsed["publishers"]

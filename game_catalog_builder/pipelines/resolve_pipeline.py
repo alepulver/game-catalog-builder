@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ..diagnostics.resolve import ResolveStats, resolve_catalog_pins
-from ..pipelines.common import log_cache_stats
+from ..analysis.resolve import ResolveStats, resolve_catalog_pins
+from ..pipelines.common import log_cache_stats, write_full_csv
 from ..pipelines.context import PipelineContext
-from ..utils import read_csv, write_csv
+from ..utils import read_csv
 
 
 def run_resolve(
@@ -40,9 +40,11 @@ def run_resolve(
     )
 
     if apply:
-        write_csv(df, out_csv)
+        write_full_csv(df, out_csv)
     else:
-        logging.info("Resolve dry-run: no catalog CSV was written (use --apply to persist changes).")
+        logging.info(
+            "Resolve dry-run: no catalog CSV was written (use --apply to persist changes)."
+        )
 
     log_cache_stats(clients)
 

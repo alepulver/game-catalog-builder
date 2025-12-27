@@ -26,4 +26,3 @@ class EveryN:
             return
         self.callback()
         self._last_s = now
-

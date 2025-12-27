@@ -7,11 +7,11 @@ from typing import Any
 import requests
 
 from ..config import RETRY, STEAMSPY
-from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
 )
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 STEAMSPY_URL = "https://steamspy.com/api.php"
 
@@ -121,6 +121,8 @@ class SteamSpyClient:
             rate = ""
         return {
             "SteamSpy_Owners": str(data.get("owners", "")),
+            "SteamSpy_Players": str(data.get("players_forever", "")),
+            "SteamSpy_Players2Weeks": str(data.get("players_2weeks", "")),
             "SteamSpy_CCU": str(data.get("ccu", "")),
             "SteamSpy_PlaytimeAvg": str(data.get("average_forever", "")),
             "SteamSpy_PlaytimeAvg2Weeks": str(data.get("average_2weeks", "")),

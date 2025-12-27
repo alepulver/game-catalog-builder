@@ -41,6 +41,7 @@ _GENERIC_SUFFIX_TOKENS = {
 # ("Ubisoft Montreal, Massive Entertainment, Ubisoft Shanghai") without breaking legitimate
 # single-company names like "Running With Scissors" or "Power and Magic Development".
 
+
 def iter_company_name_variants(value: str) -> list[str]:
     """
     Return a small set of plausible company-name variants for tier matching:

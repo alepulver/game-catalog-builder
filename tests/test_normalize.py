@@ -6,13 +6,13 @@ import pandas as pd
 
 
 def test_normalize_catalog_adds_rowid_and_identity_columns(tmp_path: Path) -> None:
-    from game_catalog_builder.cli import _normalize_catalog
+    from game_catalog_builder.pipelines.import_pipeline import normalize_catalog
 
     inp = tmp_path / "input.csv"
     out = tmp_path / "Games_Catalog.csv"
 
     pd.DataFrame([{"Name": "Doom", "MyRating": "5"}]).to_csv(inp, index=False)
-    _normalize_catalog(inp, out)
+    normalize_catalog(inp, out)
 
     df = pd.read_csv(out).fillna("")
     assert "RowId" in df.columns
@@ -44,13 +44,13 @@ def test_normalize_catalog_adds_rowid_and_identity_columns(tmp_path: Path) -> No
 
 
 def test_normalize_catalog_can_skip_diagnostics_columns(tmp_path: Path) -> None:
-    from game_catalog_builder.cli import _normalize_catalog
+    from game_catalog_builder.pipelines.import_pipeline import normalize_catalog
 
     inp = tmp_path / "input.csv"
     out = tmp_path / "Games_Catalog.csv"
 
     pd.DataFrame([{"Name": "Doom", "MyRating": "5"}]).to_csv(inp, index=False)
-    _normalize_catalog(inp, out, include_diagnostics=False)
+    normalize_catalog(inp, out, include_diagnostics=False)
 
     df = pd.read_csv(out).fillna("")
     assert "RowId" in df.columns

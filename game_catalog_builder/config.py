@@ -87,6 +87,8 @@ class CLIConfig:
     steam_flush_batch_size: int = 25
     steam_streaming_flush_batch_size: int = 10
     progress_every_n: int = 25
+    progress_min_interval_s: float = 30.0
+    max_parallel_providers: int = 8
 
 
 @dataclass(frozen=True)

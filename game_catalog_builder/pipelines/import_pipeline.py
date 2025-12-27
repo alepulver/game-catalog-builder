@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
 
-from ..diagnostics.import_diagnostics import fill_eval_tags, platform_is_pc_like
-from ..pipelines.common import log_cache_stats
+from ..analysis.import_diagnostics import fill_eval_tags, platform_is_pc_like
+from ..config import CLI
+from ..pipelines.common import iter_named_rows_with_progress, log_cache_stats, write_full_csv
 from ..pipelines.context import PipelineContext
 from ..pipelines.protocols import (
     HLTBClientLike,
@@ -23,10 +25,7 @@ from ..utils import (
     extract_year_hint,
     fuzzy_score,
     read_csv,
-    write_csv,
 )
-from ..utils.periodic import EveryN
-from ..utils.progress import Progress
 
 
 def normalize_catalog(
@@ -106,7 +105,7 @@ def normalize_catalog(
     df = ensure_columns(df, required_cols)
     df["Name"] = df["Name"].astype(str).str.strip()
     with_ids, created = ensure_row_ids(df)
-    write_csv(with_ids, output_csv)
+    write_full_csv(with_ids, output_csv)
     logging.info(f"✔ Catalog normalized: {output_csv} (new ids: {created})")
     return output_csv
 
@@ -148,28 +147,22 @@ def _match_rawg_ids(
     include_diagnostics: bool,
     active_total: int,
 ) -> None:
-    progress = Progress("RAWG", total=active_total, every_n=100)
-    seen = 0
-    for idx, row in df.iterrows():
-        if _is_yes(row.get("Disabled", "")):
-            continue
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
-
+    for idx, row, name, _seen in iter_named_rows_with_progress(
+        df,
+        label="RAWG",
+        total=active_total,
+        skip_row=lambda r: _is_yes(r.get("Disabled", "")),
+    ):
         rawg_id = str(row.get("RAWG_ID", "") or "").strip()
         if rawg_id == IDENTITY_NOT_FOUND:
             if include_diagnostics:
                 df.at[idx, "RAWG_MatchedName"] = ""
                 df.at[idx, "RAWG_MatchScore"] = ""
                 df.at[idx, "RAWG_MatchedYear"] = ""
-            progress.maybe_log(seen)
             continue
 
         if rawg_id:
             if not include_diagnostics:
-                progress.maybe_log(seen)
                 continue
             obj = client.get_by_id(rawg_id)
         else:
@@ -184,8 +177,6 @@ def _match_rawg_ids(
             df.at[idx, "RAWG_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
             df.at[idx, "RAWG_MatchedYear"] = released[:4] if len(released) >= 4 else ""
 
-        progress.maybe_log(seen)
-
 
 def _match_igdb_ids(
     df: pd.DataFrame,
@@ -194,28 +185,22 @@ def _match_igdb_ids(
     include_diagnostics: bool,
     active_total: int,
 ) -> None:
-    progress = Progress("IGDB", total=active_total, every_n=100)
-    seen = 0
-    for idx, row in df.iterrows():
-        if _is_yes(row.get("Disabled", "")):
-            continue
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
-
+    for idx, row, name, _seen in iter_named_rows_with_progress(
+        df,
+        label="IGDB",
+        total=active_total,
+        skip_row=lambda r: _is_yes(r.get("Disabled", "")),
+    ):
         igdb_id = str(row.get("IGDB_ID", "") or "").strip()
         if igdb_id == IDENTITY_NOT_FOUND:
             if include_diagnostics:
                 df.at[idx, "IGDB_MatchedName"] = ""
                 df.at[idx, "IGDB_MatchScore"] = ""
                 df.at[idx, "IGDB_MatchedYear"] = ""
-            progress.maybe_log(seen)
             continue
 
         if igdb_id:
             if not include_diagnostics:
-                progress.maybe_log(seen)
                 continue
             obj = client.get_by_id(igdb_id)
         else:
@@ -229,8 +214,6 @@ def _match_igdb_ids(
             df.at[idx, "IGDB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
             df.at[idx, "IGDB_MatchedYear"] = str(obj.get("IGDB_Year") or "").strip()
 
-        progress.maybe_log(seen)
-
 
 def _match_steam_appids(
     df: pd.DataFrame,
@@ -240,9 +223,6 @@ def _match_steam_appids(
     include_diagnostics: bool,
     active_total: int,
 ) -> None:
-    progress = Progress("STEAM", total=active_total, every_n=100)
-    seen = 0
-
     def _details_is_game(d: object) -> bool:
         if not isinstance(d, dict):
             return False
@@ -261,21 +241,18 @@ def _match_steam_appids(
             if "Steam_StoreType" in df.columns:
                 df.at[row_idx, "Steam_StoreType"] = str(d.get("type") or "").strip().lower()
 
-    for idx, row in df.iterrows():
-        if _is_yes(row.get("Disabled", "")):
-            continue
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
-
+    for idx, row, name, _seen in iter_named_rows_with_progress(
+        df,
+        label="STEAM",
+        total=active_total,
+        skip_row=lambda r: _is_yes(r.get("Disabled", "")),
+    ):
         steam_id = str(row.get("Steam_AppID", "") or "").strip()
         if not platform_is_pc_like(row.get("Platform", "")) and not steam_id:
             if include_diagnostics:
                 df.at[idx, "Steam_MatchedName"] = ""
                 df.at[idx, "Steam_MatchScore"] = ""
                 df.at[idx, "Steam_MatchedYear"] = ""
-            progress.maybe_log(seen)
             continue
 
         if steam_id == IDENTITY_NOT_FOUND:
@@ -285,7 +262,6 @@ def _match_steam_appids(
                 df.at[idx, "Steam_MatchedYear"] = ""
                 if "Steam_RejectedReason" in df.columns:
                     df.at[idx, "Steam_RejectedReason"] = ""
-            progress.maybe_log(seen)
             continue
 
         if steam_id and steam_id.isdigit():
@@ -295,7 +271,6 @@ def _match_steam_appids(
                 steam_id = ""
             elif include_diagnostics and isinstance(details, dict):
                 _apply_details(int(idx), name, details)
-                progress.maybe_log(seen)
                 continue
 
         if not steam_id and igdb is not None:
@@ -309,7 +284,6 @@ def _match_steam_appids(
                         df.at[idx, "Steam_AppID"] = inferred
                         steam_id = inferred
                         _apply_details(int(idx), name, inferred_details)
-                        progress.maybe_log(seen)
                         continue
 
         res = steam.search_appid(name, year_hint=_year_hint_from_row(row))
@@ -321,11 +295,11 @@ def _match_steam_appids(
             df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
             df.at[idx, "Steam_MatchedYear"] = str((res or {}).get("release_year") or "").strip()
             if "Steam_RejectedReason" in df.columns:
-                df.at[idx, "Steam_RejectedReason"] = str((res or {}).get("rejected_reason") or "").strip()
+                df.at[idx, "Steam_RejectedReason"] = str(
+                    (res or {}).get("rejected_reason") or ""
+                ).strip()
             if "Steam_StoreType" in df.columns:
                 df.at[idx, "Steam_StoreType"] = str((res or {}).get("store_type") or "").strip()
-
-        progress.maybe_log(seen)
 
 
 def _match_hltb_ids(
@@ -334,19 +308,13 @@ def _match_hltb_ids(
     client: HLTBClientLike,
     include_diagnostics: bool,
     active_total: int,
-    output_csv: Path,
 ) -> None:
-    progress = Progress("HLTB", total=active_total, every_n=25)
-    seen = 0
-    writer = EveryN(every_n=25, callback=lambda: write_csv(df, output_csv))
-
-    for idx, row in df.iterrows():
-        if _is_yes(row.get("Disabled", "")):
-            continue
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
+    for idx, row, name, _seen in iter_named_rows_with_progress(
+        df,
+        label="HLTB",
+        total=active_total,
+        skip_row=lambda r: _is_yes(r.get("Disabled", "")),
+    ):
         hltb_id = str(row.get("HLTB_ID", "") or "").strip()
         hltb_query = str(row.get("HLTB_Query", "") or "").strip() or name
         if hltb_id == IDENTITY_NOT_FOUND or hltb_query == IDENTITY_NOT_FOUND:
@@ -355,12 +323,10 @@ def _match_hltb_ids(
                 df.at[idx, "HLTB_MatchScore"] = ""
                 df.at[idx, "HLTB_MatchedYear"] = ""
                 df.at[idx, "HLTB_MatchedPlatforms"] = ""
-            progress.maybe_log(seen)
             continue
 
         if hltb_id:
             if not include_diagnostics:
-                progress.maybe_log(seen)
                 continue
             obj = client.get_by_id(hltb_id)
             if obj and isinstance(obj, dict):
@@ -369,8 +335,6 @@ def _match_hltb_ids(
                 df.at[idx, "HLTB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
                 df.at[idx, "HLTB_MatchedYear"] = str(obj.get("HLTB_ReleaseYear") or "").strip()
                 df.at[idx, "HLTB_MatchedPlatforms"] = str(obj.get("HLTB_Platforms") or "").strip()
-            progress.maybe_log(seen)
-            writer.maybe(seen)
             continue
 
         res = client.search(name, query=hltb_query, hltb_id=None)
@@ -385,8 +349,6 @@ def _match_hltb_ids(
                 df.at[idx, "HLTB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
                 df.at[idx, "HLTB_MatchedYear"] = str(res.get("HLTB_ReleaseYear") or "").strip()
                 df.at[idx, "HLTB_MatchedPlatforms"] = str(res.get("HLTB_Platforms") or "").strip()
-        progress.maybe_log(seen)
-        writer.maybe(seen)
 
 
 def _match_wikidata_qids(
@@ -396,26 +358,21 @@ def _match_wikidata_qids(
     include_diagnostics: bool,
     active_total: int,
 ) -> None:
-    progress = Progress("WIKIDATA", total=active_total, every_n=100)
-    seen = 0
-    for idx, row in df.iterrows():
-        if _is_yes(row.get("Disabled", "")):
-            continue
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
+    for idx, row, name, _seen in iter_named_rows_with_progress(
+        df,
+        label="WIKIDATA",
+        total=active_total,
+        skip_row=lambda r: _is_yes(r.get("Disabled", "")),
+    ):
         qid = str(row.get("Wikidata_QID", "") or "").strip()
         if qid == IDENTITY_NOT_FOUND:
             if include_diagnostics:
                 df.at[idx, "Wikidata_MatchedLabel"] = ""
                 df.at[idx, "Wikidata_MatchScore"] = ""
                 df.at[idx, "Wikidata_MatchedYear"] = ""
-            progress.maybe_log(seen)
             continue
         if qid:
             if not include_diagnostics:
-                progress.maybe_log(seen)
                 continue
             obj = client.get_by_id(qid)
         else:
@@ -423,11 +380,12 @@ def _match_wikidata_qids(
             if obj and str(obj.get("Wikidata_QID", "") or "").strip():
                 df.at[idx, "Wikidata_QID"] = str(obj.get("Wikidata_QID") or "").strip()
         if include_diagnostics and obj and isinstance(obj, dict):
-            matched = str(obj.get("Wikidata_Label") or obj.get("Wikidata_MatchedLabel") or "").strip()
+            matched = str(
+                obj.get("Wikidata_Label") or obj.get("Wikidata_MatchedLabel") or ""
+            ).strip()
             df.at[idx, "Wikidata_MatchedLabel"] = matched
             df.at[idx, "Wikidata_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
             df.at[idx, "Wikidata_MatchedYear"] = str(obj.get("Wikidata_ReleaseYear") or "").strip()
-        progress.maybe_log(seen)
 
 
 def run_import(
@@ -447,42 +405,134 @@ def run_import(
     clients = ctx.build_clients()
     active_total = sum(1 for _, r in df.iterrows() if not _is_yes(r.get("Disabled", "")))
 
+    def _run_tasks(task_fns: dict[str, callable[[], pd.DataFrame]]) -> dict[str, pd.DataFrame]:
+        if not task_fns:
+            return {}
+        max_workers = min(
+            len(task_fns),
+            int(getattr(CLI, "max_parallel_providers", 8) or 8),
+        )
+        max_workers = max(1, max_workers)
+        if max_workers == 1 or len(task_fns) == 1:
+            return {k: fn() for k, fn in task_fns.items()}
+        out: dict[str, pd.DataFrame] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = {ex.submit(fn): name for name, fn in task_fns.items()}
+            for fut in as_completed(futs):
+                name = futs[fut]
+                try:
+                    out[name] = fut.result()
+                except Exception as e:
+                    raise SystemExit(f"Import provider task failed ({name}): {e}") from e
+        return out
+
+    def _merge_prefix_cols(
+        dst: pd.DataFrame, src: pd.DataFrame, prefix: str, extras: tuple[str, ...]
+    ) -> None:
+        cols = [c for c in src.columns if c.startswith(prefix)]
+        for c in extras:
+            if c in src.columns and c not in cols:
+                cols.append(c)
+        for c in cols:
+            if c not in dst.columns:
+                continue
+            dst[c] = src[c]
+
+    # Stage 1 (fast): RAWG + IGDB in parallel.
+    stage1: dict[str, callable[[], pd.DataFrame]] = {}
     rawg = clients.get("rawg")
     if "rawg" in ctx.sources and rawg is not None:
-        _match_rawg_ids(df, client=rawg, include_diagnostics=include_diagnostics, active_total=active_total)  # type: ignore[arg-type]
-
+        stage1["rawg"] = lambda: (
+            (
+                lambda d: (
+                    _match_rawg_ids(
+                        d,
+                        client=rawg,
+                        include_diagnostics=include_diagnostics,
+                        active_total=active_total,
+                    ),
+                    d,
+                )[1]
+            )(df.copy())  # type: ignore[arg-type]
+        )
     igdb = clients.get("igdb")
     if "igdb" in ctx.sources and igdb is not None:
-        _match_igdb_ids(df, client=igdb, include_diagnostics=include_diagnostics, active_total=active_total)  # type: ignore[arg-type]
+        stage1["igdb"] = lambda: (
+            (
+                lambda d: (
+                    _match_igdb_ids(
+                        d,
+                        client=igdb,
+                        include_diagnostics=include_diagnostics,
+                        active_total=active_total,
+                    ),
+                    d,
+                )[1]
+            )(df.copy())  # type: ignore[arg-type]
+        )
 
+    for name, src_df in _run_tasks(stage1).items():
+        if name == "rawg":
+            _merge_prefix_cols(df, src_df, "RAWG_", ("RAWG_ID",))
+        if name == "igdb":
+            _merge_prefix_cols(df, src_df, "IGDB_", ("IGDB_ID",))
+
+    # Stage 2: Steam + HLTB + Wikidata in parallel (Steam may infer from IGDB_ID).
+    stage2: dict[str, callable[[], pd.DataFrame]] = {}
     steam = clients.get("steam")
     if "steam" in ctx.sources and steam is not None:
-        _match_steam_appids(
-            df,
-            steam=steam,  # type: ignore[arg-type]
-            igdb=igdb,  # type: ignore[arg-type]
-            include_diagnostics=include_diagnostics,
-            active_total=active_total,
+        stage2["steam"] = lambda: (
+            (
+                lambda d: (
+                    _match_steam_appids(
+                        d,
+                        steam=steam,
+                        igdb=igdb,
+                        include_diagnostics=include_diagnostics,
+                        active_total=active_total,
+                    ),
+                    d,
+                )[1]
+            )(df.copy())  # type: ignore[arg-type]
         )
-
     hltb = clients.get("hltb")
     if "hltb" in ctx.sources and hltb is not None:
-        _match_hltb_ids(
-            df,
-            client=hltb,  # type: ignore[arg-type]
-            include_diagnostics=include_diagnostics,
-            active_total=active_total,
-            output_csv=output_csv,
+        stage2["hltb"] = lambda: (
+            (
+                lambda d: (
+                    _match_hltb_ids(
+                        d,
+                        client=hltb,
+                        include_diagnostics=include_diagnostics,
+                        active_total=active_total,
+                    ),
+                    d,
+                )[1]
+            )(df.copy())  # type: ignore[arg-type]
         )
-
     wikidata = clients.get("wikidata")
     if "wikidata" in ctx.sources and wikidata is not None:
-        _match_wikidata_qids(
-            df,
-            client=wikidata,  # type: ignore[arg-type]
-            include_diagnostics=include_diagnostics,
-            active_total=active_total,
+        stage2["wikidata"] = lambda: (
+            (
+                lambda d: (
+                    _match_wikidata_qids(
+                        d,
+                        client=wikidata,
+                        include_diagnostics=include_diagnostics,
+                        active_total=active_total,
+                    ),
+                    d,
+                )[1]
+            )(df.copy())  # type: ignore[arg-type]
         )
+
+    for name, src_df in _run_tasks(stage2).items():
+        if name == "steam":
+            _merge_prefix_cols(df, src_df, "Steam_", ("Steam_AppID",))
+        if name == "hltb":
+            _merge_prefix_cols(df, src_df, "HLTB_", ("HLTB_ID", "HLTB_Query"))
+        if name == "wikidata":
+            _merge_prefix_cols(df, src_df, "Wikidata_", ("Wikidata_QID",))
 
     if include_diagnostics:
         df = fill_eval_tags(df, sources=set(ctx.sources), clients=clients)
@@ -493,6 +543,6 @@ def run_import(
 
     log_cache_stats(clients)
 
-    write_csv(df, output_csv)
+    write_full_csv(df, output_csv)
     logging.info(f"✔ Import matching completed: {output_csv}")
     return output_csv

@@ -1,3 +1,7 @@
+"""
+Import diagnostics/tagging helpers.
+"""
+
 from __future__ import annotations
 
 import re
@@ -11,7 +15,8 @@ from ..utils.consistency import (
     platform_outlier_tags,
     year_outlier_tags,
 )
-from ..utils.utilities import IDENTITY_NOT_FOUND, fuzzy_score, normalize_game_name
+from ..utils.cross_refs import extract_steam_appid_from_rawg_stores
+from ..utils.utilities import IDENTITY_NOT_FOUND, normalize_game_name
 
 
 def platform_is_pc_like(platform_value: object) -> bool:
@@ -157,23 +162,6 @@ def fill_eval_tags(
                 out_set.add(normalize_game_name(name))
         return {x for x in out_set if x}
 
-    def _steam_appid_from_rawg_payload(rawg_obj: object) -> str:
-        if not isinstance(rawg_obj, dict):
-            return ""
-        stores = rawg_obj.get("stores")
-        if not isinstance(stores, list):
-            return ""
-        for it in stores:
-            if not isinstance(it, dict):
-                continue
-            url = str(it.get("url") or "").strip()
-            if not url:
-                continue
-            m = re.search(r"/app/(\d+)\b", url)
-            if m:
-                return m.group(1)
-        return ""
-
     def _genres_from_rawg(obj: object) -> set[str]:
         if not isinstance(obj, dict):
             return set()
@@ -214,7 +202,6 @@ def fill_eval_tags(
         has_low_issue = False
 
         name = str(row.get("Name", "") or "").strip()
-        year_hint = _int_year(row.get("YearHint", "")) or _int_year(row.get("Year", ""))
         steam_missing_expected = False
 
         if include_rawg:
@@ -280,7 +267,7 @@ def fill_eval_tags(
                 rawg_id = str(row.get("RAWG_ID", "") or "").strip()
                 if rawg_id and rawg_id != IDENTITY_NOT_FOUND:
                     rawg_obj = clients["rawg"].get_by_id(rawg_id)  # type: ignore[attr-defined]
-                    rawg_steam = _steam_appid_from_rawg_payload(rawg_obj)
+                    rawg_steam = extract_steam_appid_from_rawg_stores(rawg_obj)
                     if rawg_steam and rawg_steam.isdigit() and rawg_steam != steam_id:
                         tags.append("steam_appid_disagree:rawg")
                         has_low_issue = True
@@ -332,7 +319,9 @@ def fill_eval_tags(
                             years["igdb"] = y
                         plats = str(igdb_obj.get("IGDB_Platforms", "") or "")
                         platforms["igdb"] = _platforms_from_csv_list(plats)
-                        genres["igdb"] = _genres_from_csv_list(str(igdb_obj.get("IGDB_Genres", "") or ""))
+                        genres["igdb"] = _genres_from_csv_list(
+                            str(igdb_obj.get("IGDB_Genres", "") or "")
+                        )
 
                 if include_steam:
                     steam_id = str(row.get("Steam_AppID", "") or "").strip()
@@ -363,7 +352,7 @@ def fill_eval_tags(
             for p, s in platforms.items():
                 if p == "steam":
                     continue
-                other_plats |= (s or set())
+                other_plats |= s or set()
             if other_plats and "pc" not in other_plats:
                 tags.append("missing_steam_nonpc")
             else:
@@ -371,9 +360,6 @@ def fill_eval_tags(
                 has_missing_provider = True
 
         year_tags = year_outlier_tags(years, max_diff=1, ignore_providers_for_consensus={"steam"})
-        if year_tags:
-            tags.extend(year_tags)
-            has_low_issue = True
 
         plat_tags = platform_outlier_tags(platforms)
         if plat_tags:
@@ -382,7 +368,8 @@ def fill_eval_tags(
 
         # Edition/port suspicion: if Steam's year is an outlier but IGDB indicates the match is a
         # port/edition/alternate version, tag it as informational rather than a generic mismatch.
-        if "year_outlier:steam" in year_tags and igdb_payload:
+        steam_year_outlier = "year_outlier:steam" in year_tags
+        if steam_year_outlier and igdb_payload:
             if any(
                 str(igdb_payload.get(k) or "").strip()
                 for k in (
@@ -395,14 +382,6 @@ def fill_eval_tags(
             ):
                 tags.append("edition_or_port_suspected")
 
-        # Genre disagreements: use RAWG/IGDB (and optional Steam tags) as a high-signal check.
-        if genres.get("rawg") and genres.get("igdb"):
-            inter = genres["rawg"] & genres["igdb"]
-            if not inter:
-                tags.append("genre_disagree")
-                has_medium_issue = True
-
-        # Actionable mismatches: roll up outlier patterns into a few tags.
         titles: dict[str, str] = {}
         if include_rawg:
             t = str(row.get("RAWG_MatchedName", "") or "").strip()
@@ -434,6 +413,38 @@ def fill_eval_tags(
             if not consensus.has_majority:
                 has_low_issue = True
             elif consensus.outliers:
+                has_medium_issue = True
+
+        if year_tags:
+            tags.extend(year_tags)
+            # Steam-only year drift is common for ports/remasters; treat it as a weak signal
+            # unless paired with other disagreements.
+            only_steam_outlier = all(
+                (t == "year_outlier:steam") for t in year_tags if t.startswith("year_outlier:")
+            ) and any(t == "year_outlier:steam" for t in year_tags)
+            if only_steam_outlier and not any(
+                t in tags
+                for t in (
+                    "provider_outlier:steam",
+                    "platform_outlier:steam",
+                    "title_mismatch",
+                    "steam_appid_disagree:igdb",
+                    "steam_appid_disagree:rawg",
+                    "store_type_not_game:dlc",
+                    "store_type_not_game:demo",
+                    "store_type_not_game:soundtrack",
+                    "store_type_not_game:advertising",
+                )
+            ):
+                has_medium_issue = True
+            else:
+                has_low_issue = True
+
+        # Genre disagreements: use RAWG/IGDB (and optional Steam tags) as a high-signal check.
+        if genres.get("rawg") and genres.get("igdb"):
+            inter = genres["rawg"] & genres["igdb"]
+            if not inter:
+                tags.append("genre_disagree")
                 has_medium_issue = True
 
         actionable = actionable_mismatch_tags(

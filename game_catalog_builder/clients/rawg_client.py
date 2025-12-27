@@ -9,7 +9,6 @@ from typing import Any
 import requests
 
 from ..config import MATCHING, RAWG, RETRY
-from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
@@ -17,6 +16,7 @@ from ..utils.utilities import (
     normalize_game_name,
     pick_best_match,
 )
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 RAWG_API_URL = "https://api.rawg.io/api/games"
 
@@ -226,9 +226,7 @@ class RAWGClient:
         # when alternatives exist.
         if q_norm and not _series_numbers(q_norm):
             no_nums = [
-                it
-                for it in candidates
-                if not _series_numbers(str(it.get("name", "") or ""))
+                it for it in candidates if not _series_numbers(str(it.get("name", "") or ""))
             ]
             if no_nums and len(no_nums) < len(candidates):
                 candidates = no_nums
@@ -468,14 +466,10 @@ class RAWGClient:
             score_100 = ""
 
         devs = [
-            d.get("name", "")
-            for d in (rawg_obj.get("developers", []) or [])
-            if isinstance(d, dict)
+            d.get("name", "") for d in (rawg_obj.get("developers", []) or []) if isinstance(d, dict)
         ]
         pubs = [
-            p.get("name", "")
-            for p in (rawg_obj.get("publishers", []) or [])
-            if isinstance(p, dict)
+            p.get("name", "") for p in (rawg_obj.get("publishers", []) or []) if isinstance(p, dict)
         ]
         dev_list = [str(x).strip() for x in devs if str(x).strip()]
         pub_list = [str(x).strip() for x in pubs if str(x).strip()]

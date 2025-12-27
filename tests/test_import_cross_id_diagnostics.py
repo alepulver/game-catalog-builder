@@ -20,7 +20,7 @@ class _RAWGStub:
 
 
 def test_fill_eval_tags_flags_steam_appid_disagree_igdb() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -48,7 +48,7 @@ def test_fill_eval_tags_flags_steam_appid_disagree_igdb() -> None:
 
 
 def test_fill_eval_tags_flags_steam_appid_disagree_rawg() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [

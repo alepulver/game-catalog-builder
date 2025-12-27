@@ -50,6 +50,21 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
+Lint/format/type-check:
+
+```bash
+ruff check .
+ruff format .
+pyright
+```
+
+Pre-commit hooks (runs ruff + pyright on commit):
+
+```bash
+pre-commit install
+pre-commit run -a
+```
+
    **Note**: Always activate the virtual environment (step 2) before running the tool. After activation, `python` will use the venv's Python automatically.
 
 ### Configuration
@@ -161,7 +176,6 @@ python run.py import path/to/exported_user_sheet.csv --out data/input/Games_Cata
 
 Both `import` and `enrich` support “in place” runs (e.g. `import X.csv --out X.csv`, or
 `enrich X.csv --merge-output X.csv`). For `enrich`, provider/public columns are always regenerated.
-
 ### Provider selection
 
 Provider lists are comma-separated via `--source`:

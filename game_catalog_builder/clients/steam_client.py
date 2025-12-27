@@ -9,7 +9,6 @@ from typing import Any
 import requests
 
 from ..config import MATCHING, RETRY, STEAM
-from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
@@ -18,6 +17,7 @@ from ..utils.utilities import (
     normalize_game_name,
     pick_best_match,
 )
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 STEAM_SEARCH_URL = "https://store.steampowered.com/api/storesearch"
 STEAM_APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
@@ -867,7 +867,16 @@ class SteamClient:
             # Special-case Ubisoft location lists like "... Red Storm, Shanghai, Toronto, Kiev"
             # without inventing new entities for non-location names.
             if parts and parts[0].casefold().startswith("ubisoft "):
-                ubisoft_locations = {"shanghai", "toronto", "kiev", "kyiv", "quebec", "québec", "montreal", "montréal"}
+                ubisoft_locations = {
+                    "shanghai",
+                    "toronto",
+                    "kiev",
+                    "kyiv",
+                    "quebec",
+                    "québec",
+                    "montreal",
+                    "montréal",
+                }
                 out: list[str] = []
                 for p in parts:
                     if p.casefold().startswith("ubisoft "):
@@ -888,9 +897,11 @@ class SteamClient:
                     if v and v not in dev_list:
                         dev_list.append(v)
 
-        pub_list = [str(x).strip() for x in (publishers or []) if str(x).strip()] if isinstance(
-            publishers, list
-        ) else []
+        pub_list = (
+            [str(x).strip() for x in (publishers or []) if str(x).strip()]
+            if isinstance(publishers, list)
+            else []
+        )
         dev_str = json.dumps(dev_list, ensure_ascii=False)
         pub_str = json.dumps(pub_list, ensure_ascii=False)
 

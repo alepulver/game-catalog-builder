@@ -44,4 +44,3 @@ def test_validation_genre_no_consensus_when_disjoint() -> None:
     report = generate_validation_report(df)
     tags = report.loc[0, "ValidationTags"]
     assert "genre_no_consensus" in tags
-

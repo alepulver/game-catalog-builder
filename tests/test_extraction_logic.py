@@ -157,6 +157,8 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
     data = client.fetch(999)
     assert data == {
         "SteamSpy_Owners": "10,000 .. 20,000",
+        "SteamSpy_Players": "1234",
+        "SteamSpy_Players2Weeks": "",
         "SteamSpy_CCU": "12",
         "SteamSpy_PlaytimeAvg": "56",
         "SteamSpy_PlaytimeAvg2Weeks": "",
@@ -189,7 +191,10 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
                 "name": "Doom",
                 "first_release_date": 1463097600,
                 "summary": "Rip and tear until it is done.",
-                "websites": [{"url": "https://slayersclub.bethesda.net/"}, {"url": "https://doom.com/"}],
+                "websites": [
+                    {"url": "https://slayersclub.bethesda.net/"},
+                    {"url": "https://doom.com/"},
+                ],
                 "platforms": [{"name": "PC (Microsoft Windows)"}],
                 "genres": [{"name": "Shooter"}],
                 "themes": [{"name": "Action"}],
@@ -292,13 +297,7 @@ def test_wikidata_extract_fields_fixture(tmp_path) -> None:
         "labels": {"en": {"value": "Doom"}},
         "descriptions": {"en": {"value": "1993 video game"}},
         "claims": {
-            "P577": [
-                {
-                    "mainsnak": {
-                        "datavalue": {"value": {"time": "+1993-12-10T00:00:00Z"}}
-                    }
-                }
-            ],
+            "P577": [{"mainsnak": {"datavalue": {"value": {"time": "+1993-12-10T00:00:00Z"}}}}],
             "P178": [{"mainsnak": {"datavalue": {"value": {"id": "QDEV"}}}}],
             "P123": [{"mainsnak": {"datavalue": {"value": {"id": "QPUB"}}}}],
             "P400": [{"mainsnak": {"datavalue": {"value": {"id": "QPLAT"}}}}],

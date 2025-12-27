@@ -61,7 +61,7 @@ class _SteamStub:
 
 
 def test_fill_eval_tags_flags_year_outlier_when_rawg_igdb_agree() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -97,7 +97,7 @@ def test_fill_eval_tags_flags_year_outlier_when_rawg_igdb_agree() -> None:
 
 
 def test_fill_eval_tags_flags_platform_outlier() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -132,7 +132,7 @@ def test_fill_eval_tags_flags_platform_outlier() -> None:
 
 
 def test_fill_eval_tags_flags_genre_disagree_rawg_igdb() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -163,7 +163,7 @@ def test_fill_eval_tags_flags_genre_disagree_rawg_igdb() -> None:
 
 
 def test_fill_eval_tags_adds_provider_outlier_when_two_agree() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -198,7 +198,7 @@ def test_fill_eval_tags_adds_provider_outlier_when_two_agree() -> None:
 
 
 def test_fill_eval_tags_adds_provider_no_consensus_when_all_disagree() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -227,7 +227,7 @@ def test_fill_eval_tags_adds_provider_no_consensus_when_all_disagree() -> None:
 
 
 def test_fill_eval_tags_downgrades_missing_steam_when_platforms_non_pc() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -247,7 +247,9 @@ def test_fill_eval_tags_downgrades_missing_steam_when_platforms_non_pc() -> None
         df,
         sources={"rawg", "steam"},
         clients={
-            "rawg": _RAWGStub(released="2000-01-01", platforms=["PlayStation 2"], genres=["Action"]),
+            "rawg": _RAWGStub(
+                released="2000-01-01", platforms=["PlayStation 2"], genres=["Action"]
+            ),
         },
     )
     tags = out.iloc[0]["ReviewTags"]
@@ -258,7 +260,7 @@ def test_fill_eval_tags_downgrades_missing_steam_when_platforms_non_pc() -> None
 
 
 def test_fill_eval_tags_tags_edition_or_port_suspected_for_steam_year_outlier() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [

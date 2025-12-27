@@ -65,7 +65,9 @@ def __getattr__(name: str) -> Any:  # pragma: no cover
     if name in {"ValidationThresholds", "generate_validation_report"}:
         from .validation import ValidationThresholds, generate_validation_report
 
-        return ValidationThresholds if name == "ValidationThresholds" else generate_validation_report
+        return (
+            ValidationThresholds if name == "ValidationThresholds" else generate_validation_report
+        )
 
     if name in {"ReviewConfig", "build_review_csv"}:
         from .review import ReviewConfig, build_review_csv

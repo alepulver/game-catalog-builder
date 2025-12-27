@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..clients import HLTBClient, IGDBClient, RAWGClient, SteamClient, SteamSpyClient, WikidataClient
+from ..clients import (
+    HLTBClient,
+    IGDBClient,
+    RAWGClient,
+    SteamClient,
+    SteamSpyClient,
+    WikidataClient,
+)
 from ..config import IGDB, RAWG, STEAM, STEAMSPY, WIKIDATA
 
 
@@ -56,4 +63,3 @@ def build_provider_clients(
         clients["hltb"] = HLTBClient(cache_path=cache_dir / "hltb_cache.json")
 
     return clients
-

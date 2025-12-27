@@ -76,6 +76,8 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "Steam_Publishers": "",
     # SteamSpy
     "SteamSpy_Owners": "",
+    "SteamSpy_Players": "",
+    "SteamSpy_Players2Weeks": "",
     "SteamSpy_CCU": "",
     "SteamSpy_PlaytimeAvg": "",
     "SteamSpy_PlaytimeAvg2Weeks": "",
@@ -137,6 +139,7 @@ def provider_output_columns(
         if c in cols and c not in out:
             out.append(c)
     return out
+
 
 # Columns that pin identity per provider.
 PINNED_ID_COLS = {

@@ -6,9 +6,10 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..diagnostics.import_diagnostics import fill_eval_tags
+from ..analysis.import_diagnostics import fill_eval_tags
 from ..utils import extract_year_hint, fuzzy_score
 from ..utils.consistency import compute_provider_consensus, compute_year_consensus
+from ..utils.utilities import IDENTITY_NOT_FOUND
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,77 @@ class ResolveStats:
     unpinned: int
     kept: int
     wikidata_hint_added: int
+
+
+def auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame, int, list[int]]:
+    """
+    Clear provider IDs when the row already indicates a strict-majority consensus that the
+    provider is the outlier and likely wrong.
+
+    This is intentionally conservative: it is meant to prevent "wrong pins", not to resolve
+    ambiguity. It does not call provider APIs.
+    """
+    out = df.copy()
+    changed = 0
+    changed_idx: list[int] = []
+
+    rules: list[tuple[str, str, list[str]]] = [
+        (
+            "steam",
+            "Steam_AppID",
+            [
+                "Steam_MatchedName",
+                "Steam_MatchScore",
+                "Steam_MatchedYear",
+                "Steam_RejectedReason",
+                "Steam_StoreType",
+            ],
+        ),
+        ("rawg", "RAWG_ID", ["RAWG_MatchedName", "RAWG_MatchScore", "RAWG_MatchedYear"]),
+        ("igdb", "IGDB_ID", ["IGDB_MatchedName", "IGDB_MatchScore", "IGDB_MatchedYear"]),
+        (
+            "hltb",
+            "HLTB_ID",
+            ["HLTB_MatchedName", "HLTB_MatchScore", "HLTB_MatchedYear", "HLTB_MatchedPlatforms"],
+        ),
+    ]
+
+    for idx, row in out.iterrows():
+        rowid = str(row.get("RowId", "") or "").strip()
+        if not rowid:
+            continue
+        tags = str(row.get("ReviewTags", "") or "").strip()
+        if not tags:
+            continue
+        for prov, id_col, diag_cols in rules:
+            id_val = str(row.get(id_col, "") or "").strip()
+            if not id_val or id_val == IDENTITY_NOT_FOUND:
+                continue
+            if f"likely_wrong:{prov}" not in tags:
+                continue
+            if "provider_consensus:" not in tags:
+                continue
+            if f"provider_outlier:{prov}" not in tags:
+                continue
+
+            out.at[idx, id_col] = ""
+            for c in diag_cols:
+                if c in out.columns:
+                    out.at[idx, c] = ""
+
+            existing = (
+                str(out.at[idx, "ReviewTags"] or "").strip() if "ReviewTags" in out.columns else ""
+            )
+            if f"autounpinned:{prov}" not in existing:
+                out.at[idx, "ReviewTags"] = (
+                    (existing + f", autounpinned:{prov}").strip(", ").strip()
+                )
+            if "MatchConfidence" in out.columns:
+                out.at[idx, "MatchConfidence"] = "LOW"
+            changed += 1
+            changed_idx.append(int(idx))
+
+    return out, changed, changed_idx
 
 
 def resolve_catalog_pins(
@@ -303,9 +375,7 @@ def resolve_catalog_pins(
                             (details or {}).get("name") or search.get("name") or ""
                         ).strip()
                         release = (details or {}).get("release_date", {}) or {}
-                        m = re.search(
-                            r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or "")
-                        )
+                        m = re.search(r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or ""))
                         y = m.group(1) if m else ""
                         score = fuzzy_score(majority_title or name, matched) if matched else 0
                         if score >= 90 or _year_close(y, majority_year):
@@ -374,11 +444,13 @@ def resolve_catalog_pins(
             if reason == "fix_wrong_pin":
                 logging.warning(
                     f"[RESOLVE] {'Unpinned' if apply else 'Would unpin'} likely-wrong {prov} for "
-                    f"'{name}' (RowId={row.get('RowId','')})"
+                    f"'{name}' (RowId={row.get('RowId', '')})"
                 )
                 if apply:
                     _clear_provider_pin(idx, prov)
-                    df.at[idx, "ReviewTags"] = _add_tag(df.at[idx, "ReviewTags"], f"autounpinned:{prov}")
+                    df.at[idx, "ReviewTags"] = _add_tag(
+                        df.at[idx, "ReviewTags"], f"autounpinned:{prov}"
+                    )
                 unpinned += 1
             else:
                 kept += 1
@@ -396,4 +468,3 @@ def resolve_catalog_pins(
             wikidata_hint_added=resolved_wikidata,
         ),
     )
-

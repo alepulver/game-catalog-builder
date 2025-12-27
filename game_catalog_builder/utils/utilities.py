@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import random
 import re
 import time
 import uuid
-import atexit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -202,9 +202,7 @@ def load_identity_overrides(path: str | Path) -> dict[str, dict[str, str]]:
     steam = col("Steam_AppID")
     hltb_id = col("HLTB_ID") if "HLTB_ID" in df.columns else pd.Series([""] * len(df))
     hltb_query = col("HLTB_Query") if "HLTB_Query" in df.columns else pd.Series([""] * len(df))
-    wikidata = (
-        col("Wikidata_QID") if "Wikidata_QID" in df.columns else pd.Series([""] * len(df))
-    )
+    wikidata = col("Wikidata_QID") if "Wikidata_QID" in df.columns else pd.Series([""] * len(df))
 
     out: dict[str, dict[str, str]] = {}
     for rid, rawg_id, igdb_id, steam_id, hltb_id_val, hltb_q, qid in zip(
@@ -660,9 +658,9 @@ def with_retries(
                         logging.error(f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}")
                 if retry_stats is not None:
                     if is_network:
-                        retry_stats["network_failures"] = int(
-                            retry_stats.get("network_failures", 0)
-                        ) + 1
+                        retry_stats["network_failures"] = (
+                            int(retry_stats.get("network_failures", 0)) + 1
+                        )
                     if is_http:
                         retry_stats["http_failures"] = int(retry_stats.get("http_failures", 0)) + 1
                 return on_fail_return
@@ -672,7 +670,9 @@ def with_retries(
             if retry_stats is not None:
                 retry_stats["retry_attempts"] = int(retry_stats.get("retry_attempts", 0)) + 1
                 if is_429:
-                    retry_stats["http_429_retries"] = int(retry_stats.get("http_429_retries", 0)) + 1
+                    retry_stats["http_429_retries"] = (
+                        int(retry_stats.get("http_429_retries", 0)) + 1
+                    )
                     retry_stats["http_429_backoff_ms"] = int(
                         retry_stats.get("http_429_backoff_ms", 0)
                     ) + int(round(sleep * 1000.0))
@@ -730,12 +730,12 @@ class CacheIOTracker:
         t0 = time.perf_counter()
         raw = load_json_cache(path)
         t1 = time.perf_counter()
-        self.stats[f"{self.prefix}_load_count"] = int(
-            self.stats.get(f"{self.prefix}_load_count", 0) or 0
-        ) + 1
-        self.stats[f"{self.prefix}_load_ms"] = int(self.stats.get(f"{self.prefix}_load_ms", 0) or 0) + int(
-            round((t1 - t0) * 1000.0)
+        self.stats[f"{self.prefix}_load_count"] = (
+            int(self.stats.get(f"{self.prefix}_load_count", 0) or 0) + 1
         )
+        self.stats[f"{self.prefix}_load_ms"] = int(
+            self.stats.get(f"{self.prefix}_load_ms", 0) or 0
+        ) + int(round((t1 - t0) * 1000.0))
         return raw
 
     def save_json(self, cache: dict[str, Any], path: str | Path) -> None:
@@ -766,10 +766,12 @@ class CacheIOTracker:
         t1 = time.perf_counter()
         self._last_save_s = time.monotonic()
         dur_ms = int(round((t1 - t0) * 1000.0))
-        self.stats[f"{self.prefix}_save_count"] = int(
-            self.stats.get(f"{self.prefix}_save_count", 0) or 0
-        ) + 1
-        self.stats[f"{self.prefix}_save_ms"] = int(self.stats.get(f"{self.prefix}_save_ms", 0) or 0) + dur_ms
+        self.stats[f"{self.prefix}_save_count"] = (
+            int(self.stats.get(f"{self.prefix}_save_count", 0) or 0) + 1
+        )
+        self.stats[f"{self.prefix}_save_ms"] = (
+            int(self.stats.get(f"{self.prefix}_save_ms", 0) or 0) + dur_ms
+        )
 
         slow_ms = int(getattr(CACHE, "slow_save_log_ms", 0) or 0)
         if slow_ms > 0 and dur_ms >= slow_ms:
@@ -782,11 +784,7 @@ class CacheIOTracker:
         load_ms = int(stats.get(f"{prefix}_load_ms", 0) or 0)
         save_count = int(stats.get(f"{prefix}_save_count", 0) or 0)
         save_ms = int(stats.get(f"{prefix}_save_ms", 0) or 0)
-        return (
-            f"{prefix} load_ms={load_ms} "
-            f"saves={save_count} "
-            f"save_ms={save_ms}"
-        )
+        return f"{prefix} load_ms={load_ms} saves={save_count} save_ms={save_ms}"
 
 
 def iter_chunks(items: list[Any], chunk_size: int) -> list[list[Any]]:
@@ -847,6 +845,3 @@ def load_credentials(credentials_path: str | Path | None = None) -> dict[str, An
 
     with open(credentials_path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
-
-
-from ..schema import PUBLIC_DEFAULT_COLS

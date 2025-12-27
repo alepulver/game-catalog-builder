@@ -41,6 +41,7 @@ def test_hltb_search_falls_back_to_case_variants_when_no_results(tmp_path) -> No
             if q == "Amid Evil":
                 return []
             if q == "amid evil":
+
                 class _R:
                     game_id = 123
                     game_name = "AMID EVIL"

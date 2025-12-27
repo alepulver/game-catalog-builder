@@ -19,6 +19,7 @@ from .utilities import fuzzy_score, normalize_game_name
 def _split_csv_list(s: str) -> list[str]:
     return [p.strip() for p in (s or "").split(",") if p.strip()]
 
+
 def _normalize_platform_token(token: str) -> str:
     t = (token or "").strip().lower()
     if not t:
@@ -321,8 +322,8 @@ def generate_validation_report(
         if steam_year is not None:
             primary = igdb_year if igdb_year is not None else rawg_year
             if primary is not None and abs(steam_year - primary) > thresholds.year_max_diff:
-                # Steam years often represent ports/remasters/HD releases; lower severity if it
-                # looks like an edition.
+                # Steam years often represent ports/remasters/HD releases; treat this as
+                # informational unless paired with other identity disagreements.
                 if not steam_is_edition:
                     steam_year_disagree = "YES"
 
@@ -606,8 +607,6 @@ def generate_validation_report(
         if consensus:
             validation_tags.extend(consensus.tags())
 
-        year_tags = year_outlier_tags(years_map, max_diff=thresholds.year_max_diff)
-        validation_tags.extend(year_tags)
         platform_sets = {
             "rawg": _normalize_platforms(str(r.get("RAWG_Platforms", "") or "")),
             "igdb": _normalize_platforms(str(r.get("IGDB_Platforms", "") or "")),
@@ -616,6 +615,9 @@ def generate_validation_report(
         }
         platform_tags = platform_outlier_tags(platform_sets)
         validation_tags.extend(platform_tags)
+
+        year_tags = year_outlier_tags(years_map, max_diff=thresholds.year_max_diff)
+        validation_tags.extend(year_tags)
 
         def _normalize_genres(genres: str) -> set[str]:
             out: set[str] = set()

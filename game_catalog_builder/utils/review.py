@@ -147,10 +147,7 @@ def build_review_csv(
             "year_outlier:",
             "platform_outlier:",
         )
-        return any(
-            t.startswith(outlier_prefixes)
-            for t in tags
-        )
+        return any(t.startswith(outlier_prefixes) for t in tags)
 
     df = df[df.apply(_include_row, axis=1)].copy()
     if df.empty:

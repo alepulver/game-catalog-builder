@@ -4,7 +4,8 @@ import pandas as pd
 
 
 def test_auto_unpin_then_fill_eval_tags_drops_stale_provider_score_tags() -> None:
-    from game_catalog_builder.cli import _auto_unpin_likely_wrong_provider_ids, fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.analysis.resolve import auto_unpin_likely_wrong_provider_ids
 
     df = pd.DataFrame(
         [
@@ -24,7 +25,7 @@ def test_auto_unpin_then_fill_eval_tags_drops_stale_provider_score_tags() -> Non
         ]
     )
 
-    out, changed, changed_idx = _auto_unpin_likely_wrong_provider_ids(df)
+    out, changed, changed_idx = auto_unpin_likely_wrong_provider_ids(df)
     assert changed == 1
     assert changed_idx == [0]
     assert out.loc[0, "Steam_AppID"] == ""
@@ -36,4 +37,3 @@ def test_auto_unpin_then_fill_eval_tags_drops_stale_provider_score_tags() -> Non
     tags = recomputed.loc[0, "ReviewTags"]
     assert "steam_score:" not in tags
     assert "autounpinned:steam" in tags
-

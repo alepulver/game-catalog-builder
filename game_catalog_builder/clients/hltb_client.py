@@ -251,30 +251,29 @@ class HLTBClient:
         query: str | None = None,
         hltb_id: str | int | None = None,
     ) -> dict[str, Any] | None:
-        # If an HLTB_ID is pinned, use it. This avoids ambiguity and doesn't depend on fuzzy
-        # matching.
-        if hltb_id is not None and str(hltb_id).strip() and str(hltb_id).strip() != "0":
-            data = self.get_by_id(str(hltb_id).strip())
-            if data:
-                return data
-            logging.warning(
-                f"HLTB pinned id did not resolve for '{game_name}': {hltb_id}. "
-                "Falling back to search."
-            )
-
         try:
             best_score = -1
             best_query: str | None = None
             best_candidate: dict[str, Any] | None = None
+            pinned_id: str | None = None
+
+            # If an HLTB_ID is pinned, prefer selecting it from a search result set (by ID)
+            # rather than relying on howlongtobeatpy.search_from_id(), which can fail.
+            if hltb_id is not None and str(hltb_id).strip() and str(hltb_id).strip() != "0":
+                pinned_id = str(hltb_id).strip()
+                cached = self._by_id.get(pinned_id)
+                if isinstance(cached, dict):
+                    self.stats["by_id_hit"] += 1
+                    return self.extract_fields(cached)
 
             attempted: set[str] = set()
 
-            def _try_query(q: str) -> None:
+            def _try_query(q: str) -> bool:
                 nonlocal best_score, best_query, best_candidate
 
                 q = str(q or "").strip()
                 if not q or q in attempted:
-                    return
+                    return False
                 attempted.add(q)
                 qkey = f"q:{q}"
                 cached = self._by_query.get(qkey)
@@ -300,7 +299,17 @@ class HLTBClient:
                         self.stats["by_query_negative_fetch"] += 1
 
                 if not candidates:
-                    return
+                    return False
+
+                if pinned_id is not None:
+                    for r in candidates:
+                        if str(r.get("game_id", "") or "") == pinned_id:
+                            best_score = 100
+                            best_query = q
+                            best_candidate = r
+                            return True
+                    # When an ID is pinned, never substitute a different match.
+                    return False
 
                 # Choose the best match by similarity against the original title; the query can be
                 # a heuristic variant and should not affect the score.
@@ -317,15 +326,15 @@ class HLTBClient:
 
                 # Exact match: stop early to avoid extra calls.
                 if best_score >= 100:
-                    return
+                    return True
                 # High-confidence match: don't spend extra queries trying to reach 100%.
                 if best_score >= HLTB.early_stop_score:
-                    return
+                    return True
+                return False
 
             base_query = str(query or game_name).strip()
             for q in self._query_variants(base_query):
-                _try_query(q)
-                if best_score >= HLTB.early_stop_score:
+                if _try_query(q):
                     break
 
             # Last-resort case variants: keep match quality for a small number of stylized titles
@@ -336,6 +345,12 @@ class HLTBClient:
                 _try_query(base_query.upper())
 
             if best_candidate is None:
+                if pinned_id is not None:
+                    logging.warning(
+                        f"HLTB pinned id not found in search results for '{game_name}': "
+                        f"id={pinned_id}, query={base_query!r}"
+                    )
+                    return None
                 logging.warning(f"Not found in HLTB: '{game_name}'. No results from API.")
                 return None
 

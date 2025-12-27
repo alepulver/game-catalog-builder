@@ -46,9 +46,7 @@ def _parse_float(value: Any) -> float | None:
         return None
 
 
-_OWNERS_RANGE_RE = re.compile(
-    r"^\s*(?P<low>[\d,\s]+)\s*(?:\.\.|-)\s*(?P<high>[\d,\s]+)\s*$"
-)
+_OWNERS_RANGE_RE = re.compile(r"^\s*(?P<low>[\d,\s]+)\s*(?:\.\.|-)\s*(?P<high>[\d,\s]+)\s*$")
 
 
 def parse_steamspy_owners_range(owners: Any) -> tuple[int | None, int | None, int | None]:
@@ -410,8 +408,18 @@ def compute_production_tier(
             out.extend(_split_csv_list(row.get(c, "")))
         return out
 
-    publisher_cols = ("Steam_Publishers", "IGDB_Publishers", "RAWG_Publishers", "Wikidata_Publishers")
-    developer_cols = ("Steam_Developers", "IGDB_Developers", "RAWG_Developers", "Wikidata_Developers")
+    publisher_cols = (
+        "Steam_Publishers",
+        "IGDB_Publishers",
+        "RAWG_Publishers",
+        "Wikidata_Publishers",
+    )
+    developer_cols = (
+        "Steam_Developers",
+        "IGDB_Developers",
+        "RAWG_Developers",
+        "Wikidata_Developers",
+    )
 
     saw_any_company = False
     saw_unknown: tuple[str, str] | None = None
@@ -699,6 +707,7 @@ def apply_phase1_signals(
     out["Reach_IGDBAggregatedRatingCount"] = out.get("IGDB_AggregatedRatingCount", "")
 
     # --- Now (current interest): SteamSpy activity proxies ---
+    out["Now_SteamSpyPlayers2Weeks"] = out.get("SteamSpy_Players2Weeks", "")
     out["Now_SteamSpyPlaytimeAvg2Weeks"] = out.get("SteamSpy_PlaytimeAvg2Weeks", "")
     out["Now_SteamSpyPlaytimeMedian2Weeks"] = out.get("SteamSpy_PlaytimeMedian2Weeks", "")
 
@@ -715,6 +724,15 @@ def apply_phase1_signals(
         )
         if ccu_score is not None:
             pairs.append((ccu_score, SIGNALS.w_ccu))
+
+        p2w = _parse_int(r.get("SteamSpy_Players2Weeks", ""))
+        p2w_score = _log_scale_0_100(
+            p2w,
+            log10_min=SIGNALS.now_players2w_log10_min,
+            log10_max=SIGNALS.now_players2w_log10_max,
+        )
+        if p2w_score is not None:
+            pairs.append((p2w_score, SIGNALS.w_players2w))
 
         wiki_30 = _parse_int(r.get("Wikidata_Pageviews30d", ""))
         wiki_30_score = _log_scale_0_100(

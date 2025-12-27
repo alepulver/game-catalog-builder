@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .provider_clients import build_provider_clients
 from ..utils import load_credentials
+from .provider_clients import build_provider_clients
 
 
 @dataclass(frozen=True)
@@ -23,4 +23,3 @@ class PipelineContext:
             credentials=self.credentials(),
             cache_dir=self.cache_dir,
         )
-

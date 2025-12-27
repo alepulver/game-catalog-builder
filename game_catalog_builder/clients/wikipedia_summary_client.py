@@ -8,11 +8,11 @@ from urllib.parse import quote
 import requests
 
 from ..config import RETRY
-from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
 )
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 WIKIPEDIA_SUMMARY_API = "https://en.wikipedia.org/api/rest_v1/page/summary"
 USER_AGENT = "game-catalog-builder/1.0"
@@ -83,7 +83,9 @@ class WikipediaSummaryClient:
             on_fail_return=None,
         )
         if data is None:
-            logging.warning("Wikipedia summary request failed (no response); not caching as not-found.")
+            logging.warning(
+                "Wikipedia summary request failed (no response); not caching as not-found."
+            )
             return None
 
         self._by_title[title] = data

@@ -6,7 +6,8 @@ from pathlib import Path
 import pandas as pd
 
 from ..schema import EVAL_COLUMNS
-from ..utils import ensure_columns, ensure_row_ids, read_csv, write_csv
+from ..utils import ensure_columns, ensure_row_ids, read_csv
+from .common import write_full_csv
 
 
 def _drop_eval_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -36,7 +37,14 @@ def sync_back_catalog(
     enriched["RowId"] = enriched["RowId"].astype(str).str.strip()
 
     provider_prefixes = ("RAWG_", "IGDB_", "Steam_", "SteamSpy_", "HLTB_", "Wikidata_")
-    provider_id_cols = {"RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_ID", "HLTB_Query", "Wikidata_QID"}
+    provider_id_cols = {
+        "RAWG_ID",
+        "IGDB_ID",
+        "Steam_AppID",
+        "HLTB_ID",
+        "HLTB_Query",
+        "Wikidata_QID",
+    }
     always_keep = {"RowId", "Name"} | provider_id_cols
 
     sync_cols: list[str] = []
@@ -92,10 +100,9 @@ def sync_back_catalog(
 
     out = c_idx.reset_index(drop=True)
     out = _drop_eval_columns(out)
-    write_csv(out, output_csv)
+    write_full_csv(out, output_csv)
     logging.info(
         f"✔ sync updated catalog: {output_csv} (synced_cols={len(sync_cols)}, "
         f"added={len(added)}, deleted={len(missing_in_enriched)})"
     )
     return output_csv
-

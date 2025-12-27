@@ -11,7 +11,6 @@ from typing import Any
 import requests
 
 from ..config import IGDB, MATCHING, REQUEST, RETRY
-from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 from ..utils.utilities import (
     CacheIOTracker,
     RateLimiter,
@@ -20,6 +19,7 @@ from ..utils.utilities import (
     normalize_game_name,
     pick_best_match,
 )
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 IGDB_API_URL = "https://api.igdb.com/v4"

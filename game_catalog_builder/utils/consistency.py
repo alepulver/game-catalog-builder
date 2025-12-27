@@ -294,9 +294,7 @@ def actionable_mismatch_tags(
     """
     out: list[str] = []
     if provider_consensus and provider_consensus.has_majority:
-        year_outliers = {
-            t.split(":", 1)[1] for t in year_tags if t.startswith("year_outlier:")
-        }
+        year_outliers = {t.split(":", 1)[1] for t in year_tags if t.startswith("year_outlier:")}
         platform_outliers = {
             t.split(":", 1)[1] for t in platform_tags if t.startswith("platform_outlier:")
         }
@@ -305,10 +303,7 @@ def actionable_mismatch_tags(
 
         # When titles agree (no title outliers) but years diverge widely, it's usually a
         # "same name, different game/edition" scenario (e.g. Doom 1993 vs Doom 2016).
-        if (
-            not provider_consensus.outliers
-            and len(provider_consensus.present) >= 2
-        ):
+        if not provider_consensus.outliers and len(provider_consensus.present) >= 2:
             present_years = [years[p] for p in provider_consensus.present if p in years]
             if len(set(present_years)) >= 2 and (max(present_years) - min(present_years)) >= (
                 ambiguous_year_spread

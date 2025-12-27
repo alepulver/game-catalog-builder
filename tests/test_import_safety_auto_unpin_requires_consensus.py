@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def test_auto_unpin_requires_consensus_and_outlier_tag():
-    from game_catalog_builder.cli import _auto_unpin_likely_wrong_provider_ids
+    from game_catalog_builder.analysis.resolve import auto_unpin_likely_wrong_provider_ids
 
     df = pd.DataFrame(
         [
@@ -36,7 +36,7 @@ def test_auto_unpin_requires_consensus_and_outlier_tag():
         ]
     )
 
-    out, changed, changed_idx = _auto_unpin_likely_wrong_provider_ids(df)
+    out, changed, changed_idx = auto_unpin_likely_wrong_provider_ids(df)
     assert changed == 1
     assert changed_idx == [1]
     assert out.loc[0, "Steam_AppID"] == "111"

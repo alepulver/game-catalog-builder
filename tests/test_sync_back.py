@@ -6,7 +6,7 @@ import pandas as pd
 
 
 def test_sync_back_updates_user_fields_and_keeps_provider_fields_out(tmp_path: Path) -> None:
-    from game_catalog_builder.cli import _sync_back_catalog
+    from game_catalog_builder.pipelines.sync_pipeline import sync_back_catalog
 
     catalog_csv = tmp_path / "Games_Catalog.csv"
     enriched_csv = tmp_path / "Games_Enriched.csv"
@@ -49,7 +49,7 @@ def test_sync_back_updates_user_fields_and_keeps_provider_fields_out(tmp_path: P
     )
     enriched.to_csv(enriched_csv, index=False)
 
-    _sync_back_catalog(catalog_csv=catalog_csv, enriched_csv=enriched_csv, output_csv=out_csv)
+    sync_back_catalog(catalog_csv=catalog_csv, enriched_csv=enriched_csv, output_csv=out_csv)
     out = pd.read_csv(out_csv).fillna("")
 
     # Updated from enriched.

@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def test_fill_eval_tags_marks_missing_and_not_found() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
     from game_catalog_builder.utils import IDENTITY_NOT_FOUND
 
     df = pd.DataFrame(
@@ -34,7 +34,7 @@ def test_fill_eval_tags_marks_missing_and_not_found() -> None:
 
 
 def test_fill_eval_tags_ignores_disabled_rows() -> None:
-    from game_catalog_builder.cli import fill_eval_tags
+    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [

@@ -19,8 +19,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "ruff>=0.7.0",
+    "pre-commit>=3.0.0",
     "pytest>=7.4",
-    "mypy>=1.7",
+    "pyright>=1.1.0",
     "types-PyYAML",
     "types-requests",
 ]
@@ -31,8 +32,8 @@ gcb = "game_catalog_builder.cli:main"
 [tool.setuptools]
 packages = [
     "game_catalog_builder",
+    "game_catalog_builder.analysis",
     "game_catalog_builder.clients",
-    "game_catalog_builder.diagnostics",
     "game_catalog_builder.pipelines",
     "game_catalog_builder.tools",
     "game_catalog_builder.utils",
@@ -49,14 +50,17 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 known-first-party = ["game_catalog_builder"]
 
+[tool.pyright]
+pythonVersion = "3.8"
+typeCheckingMode = "basic"
+reportMissingImports = false
+reportMissingTypeStubs = false
+exclude = [
+    ".venv",
+    "data",
+    "docs",
+    "experiments",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[tool.mypy]
-python_version = "3.8"
-warn_unused_ignores = true
-warn_redundant_casts = true
-warn_return_any = false
-disallow_untyped_defs = false
-no_implicit_optional = true
-ignore_missing_imports = true

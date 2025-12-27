@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from game_catalog_builder.clients.wikidata_client import WikidataClient
 from game_catalog_builder.utils.utilities import IDENTITY_NOT_FOUND
 
@@ -20,7 +18,11 @@ def test_wikidata_label_fetch_falls_back_to_enwiki_title(tmp_path: Path) -> None
         assert "sitelinks" in props
         assert sitefilter == "enwiki"
         return {
-            "Q10680": {"id": "Q10680", "labels": {}, "sitelinks": {"enwiki": {"title": "PlayStation 2"}}}
+            "Q10680": {
+                "id": "Q10680",
+                "labels": {},
+                "sitelinks": {"enwiki": {"title": "PlayStation 2"}},
+            }
         }
 
     client._get_entities = fake_get_entities.__get__(client, WikidataClient)  # type: ignore[attr-defined]

@@ -28,4 +28,3 @@ def test_steam_search_prefers_exact_normalized_match(tmp_path, monkeypatch):
     got = client.search_appid("Diablo", year_hint=None)
     assert got is not None
     assert str(got.get("id")) == "222"
-

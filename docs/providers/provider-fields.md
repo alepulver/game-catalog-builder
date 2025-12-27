@@ -270,5 +270,5 @@ Additional derived-from-Wikidata columns (official Wikimedia APIs, cached):
 | `Wikidata_Pageviews30d` | Pageviews API | Sum of pageviews over last 30 days (enwiki) |
 | `Wikidata_Pageviews90d` | Pageviews API | Sum of pageviews over last 90 days (enwiki) |
 | `Wikidata_Pageviews365d` | Pageviews API | Sum of pageviews over last 365 days (enwiki) |
-| `Wikidata_PageviewsFirst30d` | Pageviews API | Sum of pageviews over first 30 days since release (enwiki; usually post-2015 only) |
-| `Wikidata_PageviewsFirst90d` | Pageviews API | Sum of pageviews over first 90 days since release (enwiki; usually post-2015 only) |
+| `Wikidata_PageviewsFirst30d` | Pageviews API | Sum of pageviews over the first 30 days since release (enwiki; only computed when Wikidata has a full `YYYY-MM-DD` release date and it’s within Pageviews coverage, i.e. release date >= 2015-07-01) |
+| `Wikidata_PageviewsFirst90d` | Pageviews API | Sum of pageviews over the first 90 days since release (enwiki; only computed when Wikidata has a full `YYYY-MM-DD` release date and it’s within Pageviews coverage, i.e. release date >= 2015-07-01) |

@@ -42,6 +42,14 @@ does not meet the repin gate, it unpins.
 
 ## Signals / Enrichment
 
+### Steam release-year disagreement as a review driver
+- Idea: treat Steam’s store `release_date.year` as a strong mismatch signal vs IGDB/RAWG/HLTB.
+- Result: very noisy on this catalog. Steam frequently reflects PC re-releases/ports/remasters while
+  still being the correct identity match (e.g. older console titles arriving on Steam years later).
+- Decision: keep `year_outlier:steam` and `steam_year_disagree` as tags, but do not let them
+  independently imply “needs review”. They only weakly affect `MatchConfidence` unless paired with
+  stronger identity disagreements (title/platform/edition/appid).
+
 ### Wikipedia-based production tier classification
 - Idea: automatically classify publisher/developer “production tier” (AAA/AA/Indie) by looking up the company on
   Wikipedia and inferring tier from the page extract (owned-by-major/independent/etc).

@@ -26,12 +26,6 @@ def test_import_hltb_populates_id_even_without_diagnostics(tmp_path, monkeypatch
 
     monkeypatch.setattr("game_catalog_builder.clients.hltb_client.HLTBClient.search", fake_search)
 
-    # Also stub credentials loading to avoid requiring real credentials for other providers.
-    monkeypatch.setattr(
-        "game_catalog_builder.cli.load_credentials",
-        lambda *_args, **_kwargs: {"igdb": {}, "rawg": {}},
-    )
-
     main(
         [
             "import",

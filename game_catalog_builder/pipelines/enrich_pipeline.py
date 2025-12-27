@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +21,7 @@ from ..clients import (
     WikipediaSummaryClient,
 )
 from ..config import CLI, IGDB, RAWG, STEAM, STEAMSPY, WIKIDATA
-from ..schema import EVAL_COLUMNS, PUBLIC_DEFAULT_COLS, provider_output_columns
+from ..schema import EVAL_COLUMNS, PUBLIC_DEFAULT_COLS
 from ..utils import (
     IDENTITY_NOT_FOUND,
     ensure_columns,
@@ -34,9 +33,16 @@ from ..utils import (
     merge_all,
     normalize_game_name,
     read_csv,
-    write_csv,
 )
 from ..utils.progress import Progress
+from .common import (
+    flush_pending_keys,
+    iter_named_rows_with_progress,
+    log_cache_stats,
+    total_named_rows,
+    write_full_csv,
+    write_provider_output_csv,
+)
 
 if TYPE_CHECKING:
     from .context import PipelineContext
@@ -110,12 +116,6 @@ def build_personal_base_for_enrich(df: pd.DataFrame) -> pd.DataFrame:
     return df[cols].copy()
 
 
-def _total_named_rows(df: pd.DataFrame) -> int:
-    if "Name" not in df.columns:
-        return 0
-    return int((df["Name"].astype(str).str.strip() != "").sum())
-
-
 def process_steam_and_steamspy_streaming(
     *,
     input_csv: Path,
@@ -125,19 +125,21 @@ def process_steam_and_steamspy_streaming(
     steamspy_cache_path: Path,
     identity_overrides: dict[str, dict[str, str]] | None = None,
 ) -> None:
-    steam_client = SteamClient(cache_path=steam_cache_path, min_interval_s=STEAM.storesearch_min_interval_s)
-    steamspy_client = SteamSpyClient(cache_path=steamspy_cache_path, min_interval_s=STEAMSPY.min_interval_s)
+    steam_client = SteamClient(
+        cache_path=steam_cache_path, min_interval_s=STEAM.storesearch_min_interval_s
+    )
+    steamspy_client = SteamSpyClient(
+        cache_path=steamspy_cache_path, min_interval_s=STEAMSPY.min_interval_s
+    )
 
     df_steam = load_or_merge_dataframe(input_csv, steam_output_csv)
     df_steamspy = read_csv(input_csv)
     df_steamspy = ensure_columns(df_steamspy, PUBLIC_DEFAULT_COLS)
-    total_steam_rows = _total_named_rows(df_steam)
+    total_steam_rows = total_named_rows(df_steam)
     q: Queue[tuple[int, str, str] | None] = Queue()
 
     def steam_producer() -> None:
         processed = 0
-        seen = 0
-        progress = Progress("STEAM", total=total_steam_rows or None, every_n=CLI.progress_every_n)
         pending: dict[int, list[int]] = {}
 
         def _flush_pending() -> None:
@@ -157,13 +159,9 @@ def process_steam_and_steamspy_streaming(
                 processed += len(indices)
             pending.clear()
 
-        for idx, row in df_steam.iterrows():
-            name = str(row.get("Name", "") or "").strip()
-            if not name:
-                continue
-            seen += 1
-            progress.maybe_log(seen)
-
+        for idx, row, name, _ in iter_named_rows_with_progress(
+            df_steam, label="STEAM", total=total_steam_rows
+        ):
             rowid = str(row.get("RowId", "") or "").strip()
             override_appid = ""
             if identity_overrides and rowid:
@@ -177,7 +175,9 @@ def process_steam_and_steamspy_streaming(
 
             if is_row_processed(df_steam, int(idx), ["Steam_Name"]):
                 current_appid = str(df_steam.at[idx, "Steam_AppID"] or "").strip()
-                if current_appid and not is_row_processed(df_steamspy, int(idx), ["SteamSpy_Owners"]):
+                if current_appid and not is_row_processed(
+                    df_steamspy, int(idx), ["SteamSpy_Owners"]
+                ):
                     q.put((int(idx), name, current_appid))
                 if not (override_appid and current_appid != override_appid):
                     continue
@@ -211,14 +211,14 @@ def process_steam_and_steamspy_streaming(
                 pending.setdefault(appid_int, []).append(int(idx))
 
             if processed % 10 == 0:
-                write_csv(df_steam[provider_output_columns(list(df_steam.columns), prefix="Steam_")], steam_output_csv)
+                write_provider_output_csv(df_steam, steam_output_csv, prefix="Steam_")
 
             if len(pending) >= CLI.steam_streaming_flush_batch_size:
                 _flush_pending()
-                write_csv(df_steam[provider_output_columns(list(df_steam.columns), prefix="Steam_")], steam_output_csv)
+                write_provider_output_csv(df_steam, steam_output_csv, prefix="Steam_")
 
         _flush_pending()
-        write_csv(df_steam[provider_output_columns(list(df_steam.columns), prefix="Steam_")], steam_output_csv)
+        write_provider_output_csv(df_steam, steam_output_csv, prefix="Steam_")
         q.put(None)
 
     def steamspy_consumer() -> None:
@@ -240,15 +240,19 @@ def process_steam_and_steamspy_streaming(
             processed += 1
             progress.maybe_log(processed)
             if processed % 10 == 0:
-                steamspy_cols = provider_output_columns(
-                    list(df_steamspy.columns), prefix="SteamSpy_", extra=("Score_SteamSpy_100",)
+                write_provider_output_csv(
+                    df_steamspy,
+                    steamspy_output_csv,
+                    prefix="SteamSpy_",
+                    extra=("Score_SteamSpy_100",),
                 )
-                write_csv(df_steamspy[steamspy_cols], steamspy_output_csv)
 
-        steamspy_cols = provider_output_columns(
-            list(df_steamspy.columns), prefix="SteamSpy_", extra=("Score_SteamSpy_100",)
+        write_provider_output_csv(
+            df_steamspy,
+            steamspy_output_csv,
+            prefix="SteamSpy_",
+            extra=("Score_SteamSpy_100",),
         )
-        write_csv(df_steamspy[steamspy_cols], steamspy_output_csv)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         f1 = executor.submit(steam_producer)
@@ -256,8 +260,7 @@ def process_steam_and_steamspy_streaming(
         f1.result()
         f2.result()
 
-    logging.info(f"[STEAM] Cache stats: {steam_client.format_cache_stats()}")
-    logging.info(f"[STEAMSPY] Cache stats: {steamspy_client.format_cache_stats()}")
+    log_cache_stats({"steam": steam_client, "steamspy": steamspy_client})
 
 
 def process_igdb(
@@ -278,36 +281,28 @@ def process_igdb(
         min_interval_s=IGDB.min_interval_s,
     )
     df = load_or_merge_dataframe(input_csv, output_csv)
-    total_rows = _total_named_rows(df)
-    progress = Progress("IGDB", total=total_rows or None, every_n=CLI.progress_every_n)
+    total_rows = total_named_rows(df)
 
     processed = 0
-    seen = 0
     pending_by_id: dict[str, list[int]] = {}
+
+    def _apply_igdb_fields(_igdb_id: str, indices: list[int], data: object) -> int:
+        if not isinstance(data, dict):
+            return 0
+        for idx2 in indices:
+            for k, v in data.items():
+                df.at[idx2, k] = v
+        return len(indices)
 
     def _flush_pending() -> None:
         nonlocal processed
-        if not pending_by_id:
-            return
-        ids = list(pending_by_id.keys())
-        by_id = client.get_by_ids(ids)
-        for igdb_id, indices in list(pending_by_id.items()):
-            data = by_id.get(str(igdb_id))
-            if not data:
-                continue
-            for idx2 in indices:
-                for k, v in data.items():
-                    df.at[idx2, k] = v
-            processed += len(indices)
-        pending_by_id.clear()
+        processed += flush_pending_keys(
+            pending_by_id,
+            fetch_many=client.get_by_ids,
+            on_item=_apply_igdb_fields,
+        )
 
-    for idx, row in df.iterrows():
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
-        progress.maybe_log(seen)
-
+    for idx, row, name, _seen in iter_named_rows_with_progress(df, label="IGDB", total=total_rows):
         rowid = str(row.get("RowId", "") or "").strip()
         override_id = ""
         if identity_overrides and rowid:
@@ -338,24 +333,30 @@ def process_igdb(
                 processed += 1
 
         if processed % 10 == 0:
-            cols = provider_output_columns(
-                list(df.columns), prefix="IGDB_", extra=("Score_IGDB_100", "Score_IGDBCritic_100")
+            write_provider_output_csv(
+                df,
+                output_csv,
+                prefix="IGDB_",
+                extra=("Score_IGDB_100", "Score_IGDBCritic_100"),
             )
-            write_csv(df[cols], output_csv)
 
         if len(pending_by_id) >= CLI.igdb_flush_batch_size:
             _flush_pending()
-            cols = provider_output_columns(
-                list(df.columns), prefix="IGDB_", extra=("Score_IGDB_100", "Score_IGDBCritic_100")
+            write_provider_output_csv(
+                df,
+                output_csv,
+                prefix="IGDB_",
+                extra=("Score_IGDB_100", "Score_IGDBCritic_100"),
             )
-            write_csv(df[cols], output_csv)
 
     _flush_pending()
-    cols = provider_output_columns(
-        list(df.columns), prefix="IGDB_", extra=("Score_IGDB_100", "Score_IGDBCritic_100")
+    write_provider_output_csv(
+        df,
+        output_csv,
+        prefix="IGDB_",
+        extra=("Score_IGDB_100", "Score_IGDBCritic_100"),
     )
-    write_csv(df[cols], output_csv)
-    logging.info(f"[IGDB] Cache stats: {client.format_cache_stats()}")
+    log_cache_stats({"igdb": client})
     logging.info(f"✔ IGDB completed: {output_csv}")
 
 
@@ -376,18 +377,10 @@ def process_rawg(
         min_interval_s=RAWG.min_interval_s,
     )
     df = load_or_merge_dataframe(input_csv, output_csv)
-    total_rows = _total_named_rows(df)
-    progress = Progress("RAWG", total=total_rows or None, every_n=CLI.progress_every_n)
+    total_rows = total_named_rows(df)
 
     processed = 0
-    seen = 0
-    for idx, row in df.iterrows():
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
-        progress.maybe_log(seen)
-
+    for idx, row, name, _seen in iter_named_rows_with_progress(df, label="RAWG", total=total_rows):
         rowid = str(row.get("RowId", "") or "").strip()
         override_id = ""
         if identity_overrides and rowid:
@@ -418,12 +411,10 @@ def process_rawg(
 
         processed += 1
         if processed % 10 == 0:
-            cols = provider_output_columns(list(df.columns), prefix="RAWG_", extra=("Score_RAWG_100",))
-            write_csv(df[cols], output_csv)
+            write_provider_output_csv(df, output_csv, prefix="RAWG_", extra=("Score_RAWG_100",))
 
-    cols = provider_output_columns(list(df.columns), prefix="RAWG_", extra=("Score_RAWG_100",))
-    write_csv(df[cols], output_csv)
-    logging.info(f"[RAWG] Cache stats: {client.format_cache_stats()}")
+    write_provider_output_csv(df, output_csv, prefix="RAWG_", extra=("Score_RAWG_100",))
+    log_cache_stats({"rawg": client})
     logging.info(f"✔ RAWG completed: {output_csv}")
 
 
@@ -437,35 +428,28 @@ def process_steam(
 ) -> None:
     client = SteamClient(cache_path=cache_path, min_interval_s=STEAM.storesearch_min_interval_s)
     df = load_or_merge_dataframe(input_csv, output_csv)
-    total_rows = _total_named_rows(df)
-    progress = Progress("STEAM", total=total_rows or None, every_n=CLI.progress_every_n)
+    total_rows = total_named_rows(df)
 
     pending: dict[int, list[int]] = {}
 
+    def _apply_steam_fields(appid: int, indices: list[int], details: object) -> int:
+        if not isinstance(details, dict):
+            return 0
+        fields = client.extract_fields(int(appid), details)
+        for idx2 in indices:
+            for k, v in fields.items():
+                df.at[idx2, k] = v
+        return len(indices)
+
     def _flush_pending() -> None:
-        if not pending:
-            return
-        appids = list(pending.keys())
-        details_by_id = client.get_app_details_many(appids)
-        for appid, idxs in list(pending.items()):
-            details = details_by_id.get(appid)
-            if not isinstance(details, dict):
-                continue
-            fields = client.extract_fields(appid, details)
-            for idx in idxs:
-                for k, v in fields.items():
-                    df.at[idx, k] = v
-        pending.clear()
+        flush_pending_keys(
+            pending,
+            fetch_many=client.get_app_details_many,
+            on_item=_apply_steam_fields,
+        )
 
     queued = 0
-    seen = 0
-    for idx, row in df.iterrows():
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
-        progress.maybe_log(seen)
-
+    for idx, row, name, _seen in iter_named_rows_with_progress(df, label="STEAM", total=total_rows):
         rowid = str(row.get("RowId", "") or "").strip()
         override_appid = ""
         if identity_overrides and rowid:
@@ -478,7 +462,9 @@ def process_steam(
             continue
 
         if is_row_processed(df, idx, required_cols):
-            if not (override_appid and str(df.at[idx, "Steam_AppID"] or "").strip() != override_appid):
+            if not (
+                override_appid and str(df.at[idx, "Steam_AppID"] or "").strip() != override_appid
+            ):
                 continue
 
         appid_str = override_appid or str(row.get("Steam_AppID", "") or "").strip()
@@ -498,15 +484,15 @@ def process_steam(
         queued += 1
 
         if queued % 10 == 0:
-            write_csv(df[provider_output_columns(list(df.columns), prefix="Steam_")], output_csv)
+            write_provider_output_csv(df, output_csv, prefix="Steam_")
 
         if len(pending) >= CLI.steam_flush_batch_size:
             _flush_pending()
-            write_csv(df[provider_output_columns(list(df.columns), prefix="Steam_")], output_csv)
+            write_provider_output_csv(df, output_csv, prefix="Steam_")
 
     _flush_pending()
-    write_csv(df[provider_output_columns(list(df.columns), prefix="Steam_")], output_csv)
-    logging.info(f"[STEAM] Cache stats: {client.format_cache_stats()}")
+    write_provider_output_csv(df, output_csv, prefix="Steam_")
+    log_cache_stats({"steam": client})
     logging.info(f"✔ Steam completed: {output_csv}")
 
 
@@ -522,17 +508,15 @@ def process_steamspy(
         raise FileNotFoundError(f"{input_csv} not found. Run steam processing first.")
     df = load_or_merge_dataframe(input_csv, output_csv)
     total_rows = int((df.get("Steam_AppID", "").astype(str).str.strip() != "").sum())
-    progress = Progress("STEAMSPY", total=total_rows or None, every_n=CLI.progress_every_n)
 
     processed = 0
-    seen = 0
-    for idx, row in df.iterrows():
+    for idx, row, name, _ in iter_named_rows_with_progress(
+        df,
+        label="STEAMSPY",
+        total=total_rows,
+        skip_row=lambda r: not str(r.get("Steam_AppID", "") or "").strip(),
+    ):
         appid = str(row.get("Steam_AppID", "") or "").strip()
-        if not appid:
-            continue
-        name = str(row.get("Name", "") or "").strip()
-        seen += 1
-        progress.maybe_log(seen)
         if is_row_processed(df, idx, required_cols):
             continue
         logging.debug(f"[STEAMSPY] {name} (AppID {appid})")
@@ -544,14 +528,12 @@ def process_steamspy(
             df.at[idx, k] = v
         processed += 1
         if processed % 10 == 0:
-            cols = provider_output_columns(
-                list(df.columns), prefix="SteamSpy_", extra=("Score_SteamSpy_100",)
+            write_provider_output_csv(
+                df, output_csv, prefix="SteamSpy_", extra=("Score_SteamSpy_100",)
             )
-            write_csv(df[cols], output_csv)
 
-    cols = provider_output_columns(list(df.columns), prefix="SteamSpy_", extra=("Score_SteamSpy_100",))
-    write_csv(df[cols], output_csv)
-    logging.info(f"[STEAMSPY] Cache stats: {client.format_cache_stats()}")
+    write_provider_output_csv(df, output_csv, prefix="SteamSpy_", extra=("Score_SteamSpy_100",))
+    log_cache_stats({"steamspy": client})
     logging.info(f"✔ SteamSpy completed: {output_csv}")
 
 
@@ -565,18 +547,10 @@ def process_hltb(
 ) -> None:
     client = HLTBClient(cache_path=cache_path)
     df = load_or_merge_dataframe(input_csv, output_csv)
-    total_rows = _total_named_rows(df)
-    progress = Progress("HLTB", total=total_rows or None, every_n=CLI.progress_every_n)
+    total_rows = total_named_rows(df)
 
     processed = 0
-    seen = 0
-    for idx, row in df.iterrows():
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        seen += 1
-        progress.maybe_log(seen)
-
+    for idx, row, name, _seen in iter_named_rows_with_progress(df, label="HLTB", total=total_rows):
         rowid = str(row.get("RowId", "") or "").strip()
         query = ""
         pinned_id = ""
@@ -602,12 +576,10 @@ def process_hltb(
 
         processed += 1
         if processed % 10 == 0:
-            cols = provider_output_columns(list(df.columns), prefix="HLTB_", extra=("Score_HLTB_100",))
-            write_csv(df[cols], output_csv)
+            write_provider_output_csv(df, output_csv, prefix="HLTB_", extra=("Score_HLTB_100",))
 
-    cols = provider_output_columns(list(df.columns), prefix="HLTB_", extra=("Score_HLTB_100",))
-    write_csv(df[cols], output_csv)
-    logging.info(f"[HLTB] Cache stats: {client.format_cache_stats()}")
+    write_provider_output_csv(df, output_csv, prefix="HLTB_", extra=("Score_HLTB_100",))
+    log_cache_stats({"hltb": client})
     logging.info(f"✔ HLTB completed: {output_csv}")
 
 
@@ -635,11 +607,9 @@ def process_wikidata(
     igdb_by_id = igdb_cache.get("by_id") if isinstance(igdb_cache, dict) else {}
 
     df = load_or_merge_dataframe(input_csv, output_csv)
-    total_rows = _total_named_rows(df)
-    progress = Progress("WIKIDATA", total=total_rows or None, every_n=CLI.progress_every_n)
+    total_rows = total_named_rows(df)
 
     processed = 0
-    seen = 0
     pending_by_id: dict[str, list[int]] = {}
 
     def _year_hint(row: pd.Series) -> int | None:
@@ -722,78 +692,76 @@ def process_wikidata(
             out.append(t)
         return out
 
+    def _apply_wikidata_fields(qid: str, indices: list[int], data: object) -> int:
+        if not isinstance(data, dict):
+            return 0
+        enwiki_title = str(data.get("Wikidata_EnwikiTitle") or "").strip()
+        pageviews = None
+        if enwiki_title:
+            pageviews = pageviews_client.get_pageviews_summary_enwiki(enwiki_title)
+            launch = pageviews_client.get_pageviews_launch_summary_enwiki(
+                enwiki_title=enwiki_title, release_date=str(data.get("Wikidata_ReleaseDate") or "")
+            )
+            summary = summary_client.get_summary(enwiki_title)
+        else:
+            launch = None
+            summary = None
+
+        for idx2 in indices:
+            for k, v in data.items():
+                df.at[idx2, k] = v
+            if pageviews is not None:
+                df.at[idx2, "Wikidata_Pageviews30d"] = (
+                    str(pageviews.days_30) if pageviews.days_30 is not None else ""
+                )
+                df.at[idx2, "Wikidata_Pageviews90d"] = (
+                    str(pageviews.days_90) if pageviews.days_90 is not None else ""
+                )
+                df.at[idx2, "Wikidata_Pageviews365d"] = (
+                    str(pageviews.days_365) if pageviews.days_365 is not None else ""
+                )
+            df.at[idx2, "Wikidata_PageviewsFirst30d"] = (
+                str(launch.days_30) if launch and launch.days_30 is not None else ""
+            )
+            df.at[idx2, "Wikidata_PageviewsFirst90d"] = (
+                str(launch.days_90) if launch and launch.days_90 is not None else ""
+            )
+            if isinstance(summary, dict) and summary:
+                extract = str(summary.get("extract") or "").strip()
+                if len(extract) > 320:
+                    extract = extract[:317].rstrip() + "..."
+                thumb = ""
+                t = summary.get("thumbnail")
+                if isinstance(t, dict):
+                    thumb = str(t.get("source") or "").strip()
+                page_url = ""
+                cu = summary.get("content_urls")
+                if isinstance(cu, dict):
+                    desktop = cu.get("desktop")
+                    if isinstance(desktop, dict):
+                        page_url = str(desktop.get("page") or "").strip()
+                df.at[idx2, "Wikidata_WikipediaSummary"] = extract
+                df.at[idx2, "Wikidata_WikipediaThumbnail"] = thumb
+                df.at[idx2, "Wikidata_WikipediaPage"] = page_url
+        return len(indices)
+
     def _flush_pending() -> None:
         nonlocal processed
-        if not pending_by_id:
-            return
-        qids = list(pending_by_id.keys())
-        by_qid = client.get_by_ids(qids)
-        for qid, indices in list(pending_by_id.items()):
-            data = by_qid.get(qid)
-            if not data:
-                continue
-            enwiki_title = str(data.get("Wikidata_EnwikiTitle") or "").strip()
-            pageviews = None
-            if enwiki_title:
-                pageviews = pageviews_client.get_pageviews_summary_enwiki(enwiki_title)
-                launch = pageviews_client.get_pageviews_launch_summary_enwiki(
-                    enwiki_title=enwiki_title, release_date=str(data.get("Wikidata_ReleaseDate") or "")
-                )
-                summary = summary_client.get_summary(enwiki_title)
-            else:
-                launch = None
-                summary = None
+        processed += flush_pending_keys(
+            pending_by_id,
+            fetch_many=client.get_by_ids,
+            on_item=_apply_wikidata_fields,
+        )
 
-            for idx2 in indices:
-                for k, v in data.items():
-                    df.at[idx2, k] = v
-                if pageviews is not None:
-                    df.at[idx2, "Wikidata_Pageviews30d"] = (
-                        str(pageviews.days_30) if pageviews.days_30 is not None else ""
-                    )
-                    df.at[idx2, "Wikidata_Pageviews90d"] = (
-                        str(pageviews.days_90) if pageviews.days_90 is not None else ""
-                    )
-                    df.at[idx2, "Wikidata_Pageviews365d"] = (
-                        str(pageviews.days_365) if pageviews.days_365 is not None else ""
-                    )
-                df.at[idx2, "Wikidata_PageviewsFirst30d"] = (
-                    str(launch.days_30) if launch and launch.days_30 is not None else ""
-                )
-                df.at[idx2, "Wikidata_PageviewsFirst90d"] = (
-                    str(launch.days_90) if launch and launch.days_90 is not None else ""
-                )
-                if isinstance(summary, dict) and summary:
-                    extract = str(summary.get("extract") or "").strip()
-                    if len(extract) > 320:
-                        extract = extract[:317].rstrip() + "..."
-                    thumb = ""
-                    t = summary.get("thumbnail")
-                    if isinstance(t, dict):
-                        thumb = str(t.get("source") or "").strip()
-                    page_url = ""
-                    cu = summary.get("content_urls")
-                    if isinstance(cu, dict):
-                        desktop = cu.get("desktop")
-                        if isinstance(desktop, dict):
-                            page_url = str(desktop.get("page") or "").strip()
-                    df.at[idx2, "Wikidata_WikipediaSummary"] = extract
-                    df.at[idx2, "Wikidata_WikipediaThumbnail"] = thumb
-                    df.at[idx2, "Wikidata_WikipediaPage"] = page_url
-            processed += len(indices)
-        pending_by_id.clear()
-
-    for idx, row in df.iterrows():
-        seen += 1
-        name = str(row.get("Name", "") or "").strip()
-        if not name:
-            continue
-        progress.maybe_log(seen)
-
+    for idx, row, name, seen in iter_named_rows_with_progress(
+        df, label="WIKIDATA", total=total_rows
+    ):
         rowid = str(row.get("RowId", "") or "").strip()
         override_qid = ""
         if identity_overrides and rowid:
-            override_qid = str(identity_overrides.get(rowid, {}).get("Wikidata_QID", "") or "").strip()
+            override_qid = str(
+                identity_overrides.get(rowid, {}).get("Wikidata_QID", "") or ""
+            ).strip()
 
         if override_qid == IDENTITY_NOT_FOUND:
             clear_prefixed_columns(df, int(idx), "Wikidata_")
@@ -824,20 +792,21 @@ def process_wikidata(
             pending_by_id.setdefault(qid, []).append(int(idx))
 
         if seen % CLI.progress_every_n == 0:
-            cols = provider_output_columns(list(df.columns), prefix="Wikidata_")
-            write_csv(df[cols], output_csv)
+            write_provider_output_csv(df, output_csv, prefix="Wikidata_")
 
         if len(pending_by_id) >= WIKIDATA.get_by_ids_batch_size:
             _flush_pending()
-            cols = provider_output_columns(list(df.columns), prefix="Wikidata_")
-            write_csv(df[cols], output_csv)
+            write_provider_output_csv(df, output_csv, prefix="Wikidata_")
 
     _flush_pending()
-    cols = provider_output_columns(list(df.columns), prefix="Wikidata_")
-    write_csv(df[cols], output_csv)
-    logging.info(f"[WIKIDATA] Cache stats: {client.format_cache_stats()}")
-    logging.info(f"[WIKIPEDIA] Cache stats: {pageviews_client.format_cache_stats()}")
-    logging.info(f"[WIKIPEDIA] Summary cache stats: {summary_client.format_cache_stats()}")
+    write_provider_output_csv(df, output_csv, prefix="Wikidata_")
+    log_cache_stats(
+        {
+            "wikidata": client,
+            "wikipedia_pageviews": pageviews_client,
+            "wikipedia_summary": summary_client,
+        }
+    )
     logging.info(f"✔ Wikidata completed: {output_csv}")
 
 
@@ -900,7 +869,7 @@ def run_enrich_ctx(
 
     base_df = build_personal_base_for_enrich(read_csv(input_csv))
     temp_base_csv = output_dir / f".personal_base.{os.getpid()}.csv"
-    write_csv(base_df, temp_base_csv)
+    write_full_csv(base_df, temp_base_csv)
     input_for_processing = temp_base_csv
     identity_overrides = load_identity_overrides(input_for_processing)
 
@@ -982,7 +951,10 @@ def run_enrich_ctx(
     if len(sources_to_process) <= 1:
         run_source(sources_to_process[0])
     else:
-        max_workers = min(len(sources_to_process), (os.cpu_count() or 4))
+        max_workers = min(
+            len(sources_to_process), int(getattr(CLI, "max_parallel_providers", 8) or 8)
+        )
+        max_workers = max(1, max_workers)
         futures = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for src in sources_to_process:
@@ -1018,7 +990,7 @@ def run_enrich_ctx(
         "Now_SteamSpyPlayers2Weeks",
     ]
     merged_df = merged_df.drop(columns=[c for c in deprecated_cols if c in merged_df.columns])
-    write_csv(merged_df, merge_output)
+    write_full_csv(merged_df, merge_output)
     logging.info(f"✔ Games_Enriched.csv generated successfully: {merge_output}")
 
     if validate:
@@ -1045,7 +1017,7 @@ def run_enrich_ctx(
             enabled_for_validation.add("wikidata")
 
         report = generate_validation_report(merged, enabled_providers=enabled_for_validation)
-        write_csv(report, validate_out)
+        write_full_csv(report, validate_out)
         logging.info(f"✔ Validation report generated: {validate_out}")
 
     if temp_base_csv.exists():

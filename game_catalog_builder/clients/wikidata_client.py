@@ -3,23 +3,21 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from pathlib import Path
 from typing import Any
 
 import requests
 
-from ..config import MATCHING, RETRY, WIKIDATA
-from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
+from ..config import CACHE, MATCHING, RETRY, WIKIDATA
 from ..utils.utilities import (
+    IDENTITY_NOT_FOUND,
     CacheIOTracker,
     RateLimiter,
-    IDENTITY_NOT_FOUND,
     fuzzy_score,
     iter_chunks,
     pick_best_match,
 )
-from ..config import CACHE
+from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
@@ -407,9 +405,9 @@ class WikidataClient:
                     continue
                 lbl = str((v.get("labels") or {}).get("en", {}).get("value") or "").strip()
                 if not lbl:
-                    enwiki_title = (
-                        ((v.get("sitelinks") or {}).get("enwiki") or {}).get("title") or ""
-                    )
+                    enwiki_title = ((v.get("sitelinks") or {}).get("enwiki") or {}).get(
+                        "title"
+                    ) or ""
                     lbl = str(enwiki_title).strip().replace("_", " ")
                 prev = self._labels.get(qid)
                 if prev is None or (prev in {"", IDENTITY_NOT_FOUND} and lbl):
@@ -781,9 +779,7 @@ class WikidataClient:
                     return None
 
         if score < 100:
-            msg = (
-                f"Close match for '{name}': Selected '{best.get('label', '')}' (score: {score}%)"
-            )
+            msg = f"Close match for '{name}': Selected '{best.get('label', '')}' (score: {score}%)"
             if top_matches:
                 top = ", ".join(f"'{n}' ({s}%)" for n, s in top_matches[:5])
                 msg += f", alternatives: {top}"

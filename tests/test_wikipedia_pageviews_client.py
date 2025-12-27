@@ -72,8 +72,9 @@ def test_pageviews_first_days_since_release_returns_sum(tmp_path, monkeypatch):
 def test_pageviews_client_disables_fetch_on_network_failure(tmp_path, monkeypatch):
     from datetime import date, timedelta
 
-    from game_catalog_builder.clients.wikipedia_pageviews_client import WikipediaPageviewsClient
     import requests
+
+    from game_catalog_builder.clients.wikipedia_pageviews_client import WikipediaPageviewsClient
 
     calls = {"get": 0}
 
@@ -89,6 +90,7 @@ def test_pageviews_client_disables_fetch_on_network_failure(tmp_path, monkeypatc
     start = end - timedelta(days=365 - 1)
     start_s = start.strftime("%Y%m%d") + "00"
     end_s = end.strftime("%Y%m%d") + "00"
+    second_ts = (start + timedelta(days=1)).strftime("%Y%m%d") + "00"
     (tmp_path / "pv.json").write_text(
         (
             "{\n"
@@ -96,7 +98,7 @@ def test_pageviews_client_disables_fetch_on_network_failure(tmp_path, monkeypatc
             f'    "en.wikipedia.org|all-access|user|Doom|daily|{start_s}|{end_s}": {{\n'
             '      "items": [\n'
             f'        {{"timestamp": "{start_s}", "views": 10}},\n'
-            f'        {{"timestamp": "{(start + timedelta(days=1)).strftime("%Y%m%d")}00", "views": 20}}\n'
+            f'        {{"timestamp": "{second_ts}", "views": 20}}\n'
             "      ]\n"
             "    }\n"
             "  }\n"

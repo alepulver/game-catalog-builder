@@ -110,11 +110,21 @@ def collect_production_tiers_yaml(
     Scan provider publisher/developer columns from an enriched CSV and write a YAML file to
     manually curate coarse production tiers (AAA/AA/Indie).
 
-    The YAML format is intentionally human/AI-editable and may include extra fields (count/examples);
-    enrich only needs the `tier` field.
+    The YAML format is intentionally human/AI-editable and may include extra fields
+    (count/examples); enrich only needs the `tier` field.
     """
-    publisher_cols = ("Steam_Publishers", "IGDB_Publishers", "RAWG_Publishers", "Wikidata_Publishers")
-    developer_cols = ("Steam_Developers", "IGDB_Developers", "RAWG_Developers", "Wikidata_Developers")
+    publisher_cols = (
+        "Steam_Publishers",
+        "IGDB_Publishers",
+        "RAWG_Publishers",
+        "Wikidata_Publishers",
+    )
+    developer_cols = (
+        "Steam_Developers",
+        "IGDB_Developers",
+        "RAWG_Developers",
+        "Wikidata_Developers",
+    )
 
     pub_counts: Counter[str] = Counter()
     dev_counts: Counter[str] = Counter()
@@ -177,7 +187,11 @@ def collect_production_tiers_yaml(
         dev_counts = Counter({k: v for k, v in dev_counts.items() if v >= int(min_count)})
 
     existing_path = base_yaml if (base_yaml is not None) else out_yaml
-    existing = _load_existing_yaml(existing_path) if keep_existing else {"publishers": {}, "developers": {}}
+    existing = (
+        _load_existing_yaml(existing_path)
+        if keep_existing
+        else {"publishers": {}, "developers": {}}
+    )
     pubs_existing_raw: dict[str, Any] = dict(existing.get("publishers", {}))
     devs_existing_raw: dict[str, Any] = dict(existing.get("developers", {}))
 
@@ -202,7 +216,11 @@ def collect_production_tiers_yaml(
         if only_missing:
             if tier_prev:
                 continue
-            pubs_out[label] = {"tier": tier_prev, "count": int(count), "examples": pub_examples.get(label, [])}
+            pubs_out[label] = {
+                "tier": tier_prev,
+                "count": int(count),
+                "examples": pub_examples.get(label, []),
+            }
         else:
             if tier_prev:
                 pubs_out[label] = tier_prev
@@ -213,7 +231,11 @@ def collect_production_tiers_yaml(
         if only_missing:
             if tier_prev:
                 continue
-            devs_out[label] = {"tier": tier_prev, "count": int(count), "examples": dev_examples.get(label, [])}
+            devs_out[label] = {
+                "tier": tier_prev,
+                "count": int(count),
+                "examples": dev_examples.get(label, []),
+            }
         else:
             if tier_prev:
                 devs_out[label] = tier_prev

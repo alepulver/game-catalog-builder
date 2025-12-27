@@ -12,7 +12,7 @@ def test_igdb_extracts_steam_appid_from_category_shape(tmp_path: Path) -> None:
 
 
 def test_extract_steam_appid_from_rawg_store_url() -> None:
-    from game_catalog_builder.cli import _extract_steam_appid_from_rawg
+    from game_catalog_builder.utils.cross_refs import extract_steam_appid_from_rawg_stores
 
     rawg_obj = {
         "stores": [
@@ -22,4 +22,4 @@ def test_extract_steam_appid_from_rawg_store_url() -> None:
             },
         ]
     }
-    assert _extract_steam_appid_from_rawg(rawg_obj) == "620"
+    assert extract_steam_appid_from_rawg_stores(rawg_obj) == "620"
