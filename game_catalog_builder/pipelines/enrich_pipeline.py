@@ -5,7 +5,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -692,57 +692,91 @@ def process_wikidata(
             out.append(t)
         return out
 
+    wiki_tasks: Queue[tuple[str, str, list[int]] | None] = Queue()
+    wiki_results: Queue[tuple[list[int], dict[str, str]]] = Queue()
+
+    def _drain_wiki_results() -> None:
+        while True:
+            try:
+                indices, fields = wiki_results.get_nowait()
+            except Empty:
+                return
+            for idx2 in indices:
+                for k, v in fields.items():
+                    df.at[idx2, k] = v
+
+    def _wikipedia_consumer() -> None:
+        memo: dict[tuple[str, str], dict[str, str]] = {}
+        while True:
+            item = wiki_tasks.get()
+            if item is None:
+                break
+            enwiki_title, release_date, indices = item
+            title = str(enwiki_title or "").strip()
+            if not title:
+                continue
+            rel = str(release_date or "").strip()
+            key = (title, rel)
+
+            cached = memo.get(key)
+            if cached is None:
+                pageviews = pageviews_client.get_pageviews_summary_enwiki(title)
+                launch = pageviews_client.get_pageviews_launch_summary_enwiki(
+                    enwiki_title=title, release_date=rel
+                )
+                summary = summary_client.get_summary(title)
+
+                fields: dict[str, str] = {
+                    "Wikidata_Pageviews30d": (
+                        str(pageviews.days_30) if pageviews.days_30 is not None else ""
+                    ),
+                    "Wikidata_Pageviews90d": (
+                        str(pageviews.days_90) if pageviews.days_90 is not None else ""
+                    ),
+                    "Wikidata_Pageviews365d": (
+                        str(pageviews.days_365) if pageviews.days_365 is not None else ""
+                    ),
+                    "Wikidata_PageviewsFirst30d": (
+                        str(launch.days_30) if launch and launch.days_30 is not None else ""
+                    ),
+                    "Wikidata_PageviewsFirst90d": (
+                        str(launch.days_90) if launch and launch.days_90 is not None else ""
+                    ),
+                }
+                if isinstance(summary, dict) and summary:
+                    extract = str(summary.get("extract") or "").strip()
+                    if len(extract) > 320:
+                        extract = extract[:317].rstrip() + "..."
+                    thumb = ""
+                    t = summary.get("thumbnail")
+                    if isinstance(t, dict):
+                        thumb = str(t.get("source") or "").strip()
+                    page_url = ""
+                    cu = summary.get("content_urls")
+                    if isinstance(cu, dict):
+                        desktop = cu.get("desktop")
+                        if isinstance(desktop, dict):
+                            page_url = str(desktop.get("page") or "").strip()
+                    fields["Wikidata_WikipediaSummary"] = extract
+                    fields["Wikidata_WikipediaThumbnail"] = thumb
+                    fields["Wikidata_WikipediaPage"] = page_url
+
+                memo[key] = fields
+                cached = fields
+
+            wiki_results.put((indices, cached))
+
     def _apply_wikidata_fields(qid: str, indices: list[int], data: object) -> int:
         if not isinstance(data, dict):
             return 0
         enwiki_title = str(data.get("Wikidata_EnwikiTitle") or "").strip()
-        pageviews = None
-        if enwiki_title:
-            pageviews = pageviews_client.get_pageviews_summary_enwiki(enwiki_title)
-            launch = pageviews_client.get_pageviews_launch_summary_enwiki(
-                enwiki_title=enwiki_title, release_date=str(data.get("Wikidata_ReleaseDate") or "")
-            )
-            summary = summary_client.get_summary(enwiki_title)
-        else:
-            launch = None
-            summary = None
+        release_date = str(data.get("Wikidata_ReleaseDate") or "").strip()
 
         for idx2 in indices:
             for k, v in data.items():
                 df.at[idx2, k] = v
-            if pageviews is not None:
-                df.at[idx2, "Wikidata_Pageviews30d"] = (
-                    str(pageviews.days_30) if pageviews.days_30 is not None else ""
-                )
-                df.at[idx2, "Wikidata_Pageviews90d"] = (
-                    str(pageviews.days_90) if pageviews.days_90 is not None else ""
-                )
-                df.at[idx2, "Wikidata_Pageviews365d"] = (
-                    str(pageviews.days_365) if pageviews.days_365 is not None else ""
-                )
-            df.at[idx2, "Wikidata_PageviewsFirst30d"] = (
-                str(launch.days_30) if launch and launch.days_30 is not None else ""
-            )
-            df.at[idx2, "Wikidata_PageviewsFirst90d"] = (
-                str(launch.days_90) if launch and launch.days_90 is not None else ""
-            )
-            if isinstance(summary, dict) and summary:
-                extract = str(summary.get("extract") or "").strip()
-                if len(extract) > 320:
-                    extract = extract[:317].rstrip() + "..."
-                thumb = ""
-                t = summary.get("thumbnail")
-                if isinstance(t, dict):
-                    thumb = str(t.get("source") or "").strip()
-                page_url = ""
-                cu = summary.get("content_urls")
-                if isinstance(cu, dict):
-                    desktop = cu.get("desktop")
-                    if isinstance(desktop, dict):
-                        page_url = str(desktop.get("page") or "").strip()
-                df.at[idx2, "Wikidata_WikipediaSummary"] = extract
-                df.at[idx2, "Wikidata_WikipediaThumbnail"] = thumb
-                df.at[idx2, "Wikidata_WikipediaPage"] = page_url
+        if enwiki_title:
+            wiki_tasks.put((enwiki_title, release_date, list(indices)))
         return len(indices)
 
     def _flush_pending() -> None:
@@ -753,52 +787,73 @@ def process_wikidata(
             on_item=_apply_wikidata_fields,
         )
 
-    for idx, row, name, seen in iter_named_rows_with_progress(
-        df, label="WIKIDATA", total=total_rows
-    ):
-        rowid = str(row.get("RowId", "") or "").strip()
-        override_qid = ""
-        if identity_overrides and rowid:
-            override_qid = str(
-                identity_overrides.get(rowid, {}).get("Wikidata_QID", "") or ""
-            ).strip()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        wikipedia_future = executor.submit(_wikipedia_consumer)
 
-        if override_qid == IDENTITY_NOT_FOUND:
-            clear_prefixed_columns(df, int(idx), "Wikidata_")
-            continue
+        for idx, row, name, seen in iter_named_rows_with_progress(
+            df, label="WIKIDATA", total=total_rows
+        ):
+            rowid = str(row.get("RowId", "") or "").strip()
+            override_qid = ""
+            if identity_overrides and rowid:
+                override_qid = str(
+                    identity_overrides.get(rowid, {}).get("Wikidata_QID", "") or ""
+                ).strip()
 
-        if is_row_processed(df, idx, required_cols):
-            if not (override_qid and str(df.at[idx, "Wikidata_QID"] or "").strip() != override_qid):
+            if override_qid == IDENTITY_NOT_FOUND:
+                clear_prefixed_columns(df, int(idx), "Wikidata_")
                 continue
 
-        qid = override_qid or str(row.get("Wikidata_QID", "") or "").strip()
-        if qid:
-            pending_by_id.setdefault(qid, []).append(int(idx))
-        else:
-            logging.debug(f"[WIKIDATA] Processing: {name}")
-            yh = _derived_year_hint(row)
-            search = client.search(name, year_hint=yh)
-            if not search:
-                for alt in _fallback_titles(row):
-                    if alt.casefold() == name.casefold():
-                        continue
-                    search = client.search(alt, year_hint=yh)
-                    if search:
-                        break
-            qid = str((search or {}).get("Wikidata_QID") or "").strip()
-            if not qid:
-                continue
-            df.at[idx, "Wikidata_QID"] = qid
-            pending_by_id.setdefault(qid, []).append(int(idx))
+            if is_row_processed(df, idx, required_cols):
+                if not (
+                    override_qid and str(df.at[idx, "Wikidata_QID"] or "").strip() != override_qid
+                ):
+                    enwiki_title = str(df.at[idx, "Wikidata_EnwikiTitle"] or "").strip()
+                    if enwiki_title:
+                        wiki_tasks.put(
+                            (
+                                enwiki_title,
+                                str(df.at[idx, "Wikidata_ReleaseDate"] or "").strip(),
+                                [int(idx)],
+                            )
+                        )
+                    _drain_wiki_results()
+                    continue
 
-        if seen % CLI.progress_every_n == 0:
-            write_provider_output_csv(df, output_csv, prefix="Wikidata_")
+            qid = override_qid or str(row.get("Wikidata_QID", "") or "").strip()
+            if qid:
+                pending_by_id.setdefault(qid, []).append(int(idx))
+            else:
+                logging.debug(f"[WIKIDATA] Processing: {name}")
+                yh = _derived_year_hint(row)
+                search = client.search(name, year_hint=yh)
+                if not search:
+                    for alt in _fallback_titles(row):
+                        if alt.casefold() == name.casefold():
+                            continue
+                        search = client.search(alt, year_hint=yh)
+                        if search:
+                            break
+                qid = str((search or {}).get("Wikidata_QID") or "").strip()
+                if not qid:
+                    continue
+                df.at[idx, "Wikidata_QID"] = qid
+                pending_by_id.setdefault(qid, []).append(int(idx))
 
-        if len(pending_by_id) >= WIKIDATA.get_by_ids_batch_size:
-            _flush_pending()
-            write_provider_output_csv(df, output_csv, prefix="Wikidata_")
+            if seen % CLI.progress_every_n == 0:
+                _drain_wiki_results()
+                write_provider_output_csv(df, output_csv, prefix="Wikidata_")
 
-    _flush_pending()
+            if len(pending_by_id) >= WIKIDATA.get_by_ids_batch_size:
+                _flush_pending()
+                _drain_wiki_results()
+                write_provider_output_csv(df, output_csv, prefix="Wikidata_")
+
+        _flush_pending()
+        wiki_tasks.put(None)
+        wikipedia_future.result()
+        _drain_wiki_results()
+
     write_provider_output_csv(df, output_csv, prefix="Wikidata_")
     log_cache_stats(
         {

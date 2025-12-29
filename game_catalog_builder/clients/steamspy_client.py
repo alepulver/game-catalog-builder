@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,27 @@ class SteamSpyClient:
         except Exception:
             score_100 = ""
             rate = ""
+
+        tags_obj = data.get("tags", None)
+        tags_csv = ""
+        tags_top = ""
+        if isinstance(tags_obj, dict):
+            items: list[tuple[str, int]] = []
+            for k, v in tags_obj.items():
+                name = str(k or "").strip()
+                if not name:
+                    continue
+                try:
+                    count = int(v)
+                except Exception:
+                    continue
+                if count <= 0:
+                    continue
+                items.append((name, count))
+            items.sort(key=lambda x: (-x[1], x[0].casefold()))
+            tags_csv = ", ".join([name for name, _ in items[:15]])
+            tags_top = json.dumps(items[:50], ensure_ascii=False)
+
         return {
             "SteamSpy_Owners": str(data.get("owners", "")),
             "SteamSpy_Players": str(data.get("players_forever", "")),
@@ -131,6 +153,8 @@ class SteamSpyClient:
             "SteamSpy_Negative": str(negative),
             "SteamSpy_PositiveRate": rate,
             "Score_SteamSpy_100": score_100,
+            "SteamSpy_Tags": tags_csv,
+            "SteamSpy_TagsTop": tags_top,
         }
 
     def format_cache_stats(self) -> str:

@@ -21,6 +21,14 @@ def test_rawg_extract_fields_fixture():
         "rating": 4.2,
         "ratings_count": 1234,
         "metacritic": 85,
+        "added": 999,
+        "added_by_status": {
+            "owned": 500,
+            "playing": 10,
+            "beaten": 100,
+            "toplay": 250,
+            "dropped": 5,
+        },
     }
 
     fields = RAWGClient.extract_fields(rawg_obj)
@@ -39,6 +47,12 @@ def test_rawg_extract_fields_fixture():
     assert fields["RAWG_Rating"] == "4.2"
     assert fields["RAWG_RatingsCount"] == "1234"
     assert fields["RAWG_Metacritic"] == "85"
+    assert fields["RAWG_Added"] == "999"
+    assert fields["RAWG_AddedByStatusOwned"] == "500"
+    assert fields["RAWG_AddedByStatusPlaying"] == "10"
+    assert fields["RAWG_AddedByStatusBeaten"] == "100"
+    assert fields["RAWG_AddedByStatusToplay"] == "250"
+    assert fields["RAWG_AddedByStatusDropped"] == "5"
     assert fields["RAWG_Developers"] == json.dumps(["id Software"], ensure_ascii=False)
     assert fields["RAWG_Publishers"] == json.dumps(["Bethesda Softworks"], ensure_ascii=False)
 
@@ -167,11 +181,38 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
         "SteamSpy_Negative": "",
         "SteamSpy_PositiveRate": "",
         "Score_SteamSpy_100": "",
+        "SteamSpy_Tags": "",
+        "SteamSpy_TagsTop": "",
     }
 
     client._cache_io.flush()
     raw = json.loads((tmp_path / "steamspy_cache.json").read_text(encoding="utf-8"))
     assert raw["by_id"]["999"]["owners"] == "10,000 .. 20,000"
+
+
+def test_steamspy_extracts_tag_cloud(tmp_path, monkeypatch):
+    from game_catalog_builder.clients.steamspy_client import SteamSpyClient
+
+    def fake_get(_self, url, params=None, timeout=None):
+        class Resp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "owners": "10,000 .. 20,000",
+                    "tags": {"Roguelike": 123, "Multiplayer": 50, "Zombies": 5},
+                }
+
+        return Resp()
+
+    monkeypatch.setattr("requests.sessions.Session.get", fake_get)
+
+    client = SteamSpyClient(cache_path=tmp_path / "steamspy_cache.json", min_interval_s=0.0)
+    data = client.fetch(111)
+    assert data is not None
+    assert data["SteamSpy_Tags"].startswith("Roguelike")
+    assert data["SteamSpy_TagsTop"].startswith("[[")
 
 
 def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatch):

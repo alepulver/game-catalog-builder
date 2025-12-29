@@ -46,6 +46,34 @@ def _parse_float(value: Any) -> float | None:
         return None
 
 
+def _split_text_list(value: Any) -> list[str]:
+    """
+    Parse a comma-separated list stored in a CSV cell.
+
+    Examples:
+      - "Action, Shooter"
+      - "Single-player, Online Co-op"
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    if raw.casefold() in {"nan", "none", "null"}:
+        return []
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    return parts
+
+
+def _normalize_token(value: str) -> str:
+    s = str(value or "").casefold().strip()
+    if not s:
+        return ""
+    s = s.replace("&", " and ")
+    s = re.sub(r"[\(\)\[\]\{\}]", " ", s)
+    s = re.sub(r"[^a-z0-9\s:+/-]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 _OWNERS_RANGE_RE = re.compile(r"^\s*(?P<low>[\d,\s]+)\s*(?:\.\.|-)\s*(?P<high>[\d,\s]+)\s*$")
 
 
@@ -295,6 +323,44 @@ def _content_type_from_igdb(row: dict[str, Any]) -> str:
     return ""
 
 
+def _igdb_list_items(row: dict[str, Any], col: str) -> list[str]:
+    """
+    IGDB relationship lists are stored as comma-separated strings in CSV output columns.
+    """
+    return [x for x in _split_text_list(row.get(col, "")) if x]
+
+
+def _looks_like_non_content_dlc(title: str) -> bool:
+    t = _normalize_token(title)
+    if not t:
+        return False
+
+    # Common “non-game-content” DLC add-ons that aren’t helpful for content-type clarity.
+    if "soundtrack" in t or "original soundtrack" in t:
+        return True
+    if re.search(r"\bost\b", t):
+        return True
+    if "artbook" in t or "art book" in t:
+        return True
+    if "wallpaper" in t or "wallpapers" in t:
+        return True
+    if re.search(r"\bmanual\b", t):
+        return True
+    if re.search(r"\bguide\b", t) and "strategy" in t:
+        return True
+    return False
+
+
+def _igdb_related_counts(row: dict[str, Any]) -> tuple[int, int, int]:
+    """
+    Return (dlcs_non_soundtrack, expansions, ports).
+    """
+    dlcs = [x for x in _igdb_list_items(row, "IGDB_DLCs") if not _looks_like_non_content_dlc(x)]
+    expansions = _igdb_list_items(row, "IGDB_Expansions")
+    ports = _igdb_list_items(row, "IGDB_Ports")
+    return (len(dlcs), len(expansions), len(ports))
+
+
 def _content_type_source_signals(row: dict[str, Any]) -> list[str]:
     """
     Return compact, human-readable tags describing the source signals.
@@ -309,12 +375,13 @@ def _content_type_source_signals(row: dict[str, Any]) -> list[str]:
         out.append("igdb:version_parent")
     if str(row.get("IGDB_ParentGame", "") or "").strip():
         out.append("igdb:parent_game")
-    if str(row.get("IGDB_DLCs", "") or "").strip():
-        out.append("igdb:has_dlcs")
-    if str(row.get("IGDB_Expansions", "") or "").strip():
-        out.append("igdb:has_expansions")
-    if str(row.get("IGDB_Ports", "") or "").strip():
-        out.append("igdb:has_ports")
+    dlc_n, exp_n, port_n = _igdb_related_counts(row)
+    if dlc_n:
+        out.append(f"igdb:dlcs={dlc_n}")
+    if exp_n:
+        out.append(f"igdb:expansions={exp_n}")
+    if port_n:
+        out.append(f"igdb:ports={port_n}")
     return out
 
 
@@ -355,6 +422,143 @@ def _content_type_consensus(row: dict[str, Any]) -> tuple[str, str, str, str]:
         ", ".join(_content_type_source_signals(row)),
         "",
     )
+
+
+def _parse_hltb_hours(value: Any) -> float | None:
+    """
+    HLTB times are stored as numeric strings (hours).
+    """
+    f = _parse_float(value)
+    if f is None:
+        return None
+    if f <= 0:
+        return None
+    return float(f)
+
+
+def _compute_replayability(row: dict[str, Any]) -> tuple[str, str]:
+    """
+    Return (Replayability_100, Replayability_SourceSignals).
+
+    This is a conservative heuristic intended for sorting/triage, not a ground-truth label.
+    """
+    steam_cats = " ".join(_normalize_token(x) for x in _split_text_list(row.get("Steam_Categories")))
+    steamspy_tags = " ".join(_normalize_token(x) for x in _split_text_list(row.get("SteamSpy_Tags")))
+    igdb_modes = " ".join(_normalize_token(x) for x in _split_text_list(row.get("IGDB_GameModes")))
+    rawg_tags = " ".join(_normalize_token(x) for x in _split_text_list(row.get("RAWG_Tags")))
+    rawg_genres = " ".join(_normalize_token(x) for x in _split_text_list(row.get("RAWG_Genres")))
+    igdb_genres = " ".join(_normalize_token(x) for x in _split_text_list(row.get("IGDB_Genres")))
+    combined = " ".join(
+        x
+        for x in (steam_cats, steamspy_tags, igdb_modes, rawg_tags, rawg_genres, igdb_genres)
+        if x
+    )
+
+    main = _parse_hltb_hours(row.get("HLTB_Main"))
+    extra = _parse_hltb_hours(row.get("HLTB_Extra"))
+    comp = _parse_hltb_hours(row.get("HLTB_Completionist"))
+
+    has_any_inputs = bool(combined.strip()) or any(v is not None for v in (main, extra, comp))
+    if not has_any_inputs:
+        return ("", "")
+
+    def _has_any(*needles: str) -> bool:
+        return any(n in combined for n in needles)
+
+    has_multiplayer = _has_any(
+        "multiplayer",
+        "multi player",
+        "online pvp",
+        "online multiplayer",
+        "pvp",
+        "mmorpg",
+        "massively multiplayer",
+        "battle royale",
+    )
+    has_coop = _has_any("co op", "coop", "co-operative", "cooperative", "online co op", "local co op")
+    has_pvp = _has_any("pvp", "competitive", "ranked", "versus")
+    has_roguelike = _has_any("roguelike", "roguelite")
+    has_procedural = _has_any("procedural", "procedurally generated", "procedural generation")
+    has_sandbox = _has_any(
+        "sandbox",
+        "open world",
+        "strategy",
+        "4x",
+        "simulation",
+        "city builder",
+        "management",
+        "survival",
+        "crafting",
+        "building",
+    )
+
+    long_optional = False
+    if main is not None and main > 0:
+        if comp is not None and (comp / main) >= 2.0:
+            long_optional = True
+        if extra is not None and (extra / main) >= 1.5:
+            long_optional = True
+
+    score = 20.0
+    signals: list[str] = []
+
+    if has_multiplayer:
+        score += 50.0
+        signals.append("multiplayer")
+    if has_coop:
+        score += 20.0
+        signals.append("coop")
+    if has_pvp:
+        score += 10.0
+        signals.append("pvp")
+    if has_roguelike:
+        score += 25.0
+        signals.append("roguelike")
+    if has_procedural and "roguelike" not in signals:
+        score += 15.0
+        signals.append("procedural")
+    if has_sandbox:
+        score += 20.0
+        signals.append("systemic")
+    if long_optional:
+        score += 10.0
+        signals.append("optional_content")
+
+    if score < 0:
+        score = 0.0
+    if score > 100:
+        score = 100.0
+
+    return (str(int(round(score))), ", ".join(signals))
+
+
+def _compute_modding_signal(row: dict[str, Any]) -> tuple[str, str, str]:
+    """
+    Return (HasWorkshop, ModdingSignal_100, Modding_SourceSignals).
+    """
+    cats = " ".join(_normalize_token(x) for x in _split_text_list(row.get("Steam_Categories")))
+    if not cats:
+        return ("", "", "")
+
+    has_workshop = "steam workshop" in cats
+    has_level_editor = "level editor" in cats or "includes level editor" in cats
+    has_mod_tools = "moddable" in cats or "mod tools" in cats or "mod support" in cats
+
+    score = 0.0
+    signals: list[str] = []
+    if has_workshop:
+        score = max(score, 90.0)
+        signals.append("steam_workshop")
+    if has_level_editor:
+        score = max(score, 75.0)
+        signals.append("level_editor")
+    if has_mod_tools:
+        score = max(score, 70.0)
+        signals.append("mod_tools")
+
+    if score <= 0:
+        return ("", "0", "")
+    return ("YES" if has_workshop else "", str(int(round(score))), ", ".join(signals))
 
 
 def compute_production_tier(
@@ -511,6 +715,28 @@ def apply_phase1_signals(
         )
         if rawg_votes_score is not None:
             pairs.append((rawg_votes_score, SIGNALS.w_votes))
+
+        rawg_added = _parse_int(r.get("RAWG_Added", ""))
+        if rawg_added is None:
+            # Fall back to the sum of buckets when `added` isn't present (some RAWG payloads omit
+            # it but still include `added_by_status`).
+            buckets = [
+                _parse_int(r.get("RAWG_AddedByStatusOwned", "")),
+                _parse_int(r.get("RAWG_AddedByStatusPlaying", "")),
+                _parse_int(r.get("RAWG_AddedByStatusBeaten", "")),
+                _parse_int(r.get("RAWG_AddedByStatusToplay", "")),
+                _parse_int(r.get("RAWG_AddedByStatusDropped", "")),
+            ]
+            if any(x is not None for x in buckets):
+                rawg_added = int(sum(int(x or 0) for x in buckets))
+
+        rawg_added_score = _log_scale_0_100(
+            rawg_added,
+            log10_min=SIGNALS.reach_rawg_added_log10_min,
+            log10_max=SIGNALS.reach_rawg_added_log10_max,
+        )
+        if rawg_added_score is not None:
+            pairs.append((rawg_added_score, SIGNALS.w_rawg_added))
 
         igdb_votes = _parse_int(r.get("IGDB_RatingCount", ""))
         igdb_votes_score = _log_scale_0_100(
@@ -671,6 +897,39 @@ def apply_phase1_signals(
     out["ContentType_ConsensusProviders"] = pd.Series(content_type_prov)
     out["ContentType_SourceSignals"] = pd.Series(content_type_signals)
     out["ContentType_Conflict"] = pd.Series(content_type_conflict)
+
+    # --- IGDB related content presence (derived, filtered) ---
+    has_dlcs: list[str] = []
+    has_exp: list[str] = []
+    has_ports: list[str] = []
+    for _, r in out.iterrows():
+        dlc_n, exp_n, port_n = _igdb_related_counts(r.to_dict())
+        has_dlcs.append("YES" if dlc_n > 0 else "")
+        has_exp.append("YES" if exp_n > 0 else "")
+        has_ports.append("YES" if port_n > 0 else "")
+    out["HasDLCs"] = pd.Series(has_dlcs)
+    out["HasExpansions"] = pd.Series(has_exp)
+    out["HasPorts"] = pd.Series(has_ports)
+
+    # --- Replayability & modding/UGC proxies (derived, best-effort) ---
+    replayability: list[str] = []
+    replayability_signals: list[str] = []
+    has_workshop: list[str] = []
+    modding_signal: list[str] = []
+    modding_signals: list[str] = []
+    for _, r in out.iterrows():
+        rep, rep_sig = _compute_replayability(r.to_dict())
+        replayability.append(rep)
+        replayability_signals.append(rep_sig)
+        hw, ms, ms_sig = _compute_modding_signal(r.to_dict())
+        has_workshop.append(hw)
+        modding_signal.append(ms)
+        modding_signals.append(ms_sig)
+    out["Replayability_100"] = pd.Series(replayability)
+    out["Replayability_SourceSignals"] = pd.Series(replayability_signals)
+    out["HasWorkshop"] = pd.Series(has_workshop)
+    out["ModdingSignal_100"] = pd.Series(modding_signal)
+    out["Modding_SourceSignals"] = pd.Series(modding_signals)
 
     # --- Production tier (optional mapping) ---
     mapping = load_production_tiers(production_tiers_path)

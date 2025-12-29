@@ -579,11 +579,13 @@ def generate_validation_report(
             "steam": company_set_from_json_array_cell(r.get("Steam_Developers", "")),
             "rawg": company_set_from_json_array_cell(r.get("RAWG_Developers", "")),
             "igdb": company_set_from_json_array_cell(r.get("IGDB_Developers", "")),
+            "wikidata": company_set_from_json_array_cell(r.get("Wikidata_Developers", "")),
         }
         pub_sets = {
             "steam": company_set_from_json_array_cell(r.get("Steam_Publishers", "")),
             "rawg": company_set_from_json_array_cell(r.get("RAWG_Publishers", "")),
             "igdb": company_set_from_json_array_cell(r.get("IGDB_Publishers", "")),
+            "wikidata": company_set_from_json_array_cell(r.get("Wikidata_Publishers", "")),
         }
         validation_tags.extend(company_disagreement_tags(dev_sets, kind="developer"))
         validation_tags.extend(company_disagreement_tags(pub_sets, kind="publisher"))

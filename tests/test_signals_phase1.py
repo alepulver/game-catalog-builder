@@ -128,3 +128,27 @@ def test_apply_phase1_signals_content_type_is_empty_when_no_consensus() -> None:
     assert row["ContentType"] == ""
     assert row["ContentType_ConsensusProviders"] == ""
     assert row["ContentType_Conflict"] == "YES"
+
+
+def test_has_dlcs_expansions_ports_derived_from_igdb_lists_and_filters_soundtracks() -> None:
+    from game_catalog_builder.utils.signals import apply_phase1_signals
+
+    df = pd.DataFrame(
+        [
+            {
+                "Name": "Example",
+                "IGDB_DLCs": "Example - Soundtrack, Example Artbook, Example DLC 1",
+                "IGDB_Expansions": "Example Expansion",
+                "IGDB_Ports": "Example (Switch)",
+            }
+        ]
+    )
+    out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.json")
+    row = out.iloc[0].to_dict()
+    assert row["HasDLCs"] == "YES"
+    assert row["HasExpansions"] == "YES"
+    assert row["HasPorts"] == "YES"
+    # Filtered counts appear in the source signals.
+    assert "igdb:dlcs=1" in row["ContentType_SourceSignals"]
+    assert "igdb:expansions=1" in row["ContentType_SourceSignals"]
+    assert "igdb:ports=1" in row["ContentType_SourceSignals"]

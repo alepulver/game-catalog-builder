@@ -49,6 +49,12 @@ Current output columns:
 | `Score_RAWG_100` | `rating` | Rating normalized to 0–100 |
 | `RAWG_RatingsCount` | `ratings_count` | Rating count |
 | `RAWG_Metacritic` | `metacritic` | Metacritic score |
+| `RAWG_Added` | `added` | RAWG “added” count |
+| `RAWG_AddedByStatusOwned` | `added_by_status.owned` | “Owned” count |
+| `RAWG_AddedByStatusPlaying` | `added_by_status.playing` | “Playing” count |
+| `RAWG_AddedByStatusBeaten` | `added_by_status.beaten` | “Beaten” count |
+| `RAWG_AddedByStatusToplay` | `added_by_status.toplay` | “To play” count |
+| `RAWG_AddedByStatusDropped` | `added_by_status.dropped` | “Dropped” count |
 
 Other useful fields available (typically richer in `/games/{id}`):
 
@@ -179,6 +185,8 @@ Current output columns:
 | `SteamSpy_Positive` | `positive` | Positive reviews |
 | `SteamSpy_Negative` | `negative` | Negative reviews |
 | `Score_SteamSpy_100` | `positive/negative` | Positive ratio normalized to 0–100 |
+| `SteamSpy_Tags` | `tags{tag:count}` | Top tags (comma-separated; by weight) |
+| `SteamSpy_TagsTop` | `tags{tag:count}` | Top tags + weights (JSON list of `[tag,count]` pairs) |
 
 Other useful fields available:
 

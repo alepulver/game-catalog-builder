@@ -356,24 +356,11 @@ The tool adds various columns to your CSV:
 - `RAWG_RatingsCount`: Number of ratings
 - `RAWG_Metacritic`: Metacritic score
 
-### Steam Fields
-- `Steam_AppID`: Steam application ID
-- `Steam_Tags`: User-defined tags
-- `Steam_ReviewCount`: Number of reviews
-- `Steam_ReviewPercent`: Positive review percentage
-- `Steam_Price`: Game price
-- `Steam_Categories`: Game categories
+### Provider Fields
 
-### SteamSpy Fields
-- `SteamSpy_Owners`: Estimated owner count
-- `SteamSpy_Players`: Estimated player count
-- `SteamSpy_CCU`: Peak concurrent users
-- `SteamSpy_PlaytimeAvg`: Average playtime
+Provider and derived columns evolve over time. The authoritative list is maintained in:
 
-### HowLongToBeat Fields
-- `HLTB_Main`: Main story completion time
-- `HLTB_Extra`: Main + extra completion time
-- `HLTB_Completionist`: 100% completion time
+- `docs/providers/provider-fields.md`
 
 ## Dependencies
 
@@ -394,7 +381,7 @@ See `requirements.txt` for the complete list. Main dependencies include:
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install in editable mode, including dev tools (ruff/pytest/mypy)
+# Install in editable mode, including dev tools (ruff/pytest/pyright/pre-commit)
 python -m pip install -e ".[dev]"
 ```
 
@@ -410,10 +397,16 @@ python -m pytest -q
 
 ```bash
 # Format code
-python -m ruff format .
+ruff format .
 
 # Lint (includes import sorting checks)
-python -m ruff check .
+ruff check .
+
+# Type check (basic)
+pyright
+
+# Optional: run configured git hooks
+pre-commit run -a
 ```
 
 ## License

@@ -108,6 +108,8 @@ class SignalsConfig:
     reach_reviews_log10_max: float = 7.0  # 10M
     reach_votes_log10_min: float = 2.0  # 100
     reach_votes_log10_max: float = 6.0  # 1M
+    reach_rawg_added_log10_min: float = 2.0  # 100
+    reach_rawg_added_log10_max: float = 7.0  # 10M
     reach_critic_votes_log10_min: float = 1.0  # 10
     reach_critic_votes_log10_max: float = 5.0  # 100k
     reach_pageviews_log10_min: float = 2.0  # 100
@@ -125,6 +127,7 @@ class SignalsConfig:
     w_owners: float = 3.0
     w_reviews: float = 2.0
     w_votes: float = 1.0
+    w_rawg_added: float = 1.0
     w_critic_votes: float = 0.5
     w_pageviews: float = 0.8
     w_players2w: float = 2.0

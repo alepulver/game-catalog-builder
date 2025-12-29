@@ -37,6 +37,9 @@ Logging defaults to `INFO` with periodic progress lines (e.g. `25/958`); per-row
 
 - `ContentType`: best-effort classification (`base_game|dlc|expansion|port|collection|demo|soundtrack`) from provider signals (e.g. Steam store type + IGDB relationships).
 - `ContentType_ConsensusProviders`, `ContentType_SourceSignals`, `ContentType_Conflict`: supporting provenance/consensus fields to help spot edition/DLC mismatches without adding many extra boolean columns.
+- `HasDLCs`, `HasExpansions`, `HasPorts`: best-effort “this title has related DLC/expansions/ports” flags derived from IGDB relationship lists (filters out soundtrack-like DLC entries).
+- `Replayability_100`: best-effort replayability heuristic (0–100) using game-mode/style signals (e.g. MP/coop/roguelike/systemic tags + HLTB time ratios).
+- `ModdingSignal_100` and `HasWorkshop`: best-effort modding/UGC proxy using Steam store categories (Workshop/level editor/mod tools when present).
 
 ## Matching (search-by-name)
 
@@ -178,6 +181,7 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - `Score_RAWG_100`, `Score_IGDB_100`, `Score_SteamSpy_100`, `Score_HLTB_100`
 - Enriched outputs also include a small set of computed “signals” (Phase 1):
   - Reach: `Reach_SteamSpyOwners_*` (parsed from SteamSpy owners ranges)
+  - Reach (cross-platform-ish): RAWG `added` / `added_by_status.*` is incorporated into `Reach_Composite` when present
   - Reach (critics): `Reach_IGDBAggregatedRatingCount` (when IGDB aggregated ratings exist)
   - Ratings: `CommunityRating_Composite_100`, `CriticRating_Composite_100` (uses Steam/RAWG Metacritic + IGDB aggregated rating when present)
   - Production: `Production_Tier` (optional; driven by `data/production_tiers.yaml` when present)
@@ -261,6 +265,7 @@ Recommended workflow (keep enrich deterministic and read-only):
 - Details: `GET https://www.wikidata.org/w/api.php?action=wbgetentities&ids=...`
 - ID: `Wikidata_QID`
 - Provides cross-platform identity context: canonical label/description, release year, developer/publisher, platforms, series, genres, and an English Wikipedia link.
+- Wikipedia signals (summary + pageviews) are fetched as soon as the Wikidata entity provides an `enwiki` title (pipelined; does not wait for all rows/QIDs).
 - Linked entity labels (developers/publishers/platforms/genres/etc) are fetched via `wbgetentities&props=labels` in batches and cached.
   - During `import`, existing `Wikidata_QID` values are prefetched in bulk so warm-cache imports don’t do per-row Wikidata requests.
 

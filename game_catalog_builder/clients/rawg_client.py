@@ -474,6 +474,20 @@ class RAWGClient:
         dev_list = [str(x).strip() for x in devs if str(x).strip()]
         pub_list = [str(x).strip() for x in pubs if str(x).strip()]
 
+        added = rawg_obj.get("added", "")
+        added_by_status = rawg_obj.get("added_by_status", None)
+        abs_owned = ""
+        abs_playing = ""
+        abs_beaten = ""
+        abs_toplay = ""
+        abs_dropped = ""
+        if isinstance(added_by_status, dict):
+            abs_owned = str(added_by_status.get("owned", "") or "")
+            abs_playing = str(added_by_status.get("playing", "") or "")
+            abs_beaten = str(added_by_status.get("beaten", "") or "")
+            abs_toplay = str(added_by_status.get("toplay", "") or "")
+            abs_dropped = str(added_by_status.get("dropped", "") or "")
+
         return {
             "RAWG_ID": str(rawg_obj.get("id", "")),
             "RAWG_Name": str(rawg_obj.get("name", "") or ""),
@@ -491,6 +505,12 @@ class RAWGClient:
             "Score_RAWG_100": score_100,
             "RAWG_RatingsCount": str(rawg_obj.get("ratings_count", "")),
             "RAWG_Metacritic": str(rawg_obj.get("metacritic", "")),
+            "RAWG_Added": str(added),
+            "RAWG_AddedByStatusOwned": abs_owned,
+            "RAWG_AddedByStatusPlaying": abs_playing,
+            "RAWG_AddedByStatusBeaten": abs_beaten,
+            "RAWG_AddedByStatusToplay": abs_toplay,
+            "RAWG_AddedByStatusDropped": abs_dropped,
             "RAWG_Developers": json.dumps(dev_list, ensure_ascii=False),
             "RAWG_Publishers": json.dumps(pub_list, ensure_ascii=False),
         }

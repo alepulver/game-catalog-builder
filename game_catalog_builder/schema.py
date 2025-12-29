@@ -29,6 +29,12 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "Score_RAWG_100": "",
     "RAWG_RatingsCount": "",
     "RAWG_Metacritic": "",
+    "RAWG_Added": "",
+    "RAWG_AddedByStatusOwned": "",
+    "RAWG_AddedByStatusPlaying": "",
+    "RAWG_AddedByStatusBeaten": "",
+    "RAWG_AddedByStatusToplay": "",
+    "RAWG_AddedByStatusDropped": "",
     "RAWG_Developers": "",
     "RAWG_Publishers": "",
     # IGDB
@@ -84,6 +90,8 @@ PUBLIC_DEFAULT_COLS: dict[str, Any] = {
     "SteamSpy_PlaytimeMedian2Weeks": "",
     "SteamSpy_Positive": "",
     "SteamSpy_Negative": "",
+    "SteamSpy_Tags": "",
+    "SteamSpy_TagsTop": "",
     "Score_SteamSpy_100": "",
     # HLTB
     "HLTB_Name": "",
