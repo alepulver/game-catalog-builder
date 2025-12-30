@@ -5,9 +5,7 @@ import argparse
 import pandas as pd
 
 
-def test_import_ignores_pinned_steam_appid_when_appdetails_missing_and_researches(
-    tmp_path, monkeypatch
-):
+def test_import_ignores_pinned_steam_appid_when_appdetails_missing_and_researches(tmp_path, monkeypatch):
     from game_catalog_builder import cli as cli_mod
     from game_catalog_builder.pipelines import context, provider_clients
 
@@ -36,9 +34,7 @@ def test_import_ignores_pinned_steam_appid_when_appdetails_missing_and_researche
     output_csv = tmp_path / "Games_Catalog.csv"
     log_file = tmp_path / "log.txt"
 
-    pd.DataFrame([{"Name": "LISA: Complete Edition", "Steam_AppID": "77828"}]).to_csv(
-        input_csv, index=False
-    )
+    pd.DataFrame([{"Name": "LISA: Complete Edition", "Steam_AppID": "77828"}]).to_csv(input_csv, index=False)
 
     args = argparse.Namespace(
         input=input_csv,

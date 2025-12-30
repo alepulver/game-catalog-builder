@@ -118,10 +118,10 @@ def test_validation_flags_year_and_platform_outliers() -> None:
                 "IGDB_Year": "2000",
                 "Steam_ReleaseYear": "2000",
                 "HLTB_ReleaseYear": "2010",
-                "RAWG_Platforms": "PC",
-                "IGDB_Platforms": "PC",
-                "Steam_Platforms": "Windows",
-                "HLTB_Platforms": "PlayStation 2",
+                "RAWG_Platforms": ["PC"],
+                "IGDB_Platforms": ["PC"],
+                "Steam_Platforms": ["Windows"],
+                "HLTB_Platforms": ["PlayStation 2"],
             }
         ]
     )

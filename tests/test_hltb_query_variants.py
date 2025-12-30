@@ -57,6 +57,6 @@ def test_hltb_search_falls_back_to_case_variants_when_no_results(tmp_path) -> No
 
     out = c.search("Amid Evil")
     assert out is not None
-    assert out["HLTB_ID"] == "123"
+    assert out["hltb.name"] == "AMID EVIL"
     assert "Amid Evil" in c.client.calls
     assert "amid evil" in c.client.calls

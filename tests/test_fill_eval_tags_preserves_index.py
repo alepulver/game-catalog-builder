@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def test_fill_eval_tags_writes_tags_with_original_index() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -15,7 +15,7 @@ def test_fill_eval_tags_writes_tags_with_original_index() -> None:
                 "Steam_AppID": "",
             }
         ],
-        index=[123],
+        index=pd.Index([123]),
     )
 
     out = fill_eval_tags(df, sources={"steam"})

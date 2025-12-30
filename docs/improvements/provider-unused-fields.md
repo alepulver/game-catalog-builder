@@ -20,10 +20,9 @@ Notes:
 - Ratings distribution:
   - `ratings[]` (breakdown), `reviews_count`, `reviews_text_count`
 - Identity / review aid:
-  - `name_original`
   - `metacritic_url`, `reddit_url`
 - Media:
-  - `background_image`, `background_image_additional`, `short_screenshots[]`, `movies_count`
+  - `background_image_additional`, `short_screenshots[]`, `movies_count`
 - Platform requirements:
   - `platforms[].requirements_en.{minimum,recommended}` (HTML/plaintext-ish)
 
@@ -34,7 +33,6 @@ Notes:
 
 ### High-ROI fields not currently used
 - Discovery:
-  - `keywords[]` (and `keywords.name` if expanded)
   - `similar_games[]` (and `similar_games.name` if expanded)
 - Ratings:
   - `total_rating`, `total_rating_count` (when present)
@@ -70,11 +68,10 @@ Notes:
 
 ### High-ROI fields not currently used
 - Pricing:
-  - `price`, `initialprice`, `discount`
+  - `currency` (SteamSpy provides only cents + discount; currency inference is non-trivial)
 - Time stats:
-  - `median_forever`
 - Identity:
-  - `developer`, `publisher` (single strings; can cross-check against other providers)
+  - `languages` (free-form, noisy)
 
 ### What these enable
 - Better “now vs reach” decompositions without adding new providers.
@@ -82,10 +79,9 @@ Notes:
 ## HowLongToBeat (HLTB) (full result object cached by id)
 
 ### High-ROI fields not currently used
-- Identity / review aid:
-  - `game_web_link` (canonical URL), `game_alias` (aliases)
 - Platform/dev hints (availability varies by game/library version):
-  - `profile_platforms`, `profile_dev`, `release_world`
+  - `profile_dev`
+  - `all_styles`, `coop_time`, `mp_time` (if consistently present in cache)
 
 ### What these enable
 - Additional cross-checks when HLTB appears as an outlier (platform/year mismatches).
@@ -104,8 +100,9 @@ If we want maximum ROI with minimal CSV bloat, the following are good “next wa
 
 - **Faster manual verification**
   - Steam `about_the_game` / `detailed_description` (HTML; consider truncation/cleanup)
-  - RAWG `metacritic_url` / `reddit_url`
-  - HLTB `game_web_link`
+  - Steam `header_image` (stable media URL)
+  - RAWG `metacritic_url` / `reddit_url` + `background_image` (stable media URL)
+  - IGDB `keywords` (strong “what kind of game is it?” identity signal)
 
 ## Implementation approach (keep caches stable)
 

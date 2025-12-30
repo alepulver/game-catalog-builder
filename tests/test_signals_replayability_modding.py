@@ -10,8 +10,8 @@ def test_replayability_is_low_for_linear_single_player() -> None:
         [
             {
                 "Name": "Linear Game",
-                "Steam_Categories": "Single-player, Steam Achievements",
-                "IGDB_GameModes": "Single player",
+                "Steam_Categories": ["Single-player", "Steam Achievements"],
+                "IGDB_GameModes": ["Single player"],
                 "HLTB_Main": "10",
                 "HLTB_Extra": "11",
                 "HLTB_Completionist": "12",
@@ -22,8 +22,8 @@ def test_replayability_is_low_for_linear_single_player() -> None:
     out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.yaml")
     row = out.iloc[0].to_dict()
 
-    assert row["Replayability_100"].isdigit()
-    assert int(row["Replayability_100"]) <= 30
+    assert isinstance(row["Replayability_100"], int)
+    assert row["Replayability_100"] <= 30
 
 
 def test_replayability_is_high_for_multiplayer() -> None:
@@ -33,7 +33,7 @@ def test_replayability_is_high_for_multiplayer() -> None:
         [
             {
                 "Name": "MP Game",
-                "Steam_Categories": "Multi-player, Online PvP",
+                "Steam_Categories": ["Multi-player", "Online PvP"],
             }
         ]
     )
@@ -51,7 +51,7 @@ def test_replayability_boosts_for_roguelike_tag() -> None:
         [
             {
                 "Name": "Rogue",
-                "RAWG_Tags": "Roguelike",
+                "RAWG_Tags": ["Roguelike"],
             }
         ]
     )
@@ -65,7 +65,7 @@ def test_replayability_boosts_for_roguelike_tag() -> None:
 def test_replayability_uses_steamspy_tags() -> None:
     from game_catalog_builder.utils.signals import apply_phase1_signals
 
-    df = pd.DataFrame([{"Name": "SteamSpy Tagged", "SteamSpy_Tags": "Roguelike, Survival"}])
+    df = pd.DataFrame([{"Name": "SteamSpy Tagged", "SteamSpy_Tags": ["Roguelike", "Survival"]}])
     out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.yaml")
     row = out.iloc[0].to_dict()
     assert int(row["Replayability_100"]) >= 40
@@ -79,15 +79,15 @@ def test_modding_signal_detects_workshop_category() -> None:
         [
             {
                 "Name": "Workshop Game",
-                "Steam_Categories": "Single-player, Steam Workshop",
+                "Steam_Categories": ["Single-player", "Steam Workshop"],
             }
         ]
     )
 
     out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.yaml")
     row = out.iloc[0].to_dict()
-    assert row["HasWorkshop"] == "YES"
-    assert row["ModdingSignal_100"] == "90"
+    assert row["HasWorkshop"] is True
+    assert row["ModdingSignal_100"] == 90
     assert "steam_workshop" in row["Modding_SourceSignals"]
 
 
@@ -98,7 +98,7 @@ def test_modding_signal_is_zero_when_categories_present_but_no_signal() -> None:
         [
             {
                 "Name": "No Mods",
-                "Steam_Categories": "Single-player, Steam Achievements",
+                "Steam_Categories": ["Single-player", "Steam Achievements"],
             }
         ]
     )
@@ -106,5 +106,5 @@ def test_modding_signal_is_zero_when_categories_present_but_no_signal() -> None:
     out = apply_phase1_signals(df, production_tiers_path="data/does_not_exist.yaml")
     row = out.iloc[0].to_dict()
     assert row["HasWorkshop"] == ""
-    assert row["ModdingSignal_100"] == "0"
+    assert row["ModdingSignal_100"] == 0
     assert row["Modding_SourceSignals"] == ""

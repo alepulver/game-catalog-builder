@@ -41,7 +41,7 @@ def test_igdb_get_by_ids_batches_single_request(tmp_path, monkeypatch):
     client._token = "token"
 
     out = client.get_by_ids([1, "2", 3])
-    assert out["1"]["IGDB_ID"] == "1"
-    assert out["2"]["IGDB_Name"] == "Two"
-    assert out["3"]["IGDB_Name"] == "Three"
+    assert out["1"]["igdb.id"] == "1"
+    assert out["2"]["igdb.name"] == "Two"
+    assert out["3"]["igdb.name"] == "Three"
     assert len(calls) == 1

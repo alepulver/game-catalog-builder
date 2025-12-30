@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 
-def parse_sources(
-    raw: str, *, allowed: set[str], aliases: dict[str, list[str]] | None = None
-) -> list[str]:
+def parse_sources(raw: str, *, allowed: set[str], aliases: dict[str, list[str]] | None = None) -> list[str]:
     """
     Parse a provider list string like:
       - "all"
@@ -40,8 +38,6 @@ def parse_sources(
                 _add(x)
             continue
         if t not in allowed:
-            raise SystemExit(
-                f"Unknown provider: {t}. Allowed: {', '.join(sorted(allowed | set(aliases)))}"
-            )
+            raise SystemExit(f"Unknown provider: {t}. Allowed: {', '.join(sorted(allowed | set(aliases)))}")
         _add(t)
     return out

@@ -15,6 +15,7 @@ def test_wikidata_wikipedia_fetch_is_pipelined(tmp_path: Path, monkeypatch) -> N
       - Wikipedia pageviews blocks until the 2nd Wikidata batch completes.
       - The 2nd Wikidata batch only runs if the main thread isn't blocked on Wikipedia.
     """
+    from game_catalog_builder.metrics.registry import load_metrics_registry
     from game_catalog_builder.pipelines.enrich_pipeline import process_wikidata
 
     started_pageviews = threading.Event()
@@ -32,10 +33,10 @@ def test_wikidata_wikipedia_fetch_is_pipelined(tmp_path: Path, monkeypatch) -> N
             out: dict[str, dict[str, str]] = {}
             for qid in qids:
                 out[qid] = {
-                    "Wikidata_QID": qid,
-                    "Wikidata_Label": f"Label {qid}",
-                    "Wikidata_EnwikiTitle": f"Title {qid}",
-                    "Wikidata_ReleaseDate": "2016-05-13",
+                    "wikidata.qid": qid,
+                    "wikidata.label": f"Label {qid}",
+                    "wikidata.enwiki_title": f"Title {qid}",
+                    "wikidata.release_date": "2016-05-13",
                 }
             return out
 
@@ -78,9 +79,7 @@ def test_wikidata_wikipedia_fetch_is_pipelined(tmp_path: Path, monkeypatch) -> N
         def format_cache_stats(self) -> str:
             return "ok"
 
-    monkeypatch.setattr(
-        "game_catalog_builder.pipelines.enrich_pipeline.WikidataClient", _FakeWikidataClient
-    )
+    monkeypatch.setattr("game_catalog_builder.pipelines.enrich_pipeline.WikidataClient", _FakeWikidataClient)
     monkeypatch.setattr(
         "game_catalog_builder.pipelines.enrich_pipeline.WikipediaPageviewsClient",
         _FakePageviewsClient,
@@ -107,6 +106,30 @@ def test_wikidata_wikipedia_fetch_is_pipelined(tmp_path: Path, monkeypatch) -> N
     output_csv = tmp_path / "Provider_Wikidata.csv"
     cache_path = tmp_path / "wikidata_cache.json"
 
+    (tmp_path / "metrics.yaml").write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "metrics:",
+                "  wikidata.qid: { column: Wikidata_QID, type: string }",
+                "  wikidata.label: { column: Wikidata_Label, type: string }",
+                "  wikidata.enwiki_title: { column: Wikidata_EnwikiTitle, type: string }",
+                "  wikidata.release_date: { column: Wikidata_ReleaseDate, type: string }",
+                "  wikipedia.page_url: { column: Wikidata_WikipediaPage, type: string }",
+                "  wikipedia.summary: { column: Wikidata_WikipediaSummary, type: string }",
+                "  wikipedia.thumbnail: { column: Wikidata_WikipediaThumbnail, type: string }",
+                "  wikipedia.pageviews_30d: { column: Wikidata_Pageviews30d, type: string }",
+                "  wikipedia.pageviews_first_30d: { column: Wikidata_PageviewsFirst30d, type: string }",
+                "  wikipedia.pageviews_first_90d: { column: Wikidata_PageviewsFirst90d, type: string }",
+                "  wikipedia.pageviews_90d: { column: Wikidata_Pageviews90d, type: string }",
+                "  wikipedia.pageviews_365d: { column: Wikidata_Pageviews365d, type: string }",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = load_metrics_registry(tmp_path / "metrics.yaml")
+
     df = pd.DataFrame(
         [
             {"RowId": "rid:1", "Name": "G1", "Wikidata_QID": "Q1"},
@@ -125,6 +148,7 @@ def test_wikidata_wikipedia_fetch_is_pipelined(tmp_path: Path, monkeypatch) -> N
                 output_csv=output_csv,
                 cache_path=cache_path,
                 required_cols=["Wikidata_Label"],
+                registry=registry,
                 identity_overrides=None,
             )
         except Exception as e:  # pragma: no cover

@@ -4,8 +4,30 @@ import pandas as pd
 
 
 def test_auto_unpin_then_fill_eval_tags_drops_stale_provider_score_tags() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
-    from game_catalog_builder.analysis.resolve import auto_unpin_likely_wrong_provider_ids
+    from game_catalog_builder.metrics.registry import MetricsRegistry
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.resolve import auto_unpin_likely_wrong_provider_ids
+
+    registry = MetricsRegistry(
+        by_key={},
+        by_column={},
+        diagnostics_by_key={
+            "diagnostics.steam.matched_name": ("Steam_MatchedName", "string"),
+            "diagnostics.steam.match_score": ("Steam_MatchScore", "int"),
+            "diagnostics.steam.matched_year": ("Steam_MatchedYear", "int"),
+            "diagnostics.steam.rejected_reason": ("Steam_RejectedReason", "string"),
+            "diagnostics.review.tags": ("ReviewTags", "string"),
+            "diagnostics.match.confidence": ("MatchConfidence", "string"),
+        },
+        diagnostics_by_column={
+            "Steam_MatchedName": ("diagnostics.steam.matched_name", "string"),
+            "Steam_MatchScore": ("diagnostics.steam.match_score", "int"),
+            "Steam_MatchedYear": ("diagnostics.steam.matched_year", "int"),
+            "Steam_RejectedReason": ("diagnostics.steam.rejected_reason", "string"),
+            "ReviewTags": ("diagnostics.review.tags", "string"),
+            "MatchConfidence": ("diagnostics.match.confidence", "string"),
+        },
+    )
 
     df = pd.DataFrame(
         [
@@ -17,7 +39,6 @@ def test_auto_unpin_then_fill_eval_tags_drops_stale_provider_score_tags() -> Non
                 "Steam_MatchScore": "70",
                 "Steam_MatchedYear": "2023",
                 "Steam_RejectedReason": "",
-                "Steam_StoreType": "game",
                 "ReviewTags": "provider_consensus:igdb+rawg+hltb, provider_outlier:steam, "
                 "year_outlier:steam, likely_wrong:steam, steam_score:70",
                 "MatchConfidence": "LOW",
@@ -25,7 +46,7 @@ def test_auto_unpin_then_fill_eval_tags_drops_stale_provider_score_tags() -> Non
         ]
     )
 
-    out, changed, changed_idx = auto_unpin_likely_wrong_provider_ids(df)
+    out, changed, changed_idx = auto_unpin_likely_wrong_provider_ids(df, registry=registry)
     assert changed == 1
     assert changed_idx == [0]
     assert out.loc[0, "Steam_AppID"] == ""

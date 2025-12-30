@@ -1,66 +1,72 @@
 from __future__ import annotations
 
-import json
 import logging
 import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 import yaml
 
 from ..config import SIGNALS
+from ..metrics.registry import MetricsRegistry, load_metrics_registry
 from .company import iter_company_name_variants, normalize_company_name
+from .utilities import normalize_game_name
 
 
-def _parse_int(value: Any) -> int | None:
+def _parse_int_text(value: Any) -> int | None:
+    """
+    Parse an integer from text.
+
+    This is only used for provider fields that are inherently string-encoded (e.g. SteamSpy owners
+    ranges like \"1,000 .. 2,000\"). Typed metric inputs should not require parsing.
+    """
     s = str(value or "").strip()
     if not s:
         return None
-    # handle floats serialized by CSV readers, e.g. "123.0"
-    if s.endswith(".0") and s[:-2].isdigit():
-        return int(s[:-2])
-    try:
-        f = float(s)
-        if f.is_integer():
-            return int(f)
-    except Exception:
-        pass
-    # handle "1,234" or "1 234"
+    if s.casefold() in {"nan", "none", "null"}:
+        return None
     s2 = re.sub(r"[,\s]", "", s)
-    if s2.isdigit():
-        return int(s2)
+    if s2.isdigit() or (s2.startswith("-") and s2[1:].isdigit()):
+        try:
+            return int(s2)
+        except Exception:
+            return None
     return None
 
 
-def _parse_float(value: Any) -> float | None:
+def _parse_float_text(value: Any) -> float | None:
     s = str(value or "").strip()
     if not s:
         return None
-    if s.endswith(".0") and s[:-2].isdigit():
-        return float(s[:-2])
+    if s.casefold() in {"nan", "none", "null"}:
+        return None
     try:
-        return float(s)
+        f = float(s)
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return f
     except Exception:
         return None
 
 
-def _split_text_list(value: Any) -> list[str]:
+def _as_str_list(value: Any) -> list[str]:
     """
-    Parse a comma-separated list stored in a CSV cell.
+    Return a list of strings from a typed list cell (no CSV parsing).
 
-    Examples:
-      - "Action, Shooter"
-      - "Single-player, Online Co-op"
+    Internal pipeline code keeps list-like metrics as typed lists (from in-memory provider payloads
+    and JSONL). CSV exports may render lists as joined strings, but those are not meant to be
+    parsed back.
     """
-    raw = str(value or "").strip()
-    if not raw:
+    if not isinstance(value, list):
         return []
-    if raw.casefold() in {"nan", "none", "null"}:
-        return []
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    return parts
+    out: list[str] = []
+    for it in value:
+        s = str(it or "").strip()
+        if s:
+            out.append(s)
+    return out
 
 
 def _normalize_token(value: str) -> str:
@@ -93,8 +99,8 @@ def parse_steamspy_owners_range(owners: Any) -> tuple[int | None, int | None, in
     if not m:
         return (None, None, None)
 
-    low = _parse_int(m.group("low"))
-    high = _parse_int(m.group("high"))
+    low = _parse_int_text(m.group("low"))
+    high = _parse_int_text(m.group("high"))
     if low is None or high is None or low <= 0 or high <= 0:
         return (None, None, None)
     if high < low:
@@ -191,26 +197,8 @@ def load_production_tiers(path: str | Path) -> dict[str, dict[str, object]]:
     return {"publishers": pubs, "developers": devs}
 
 
-def _split_csv_list(s: Any) -> list[str]:
-    raw = str(s or "").strip()
-    if not raw:
-        return []
-    if raw.casefold() in {"nan", "none", "null"}:
-        return []
-    # Stored as a JSON array in a CSV cell (e.g. ["Company, Inc."]).
-    if not raw.startswith("["):
-        return []
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        return []
-    if not isinstance(parsed, list):
-        return []
-    return [str(x).strip() for x in parsed if str(x).strip()]
-
-
 def _company_sets_by_provider(
-    row: dict[str, Any], *, kind: str
+    row: Mapping[str, Any], *, kind: str
 ) -> tuple[dict[str, set[str]], dict[str, dict[str, str]]]:
     """
     Extract normalized company-name sets from provider cells.
@@ -222,18 +210,18 @@ def _company_sets_by_provider(
     if kind not in {"developer", "publisher"}:
         raise ValueError("kind must be developer or publisher")
 
-    cols_by_provider: dict[str, str] = {
-        "steam": "Steam_Developers" if kind == "developer" else "Steam_Publishers",
-        "rawg": "RAWG_Developers" if kind == "developer" else "RAWG_Publishers",
-        "igdb": "IGDB_Developers" if kind == "developer" else "IGDB_Publishers",
-        "wikidata": "Wikidata_Developers" if kind == "developer" else "Wikidata_Publishers",
+    keys_by_provider: dict[str, str] = {
+        "steam": "steam.developers" if kind == "developer" else "steam.publishers",
+        "rawg": "rawg.developers" if kind == "developer" else "rawg.publishers",
+        "igdb": "igdb.developers" if kind == "developer" else "igdb.publishers",
+        "wikidata": "wikidata.developers" if kind == "developer" else "wikidata.publishers",
     }
 
     sets: dict[str, set[str]] = {}
     originals: dict[str, dict[str, str]] = {}
 
-    for prov, col in cols_by_provider.items():
-        raw_list = _split_csv_list(row.get(col, ""))
+    for prov, key in keys_by_provider.items():
+        raw_list = _as_str_list(row.get(key, ""))
         prov_set: set[str] = set()
         prov_map: dict[str, str] = {}
         for raw in raw_list:
@@ -295,8 +283,8 @@ def _company_strict_majority_consensus(
     return providers, [x for x in sorted(inter)]
 
 
-def _content_type_from_steam(row: dict[str, Any]) -> str:
-    st = str(row.get("Steam_StoreType", "") or "").strip().lower()
+def _content_type_from_steam(row: Mapping[str, Any]) -> str:
+    st = str(row.get("steam.store_type", "") or "").strip().lower()
     if not st:
         return ""
     if st == "game":
@@ -312,22 +300,19 @@ def _content_type_from_steam(row: dict[str, Any]) -> str:
     return ""
 
 
-def _content_type_from_igdb(row: dict[str, Any]) -> str:
+def _content_type_from_igdb(row: Mapping[str, Any]) -> str:
     # Relationship-only heuristics (no extra endpoints/fields):
     # - version_parent implies this title is a version/edition/port of another
     # - parent_game implies this title is a child (DLC/expansion/etc)
-    if str(row.get("IGDB_VersionParent", "") or "").strip():
+    if str(row.get("igdb.relationships.version_parent", "") or "").strip():
         return "port"
-    if str(row.get("IGDB_ParentGame", "") or "").strip():
+    if str(row.get("igdb.relationships.parent_game", "") or "").strip():
         return "dlc"
     return ""
 
 
-def _igdb_list_items(row: dict[str, Any], col: str) -> list[str]:
-    """
-    IGDB relationship lists are stored as comma-separated strings in CSV output columns.
-    """
-    return [x for x in _split_text_list(row.get(col, "")) if x]
+def _igdb_list_items(row: Mapping[str, Any], key: str) -> list[str]:
+    return [x for x in _as_str_list(row.get(key, "")) if x]
 
 
 def _looks_like_non_content_dlc(title: str) -> bool:
@@ -351,29 +336,29 @@ def _looks_like_non_content_dlc(title: str) -> bool:
     return False
 
 
-def _igdb_related_counts(row: dict[str, Any]) -> tuple[int, int, int]:
+def _igdb_related_counts(row: Mapping[str, Any]) -> tuple[int, int, int]:
     """
     Return (dlcs_non_soundtrack, expansions, ports).
     """
-    dlcs = [x for x in _igdb_list_items(row, "IGDB_DLCs") if not _looks_like_non_content_dlc(x)]
-    expansions = _igdb_list_items(row, "IGDB_Expansions")
-    ports = _igdb_list_items(row, "IGDB_Ports")
+    dlcs = [x for x in _igdb_list_items(row, "igdb.relationships.dlcs") if not _looks_like_non_content_dlc(x)]
+    expansions = _igdb_list_items(row, "igdb.relationships.expansions")
+    ports = _igdb_list_items(row, "igdb.relationships.ports")
     return (len(dlcs), len(expansions), len(ports))
 
 
-def _content_type_source_signals(row: dict[str, Any]) -> list[str]:
+def _content_type_source_signals(row: Mapping[str, Any]) -> list[str]:
     """
     Return compact, human-readable tags describing the source signals.
 
     These are meant for review/debugging, not for strict parsing.
     """
     out: list[str] = []
-    st = str(row.get("Steam_StoreType", "") or "").strip().lower()
+    st = str(row.get("steam.store_type", "") or "").strip().lower()
     if st:
         out.append(f"steam:type={st}")
-    if str(row.get("IGDB_VersionParent", "") or "").strip():
+    if str(row.get("igdb.relationships.version_parent", "") or "").strip():
         out.append("igdb:version_parent")
-    if str(row.get("IGDB_ParentGame", "") or "").strip():
+    if str(row.get("igdb.relationships.parent_game", "") or "").strip():
         out.append("igdb:parent_game")
     dlc_n, exp_n, port_n = _igdb_related_counts(row)
     if dlc_n:
@@ -385,13 +370,13 @@ def _content_type_source_signals(row: dict[str, Any]) -> list[str]:
     return out
 
 
-def _content_type_consensus(row: dict[str, Any]) -> tuple[str, str, str, str]:
+def _content_type_consensus(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
     """
     Compute (content_type, consensus_providers, source_signals, conflict) conservatively.
 
     - Uses only explicit signals:
-      - Steam_StoreType
-      - IGDB relationships (VersionParent/ParentGame)
+      - steam.store_type
+      - IGDB relationships (igdb.relationships.*)
     - Returns empty content_type when providers disagree (no strict majority).
     """
     votes: list[tuple[str, str]] = []
@@ -428,7 +413,7 @@ def _parse_hltb_hours(value: Any) -> float | None:
     """
     HLTB times are stored as numeric strings (hours).
     """
-    f = _parse_float(value)
+    f = _parse_float_text(value)
     if f is None:
         return None
     if f <= 0:
@@ -436,27 +421,25 @@ def _parse_hltb_hours(value: Any) -> float | None:
     return float(f)
 
 
-def _compute_replayability(row: dict[str, Any]) -> tuple[str, str]:
+def _compute_replayability(row: Mapping[str, Any]) -> tuple[str, str]:
     """
     Return (Replayability_100, Replayability_SourceSignals).
 
     This is a conservative heuristic intended for sorting/triage, not a ground-truth label.
     """
-    steam_cats = " ".join(_normalize_token(x) for x in _split_text_list(row.get("Steam_Categories")))
-    steamspy_tags = " ".join(_normalize_token(x) for x in _split_text_list(row.get("SteamSpy_Tags")))
-    igdb_modes = " ".join(_normalize_token(x) for x in _split_text_list(row.get("IGDB_GameModes")))
-    rawg_tags = " ".join(_normalize_token(x) for x in _split_text_list(row.get("RAWG_Tags")))
-    rawg_genres = " ".join(_normalize_token(x) for x in _split_text_list(row.get("RAWG_Genres")))
-    igdb_genres = " ".join(_normalize_token(x) for x in _split_text_list(row.get("IGDB_Genres")))
+    steam_cats = " ".join(_normalize_token(x) for x in _as_str_list(row.get("steam.categories")))
+    steamspy_tags = " ".join(_normalize_token(x) for x in _as_str_list(row.get("steamspy.popularity.tags")))
+    igdb_modes = " ".join(_normalize_token(x) for x in _as_str_list(row.get("igdb.game_modes")))
+    rawg_tags = " ".join(_normalize_token(x) for x in _as_str_list(row.get("rawg.tags")))
+    rawg_genres = " ".join(_normalize_token(x) for x in _as_str_list(row.get("rawg.genres")))
+    igdb_genres = " ".join(_normalize_token(x) for x in _as_str_list(row.get("igdb.genres")))
     combined = " ".join(
-        x
-        for x in (steam_cats, steamspy_tags, igdb_modes, rawg_tags, rawg_genres, igdb_genres)
-        if x
+        x for x in (steam_cats, steamspy_tags, igdb_modes, rawg_tags, rawg_genres, igdb_genres) if x
     )
 
-    main = _parse_hltb_hours(row.get("HLTB_Main"))
-    extra = _parse_hltb_hours(row.get("HLTB_Extra"))
-    comp = _parse_hltb_hours(row.get("HLTB_Completionist"))
+    main = _parse_hltb_hours(row.get("hltb.time.main"))
+    extra = _parse_hltb_hours(row.get("hltb.time.extra"))
+    comp = _parse_hltb_hours(row.get("hltb.time.completionist"))
 
     has_any_inputs = bool(combined.strip()) or any(v is not None for v in (main, extra, comp))
     if not has_any_inputs:
@@ -475,7 +458,14 @@ def _compute_replayability(row: dict[str, Any]) -> tuple[str, str]:
         "massively multiplayer",
         "battle royale",
     )
-    has_coop = _has_any("co op", "coop", "co-operative", "cooperative", "online co op", "local co op")
+    has_coop = _has_any(
+        "co op",
+        "coop",
+        "co-operative",
+        "cooperative",
+        "online co op",
+        "local co op",
+    )
     has_pvp = _has_any("pvp", "competitive", "ranked", "versus")
     has_roguelike = _has_any("roguelike", "roguelite")
     has_procedural = _has_any("procedural", "procedurally generated", "procedural generation")
@@ -532,11 +522,67 @@ def _compute_replayability(row: dict[str, Any]) -> tuple[str, str]:
     return (str(int(round(score))), ", ".join(signals))
 
 
-def _compute_modding_signal(row: dict[str, Any]) -> tuple[str, str, str]:
+def _compute_main_genre(row: Mapping[str, Any]) -> tuple[str, str]:
+    """
+    Return (Genre_Main, Genre_MainSources).
+
+    Uses cross-provider genre lists when available, preferring consensus across providers.
+    Falls back to first genre from a provider priority order.
+    """
+    by_provider: dict[str, list[str]] = {
+        "igdb": _as_str_list(row.get("igdb.genres")),
+        "rawg": _as_str_list(row.get("rawg.genres")),
+        "wikidata": _as_str_list(row.get("wikidata.genres")),
+        # Steam "tags" are genre-like and can help for PC-only titles.
+        "steam": _as_str_list(row.get("steam.tags")),
+    }
+    by_provider = {p: [g for g in gs if str(g).strip()] for p, gs in by_provider.items() if gs}
+    if not by_provider:
+        return ("", "")
+
+    norm_to_providers: dict[str, set[str]] = {}
+    norm_to_label: dict[str, str] = {}
+    for prov, genres in by_provider.items():
+        for g in genres:
+            label = str(g or "").strip()
+            if not label:
+                continue
+            norm = normalize_game_name(label)
+            if not norm:
+                continue
+            norm_to_providers.setdefault(norm, set()).add(prov)
+            norm_to_label.setdefault(norm, label)
+
+    if not norm_to_providers:
+        return ("", "")
+
+    def _best_norm() -> str:
+        items = [(len(p), n) for n, p in norm_to_providers.items()]
+        best_count = max(c for c, _ in items)
+        # Prefer consensus (2+ providers) when possible.
+        if best_count >= 2:
+            bests = [n for c, n in items if c == best_count]
+            return sorted(bests)[0]
+        # No consensus: fall back to provider order + first-genre order.
+        for prov in ("igdb", "rawg", "wikidata", "steam"):
+            genres = by_provider.get(prov) or []
+            for g in genres:
+                norm = normalize_game_name(str(g or "").strip())
+                if norm in norm_to_providers:
+                    return norm
+        return sorted(norm_to_providers.keys())[0]
+
+    best = _best_norm()
+    label = norm_to_label.get(best, "")
+    sources = "+".join(sorted(norm_to_providers.get(best) or []))
+    return (label, sources)
+
+
+def _compute_modding_signal(row: Mapping[str, Any]) -> tuple[str, str, str]:
     """
     Return (HasWorkshop, ModdingSignal_100, Modding_SourceSignals).
     """
-    cats = " ".join(_normalize_token(x) for x in _split_text_list(row.get("Steam_Categories")))
+    cats = " ".join(_normalize_token(x) for x in _as_str_list(row.get("steam.categories")))
     if not cats:
         return ("", "", "")
 
@@ -562,7 +608,7 @@ def _compute_modding_signal(row: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def compute_production_tier(
-    row: dict[str, Any], mapping: dict[str, dict[str, object]]
+    row: Mapping[str, Any], mapping: Mapping[str, Mapping[str, object]]
 ) -> tuple[str, str]:
     """
     Compute (tier, reason) using available developer/publisher names.
@@ -589,7 +635,7 @@ def compute_production_tier(
             return 0
         return -1
 
-    def _lookup(store: dict[str, object], key: str) -> tuple[str, str]:
+    def _lookup(store: Mapping[str, object], key: str) -> tuple[str, str]:
         """
         Return (tier, label) for a normalized key.
 
@@ -609,20 +655,20 @@ def compute_production_tier(
     def _iter_company_field(*cols: str) -> list[str]:
         out: list[str] = []
         for c in cols:
-            out.extend(_split_csv_list(row.get(c, "")))
+            out.extend(_as_str_list(row.get(c, "")))
         return out
 
     publisher_cols = (
-        "Steam_Publishers",
-        "IGDB_Publishers",
-        "RAWG_Publishers",
-        "Wikidata_Publishers",
+        "steam.publishers",
+        "igdb.publishers",
+        "rawg.publishers",
+        "wikidata.publishers",
     )
     developer_cols = (
-        "Steam_Developers",
-        "IGDB_Developers",
-        "RAWG_Developers",
-        "Wikidata_Developers",
+        "steam.developers",
+        "igdb.developers",
+        "rawg.developers",
+        "wikidata.developers",
     )
 
     saw_any_company = False
@@ -660,289 +706,43 @@ def compute_production_tier(
 def apply_phase1_signals(
     df: pd.DataFrame,
     *,
+    registry: MetricsRegistry | None = None,
+    metrics_registry_path: str | Path = "data/metrics-registry.yaml",
     production_tiers_path: str | Path = "data/production_tiers.yaml",
 ) -> pd.DataFrame:
     """
     Add Phase-1 computed signals to the merged enriched dataframe.
     """
     out = df.copy()
+    reg = registry or load_metrics_registry(metrics_registry_path)
 
-    # --- Reach: SteamSpy owners ---
-    lows: list[str] = []
-    highs: list[str] = []
-    mids: list[str] = []
-    for v in out.get("SteamSpy_Owners", [""] * len(out)):
-        low, high, mid = parse_steamspy_owners_range(v)
-        lows.append(str(low) if low is not None else "")
-        highs.append(str(high) if high is not None else "")
-        mids.append(str(mid) if mid is not None else "")
-    out["Reach_SteamSpyOwners_Low"] = pd.Series(lows)
-    out["Reach_SteamSpyOwners_High"] = pd.Series(highs)
-    out["Reach_SteamSpyOwners_Mid"] = pd.Series(mids)
-
-    # Wikipedia pageviews are stored as provider fields (Wikidata_Pageviews*). We avoid creating
-    # redundant Reach_/Now_ copies to keep the merged CSV lean; composites derive directly from
-    # Wikidata_Pageviews* when present.
-
-    # --- Reach composite (0..100) ---
-    reach_comp: list[str] = []
-    for _, r in out.iterrows():
-        pairs: list[tuple[float, float]] = []
-
-        owners_mid = _parse_int(r.get("Reach_SteamSpyOwners_Mid", ""))
-        owners_score = _log_scale_0_100(
-            owners_mid,
-            log10_min=SIGNALS.reach_owners_log10_min,
-            log10_max=SIGNALS.reach_owners_log10_max,
-        )
-        if owners_score is not None:
-            pairs.append((owners_score, SIGNALS.w_owners))
-
-        steam_reviews = _parse_int(r.get("Steam_ReviewCount", ""))
-        reviews_score = _log_scale_0_100(
-            steam_reviews,
-            log10_min=SIGNALS.reach_reviews_log10_min,
-            log10_max=SIGNALS.reach_reviews_log10_max,
-        )
-        if reviews_score is not None:
-            pairs.append((reviews_score, SIGNALS.w_reviews))
-
-        rawg_votes = _parse_int(r.get("RAWG_RatingsCount", ""))
-        rawg_votes_score = _log_scale_0_100(
-            rawg_votes,
-            log10_min=SIGNALS.reach_votes_log10_min,
-            log10_max=SIGNALS.reach_votes_log10_max,
-        )
-        if rawg_votes_score is not None:
-            pairs.append((rawg_votes_score, SIGNALS.w_votes))
-
-        rawg_added = _parse_int(r.get("RAWG_Added", ""))
-        if rawg_added is None:
-            # Fall back to the sum of buckets when `added` isn't present (some RAWG payloads omit
-            # it but still include `added_by_status`).
-            buckets = [
-                _parse_int(r.get("RAWG_AddedByStatusOwned", "")),
-                _parse_int(r.get("RAWG_AddedByStatusPlaying", "")),
-                _parse_int(r.get("RAWG_AddedByStatusBeaten", "")),
-                _parse_int(r.get("RAWG_AddedByStatusToplay", "")),
-                _parse_int(r.get("RAWG_AddedByStatusDropped", "")),
-            ]
-            if any(x is not None for x in buckets):
-                rawg_added = int(sum(int(x or 0) for x in buckets))
-
-        rawg_added_score = _log_scale_0_100(
-            rawg_added,
-            log10_min=SIGNALS.reach_rawg_added_log10_min,
-            log10_max=SIGNALS.reach_rawg_added_log10_max,
-        )
-        if rawg_added_score is not None:
-            pairs.append((rawg_added_score, SIGNALS.w_rawg_added))
-
-        igdb_votes = _parse_int(r.get("IGDB_RatingCount", ""))
-        igdb_votes_score = _log_scale_0_100(
-            igdb_votes,
-            log10_min=SIGNALS.reach_votes_log10_min,
-            log10_max=SIGNALS.reach_votes_log10_max,
-        )
-        if igdb_votes_score is not None:
-            pairs.append((igdb_votes_score, SIGNALS.w_votes))
-
-        igdb_critic_votes = _parse_int(r.get("IGDB_AggregatedRatingCount", ""))
-        igdb_critic_votes_score = _log_scale_0_100(
-            igdb_critic_votes,
-            log10_min=SIGNALS.reach_critic_votes_log10_min,
-            log10_max=SIGNALS.reach_critic_votes_log10_max,
-        )
-        if igdb_critic_votes_score is not None:
-            pairs.append((igdb_critic_votes_score, SIGNALS.w_critic_votes))
-
-        wiki_365 = _parse_int(r.get("Wikidata_Pageviews365d", ""))
-        wiki_365_score = _log_scale_0_100(
-            wiki_365,
-            log10_min=SIGNALS.reach_pageviews_log10_min,
-            log10_max=SIGNALS.reach_pageviews_log10_max,
-        )
-        if wiki_365_score is not None:
-            pairs.append((wiki_365_score, SIGNALS.w_pageviews))
-
-        avg = _weighted_avg(pairs)
-        reach_comp.append(str(int(round(avg))) if avg is not None else "")
-    out["Reach_Composite"] = pd.Series(reach_comp)
-
-    # --- Ratings: community composite (0..100) ---
-    community_scores: list[str] = []
-    for _, r in out.iterrows():
-        pairs: list[tuple[float, float]] = []
-
-        # SteamSpy (percent derived from pos/neg)
-        s = _parse_float(r.get("Score_SteamSpy_100", ""))
-        if s is not None:
-            pos = _parse_int(r.get("SteamSpy_Positive", ""))
-            neg = _parse_int(r.get("SteamSpy_Negative", ""))
-            w = _log_weight((pos or 0) + (neg or 0))
-            pairs.append((float(s), w))
-
-        # RAWG rating is 0..5
-        rawg_rating = _parse_float(r.get("RAWG_Rating", ""))
-        if rawg_rating is not None:
-            rawg_count = _parse_int(r.get("RAWG_RatingsCount", ""))
-            pairs.append((rawg_rating / 5.0 * 100.0, _log_weight(rawg_count)))
-
-        # IGDB rating already in 0..100-ish; keep as-is
-        igdb_score = _parse_float(r.get("Score_IGDB_100", ""))
-        if igdb_score is not None:
-            igdb_count = _parse_int(r.get("IGDB_RatingCount", ""))
-            pairs.append((float(igdb_score), _log_weight(igdb_count)))
-
-        # HLTB score is 0..100 but count is unknown; keep low weight.
-        hltb_score = _parse_float(r.get("Score_HLTB_100", ""))
-        if hltb_score is not None:
-            pairs.append((float(hltb_score), 1.0))
-
-        avg = _weighted_avg(pairs)
-        community_scores.append(str(int(round(avg))) if avg is not None else "")
-
-    out["CommunityRating_Composite_100"] = pd.Series(community_scores)
-
-    # --- Ratings: critic composite (0..100) ---
-    critic_scores: list[str] = []
-    for _, r in out.iterrows():
-        pairs: list[tuple[float, float]] = []
-
-        steam_meta = _parse_float(r.get("Steam_Metacritic", ""))
-        if steam_meta is not None and 0 <= steam_meta <= 100:
-            pairs.append((float(steam_meta), 1.0))
-
-        rawg_meta = _parse_float(r.get("RAWG_Metacritic", ""))
-        if rawg_meta is not None and 0 <= rawg_meta <= 100:
-            pairs.append((float(rawg_meta), 1.0))
-
-        igdb_agg = _parse_float(r.get("IGDB_AggregatedRating", ""))
-        if igdb_agg is not None and 0 <= igdb_agg <= 100:
-            igdb_agg_count = _parse_int(r.get("IGDB_AggregatedRatingCount", ""))
-            pairs.append((float(igdb_agg), _log_weight(igdb_agg_count)))
-
-        avg = _weighted_avg(pairs)
-        critic_scores.append(str(int(round(avg))) if avg is not None else "")
-    out["CriticRating_Composite_100"] = pd.Series(critic_scores)
-
-    # --- Normalized critic score from IGDB aggregated rating (0..100) ---
-    igdb_critic_scores: list[str] = []
-    for v in out.get("IGDB_AggregatedRating", [""] * len(out)):
-        f = _parse_float(v)
-        igdb_critic_scores.append(str(int(round(f))) if f is not None else "")
-    out["Score_IGDBCritic_100"] = pd.Series(igdb_critic_scores)
-
-    # --- Developer/publisher consensus (derived, conservative) ---
-    dev_cons_prov: list[str] = []
-    dev_cons_names: list[str] = []
-    dev_cons_count: list[str] = []
-    pub_cons_prov: list[str] = []
-    pub_cons_names: list[str] = []
-    pub_cons_count: list[str] = []
-
-    for _, r in out.iterrows():
-        row = r.to_dict()
-
-        dev_sets, dev_originals = _company_sets_by_provider(row, kind="developer")
-        pub_sets, pub_originals = _company_sets_by_provider(row, kind="publisher")
-
-        dev_providers, dev_keys = _company_strict_majority_consensus(dev_sets)
-        pub_providers, pub_keys = _company_strict_majority_consensus(pub_sets)
-
-        dev_cons_prov.append("+".join(dev_providers) if dev_providers else "")
-        pub_cons_prov.append("+".join(pub_providers) if pub_providers else "")
-        dev_cons_count.append(str(len(dev_providers)) if dev_providers else "")
-        pub_cons_count.append(str(len(pub_providers)) if pub_providers else "")
-
-        def _display(
-            keys: list[str], originals: dict[str, dict[str, str]], providers: tuple[str, ...]
-        ) -> str:
-            if not keys or not providers:
-                return ""
-            out_list: list[str] = []
-            for k in keys:
-                chosen = ""
-                for prov in ("steam", "igdb", "rawg", "wikidata"):
-                    if prov not in providers:
-                        continue
-                    chosen = str((originals.get(prov) or {}).get(k, "") or "").strip()
-                    if chosen:
-                        break
-                out_list.append(chosen or k)
-            return json.dumps(out_list, ensure_ascii=False)
-
-        dev_cons_names.append(_display(dev_keys, dev_originals, dev_providers))
-        pub_cons_names.append(_display(pub_keys, pub_originals, pub_providers))
-
-    out["Developers_ConsensusProviders"] = pd.Series(dev_cons_prov)
-    out["Developers_Consensus"] = pd.Series(dev_cons_names)
-    out["Developers_ConsensusProviderCount"] = pd.Series(dev_cons_count)
-    out["Publishers_ConsensusProviders"] = pd.Series(pub_cons_prov)
-    out["Publishers_Consensus"] = pd.Series(pub_cons_names)
-    out["Publishers_ConsensusProviderCount"] = pd.Series(pub_cons_count)
-
-    # --- Content type (derived consensus) ---
-    content_types: list[str] = []
-    content_type_prov: list[str] = []
-    content_type_signals: list[str] = []
-    content_type_conflict: list[str] = []
-    for _, r in out.iterrows():
-        ct, prov, signals, conflict = _content_type_consensus(r.to_dict())
-        content_types.append(ct)
-        content_type_prov.append(prov)
-        content_type_signals.append(signals)
-        content_type_conflict.append(conflict)
-    out["ContentType"] = pd.Series(content_types)
-    out["ContentType_ConsensusProviders"] = pd.Series(content_type_prov)
-    out["ContentType_SourceSignals"] = pd.Series(content_type_signals)
-    out["ContentType_Conflict"] = pd.Series(content_type_conflict)
-
-    # --- IGDB related content presence (derived, filtered) ---
-    has_dlcs: list[str] = []
-    has_exp: list[str] = []
-    has_ports: list[str] = []
-    for _, r in out.iterrows():
-        dlc_n, exp_n, port_n = _igdb_related_counts(r.to_dict())
-        has_dlcs.append("YES" if dlc_n > 0 else "")
-        has_exp.append("YES" if exp_n > 0 else "")
-        has_ports.append("YES" if port_n > 0 else "")
-    out["HasDLCs"] = pd.Series(has_dlcs)
-    out["HasExpansions"] = pd.Series(has_exp)
-    out["HasPorts"] = pd.Series(has_ports)
-
-    # --- Replayability & modding/UGC proxies (derived, best-effort) ---
-    replayability: list[str] = []
-    replayability_signals: list[str] = []
-    has_workshop: list[str] = []
-    modding_signal: list[str] = []
-    modding_signals: list[str] = []
-    for _, r in out.iterrows():
-        rep, rep_sig = _compute_replayability(r.to_dict())
-        replayability.append(rep)
-        replayability_signals.append(rep_sig)
-        hw, ms, ms_sig = _compute_modding_signal(r.to_dict())
-        has_workshop.append(hw)
-        modding_signal.append(ms)
-        modding_signals.append(ms_sig)
-    out["Replayability_100"] = pd.Series(replayability)
-    out["Replayability_SourceSignals"] = pd.Series(replayability_signals)
-    out["HasWorkshop"] = pd.Series(has_workshop)
-    out["ModdingSignal_100"] = pd.Series(modding_signal)
-    out["Modding_SourceSignals"] = pd.Series(modding_signals)
-
-    # --- Production tier (optional mapping) ---
     mapping = load_production_tiers(production_tiers_path)
     pubs_map = mapping.get("publishers", {}) if isinstance(mapping, dict) else {}
     devs_map = mapping.get("developers", {}) if isinstance(mapping, dict) else {}
     if not pubs_map and not devs_map:
-        # Best-effort hint: if Steam dev/pub exists but no tiers store, suggest the updater command.
-        has_steam_companies = False
-        for col in ("Steam_Publishers", "Steam_Developers"):
-            if col in out.columns and bool(out[col].astype(str).str.strip().ne("").any()):
-                has_steam_companies = True
+        company_keys = [
+            "steam.publishers",
+            "steam.developers",
+            "rawg.publishers",
+            "rawg.developers",
+            "igdb.publishers",
+            "igdb.developers",
+            "wikidata.publishers",
+            "wikidata.developers",
+        ]
+        has_company_data = False
+        for key in company_keys:
+            mapped = reg.column_for_key(key)
+            if mapped is None:
+                continue
+            col, _typ = mapped
+            if col not in out.columns:
+                continue
+            s = out[col]
+            if bool(s.map(lambda v: isinstance(v, list) and len(v) > 0).any()):
+                has_company_data = True
                 break
-        if has_steam_companies:
+        if has_company_data:
             logging.info(
                 "Production tiers mapping is empty/missing; run "
                 "`python run.py collect-production-tiers data/output/Games_Enriched.csv`, "
@@ -950,73 +750,351 @@ def apply_phase1_signals(
                 "`cp data/production_tiers.example.yaml data/production_tiers.yaml`), "
                 "then re-run `enrich`."
             )
-    tiers: list[str] = []
-    reasons: list[str] = []
-    for _, r in out.iterrows():
-        tier, reason = compute_production_tier(r.to_dict(), mapping)
-        tiers.append(tier)
-        reasons.append(reason)
-    out["Production_Tier"] = pd.Series(tiers)
-    out["Production_TierReason"] = pd.Series(reasons)
 
-    # --- Reach convenience columns ---
-    out["Reach_SteamReviews"] = out.get("Steam_ReviewCount", "")
-    out["Reach_RAWGRatingsCount"] = out.get("RAWG_RatingsCount", "")
-    out["Reach_IGDBRatingCount"] = out.get("IGDB_RatingCount", "")
-    out["Reach_IGDBAggregatedRatingCount"] = out.get("IGDB_AggregatedRatingCount", "")
+    # Clear derived/composite columns up-front to avoid stale values on in-place enrich.
+    for metric_key, (col, _typ) in reg.by_key.items():
+        if metric_key.startswith(("derived.", "composite.")):
+            if col not in out.columns:
+                out[col] = ""
+            else:
+                out[col] = ""
+
+    for idx, r in out.iterrows():
+        metrics_row: dict[str, Any] = {}
+        for col, value in r.items():
+            if not isinstance(col, str):
+                continue
+            mapped = reg.key_for_column(col)
+            if mapped is None:
+                continue
+            key, _typ = mapped
+            metrics_row[key] = value
+
+        metrics = compute_phase1_signal_metrics(metrics_row, production_tiers=mapping)
+        for key, v in metrics.items():
+            mapped = reg.column_for_key(key)
+            if mapped is None:
+                continue
+            col, _typ = mapped
+            if col not in out.columns:
+                out[col] = ""
+            out.at[idx, col] = v
+
+    return out
+
+
+def compute_phase1_signal_metrics(
+    row: Mapping[str, Any], *, production_tiers: dict[str, dict[str, object]]
+) -> dict[str, object]:
+    """
+    Compute Phase-1 derived/composite metrics for a single row.
+
+    Returns a dict of dotted metric keys to typed values (int/bool/string/list).
+    """
+
+    out: dict[str, object] = {}
+
+    low, high, mid = parse_steamspy_owners_range(row.get("steamspy.owners"))
+    if low is not None:
+        out["derived.reach.steamspy_owners_low"] = low
+    if high is not None:
+        out["derived.reach.steamspy_owners_high"] = high
+    if mid is not None:
+        out["derived.reach.steamspy_owners_mid"] = mid
+
+    def _int(key: str) -> int | None:
+        v = row.get(key, None)
+        if v is None or isinstance(v, bool):
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            if math.isnan(v) or math.isinf(v):
+                return None
+            if v.is_integer():
+                return int(v)
+        return None
+
+    def _float(key: str) -> float | None:
+        v = row.get(key, None)
+        if v is None or isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            f = float(v)
+            if math.isnan(f) or math.isinf(f):
+                return None
+            return f
+        return None
+
+    # Convenience "reach" counters (typed, derived from provider fields).
+    steam_reviews = _int("steam.review_count")
+    if steam_reviews is not None:
+        out["derived.reach.steam_reviews"] = steam_reviews
+    rawg_votes = _int("rawg.ratings_count")
+    if rawg_votes is not None:
+        out["derived.reach.rawg_ratings_count"] = rawg_votes
+    igdb_votes = _int("igdb.score_count")
+    if igdb_votes is not None:
+        out["derived.reach.igdb_rating_count"] = igdb_votes
+    igdb_critic_votes = _int("igdb.critic_score_count")
+    if igdb_critic_votes is not None:
+        out["derived.reach.igdb_aggregated_rating_count"] = igdb_critic_votes
+
+    # --- Reach composite (0..100) ---
+    reach_pairs: list[tuple[float, float]] = []
+    owners_score = _log_scale_0_100(
+        mid,
+        log10_min=SIGNALS.reach_owners_log10_min,
+        log10_max=SIGNALS.reach_owners_log10_max,
+    )
+    if owners_score is not None:
+        reach_pairs.append((owners_score, SIGNALS.w_owners))
+
+    reviews_score = _log_scale_0_100(
+        steam_reviews,
+        log10_min=SIGNALS.reach_reviews_log10_min,
+        log10_max=SIGNALS.reach_reviews_log10_max,
+    )
+    if reviews_score is not None:
+        reach_pairs.append((reviews_score, SIGNALS.w_reviews))
+
+    rawg_votes_score = _log_scale_0_100(
+        rawg_votes,
+        log10_min=SIGNALS.reach_votes_log10_min,
+        log10_max=SIGNALS.reach_votes_log10_max,
+    )
+    if rawg_votes_score is not None:
+        reach_pairs.append((rawg_votes_score, SIGNALS.w_votes))
+
+    rawg_added = _int("rawg.popularity.added_total")
+    if rawg_added is None:
+        buckets = [
+            _int("rawg.popularity.added_by_status.owned"),
+            _int("rawg.popularity.added_by_status.playing"),
+            _int("rawg.popularity.added_by_status.beaten"),
+            _int("rawg.popularity.added_by_status.toplay"),
+            _int("rawg.popularity.added_by_status.dropped"),
+        ]
+        if any(x is not None for x in buckets):
+            rawg_added = int(sum(int(x or 0) for x in buckets))
+    rawg_added_score = _log_scale_0_100(
+        rawg_added,
+        log10_min=SIGNALS.reach_rawg_added_log10_min,
+        log10_max=SIGNALS.reach_rawg_added_log10_max,
+    )
+    if rawg_added_score is not None:
+        reach_pairs.append((rawg_added_score, SIGNALS.w_rawg_added))
+
+    igdb_votes_score = _log_scale_0_100(
+        igdb_votes,
+        log10_min=SIGNALS.reach_votes_log10_min,
+        log10_max=SIGNALS.reach_votes_log10_max,
+    )
+    if igdb_votes_score is not None:
+        reach_pairs.append((igdb_votes_score, SIGNALS.w_votes))
+
+    igdb_critic_votes_score = _log_scale_0_100(
+        igdb_critic_votes,
+        log10_min=SIGNALS.reach_critic_votes_log10_min,
+        log10_max=SIGNALS.reach_critic_votes_log10_max,
+    )
+    if igdb_critic_votes_score is not None:
+        reach_pairs.append((igdb_critic_votes_score, SIGNALS.w_critic_votes))
+
+    wiki_365 = _int("wikipedia.pageviews_365d")
+    wiki_365_score = _log_scale_0_100(
+        wiki_365,
+        log10_min=SIGNALS.reach_pageviews_log10_min,
+        log10_max=SIGNALS.reach_pageviews_log10_max,
+    )
+    if wiki_365_score is not None:
+        reach_pairs.append((wiki_365_score, SIGNALS.w_pageviews))
+
+    reach_avg = _weighted_avg(reach_pairs)
+    if reach_avg is not None:
+        out["composite.reach.score_100"] = int(round(reach_avg))
+
+    # --- Ratings: community composite (0..100) ---
+    comm_pairs: list[tuple[float, float]] = []
+
+    steamspy_score = _float("steamspy.score_100")
+    if steamspy_score is not None:
+        pos = _int("steamspy.positive")
+        neg = _int("steamspy.negative")
+        comm_pairs.append((float(steamspy_score), _log_weight((pos or 0) + (neg or 0))))
+
+    rawg_score = _float("rawg.score_100")
+    if rawg_score is not None:
+        comm_pairs.append((float(rawg_score), _log_weight(rawg_votes)))
+
+    igdb_score = _float("igdb.score_100")
+    if igdb_score is not None:
+        comm_pairs.append((float(igdb_score), _log_weight(igdb_votes)))
+
+    hltb_score = _float("hltb.score_100")
+    if hltb_score is not None:
+        comm_pairs.append((float(hltb_score), 1.0))
+
+    comm_avg = _weighted_avg(comm_pairs)
+    if comm_avg is not None:
+        out["composite.community_rating.score_100"] = int(round(comm_avg))
+
+    # --- Ratings: critic composite (0..100) ---
+    critic_pairs: list[tuple[float, float]] = []
+
+    steam_meta = _float("steam.metacritic_100")
+    if steam_meta is not None and 0 <= steam_meta <= 100:
+        critic_pairs.append((float(steam_meta), 1.0))
+
+    rawg_meta = _float("rawg.metacritic_100")
+    if rawg_meta is not None and 0 <= rawg_meta <= 100:
+        critic_pairs.append((float(rawg_meta), 1.0))
+
+    igdb_critic = _float("igdb.critic.score_100")
+    if igdb_critic is not None and 0 <= igdb_critic <= 100:
+        critic_pairs.append((float(igdb_critic), _log_weight(igdb_critic_votes)))
+
+    critic_avg = _weighted_avg(critic_pairs)
+    if critic_avg is not None:
+        out["composite.critic_rating.score_100"] = int(round(critic_avg))
+
+    # --- Developer/publisher consensus (derived, conservative) ---
+    dev_sets, dev_originals = _company_sets_by_provider(row, kind="developer")
+    pub_sets, pub_originals = _company_sets_by_provider(row, kind="publisher")
+
+    dev_providers, dev_keys = _company_strict_majority_consensus(dev_sets)
+    pub_providers, pub_keys = _company_strict_majority_consensus(pub_sets)
+
+    if dev_providers:
+        out["derived.companies.developers_consensus_providers"] = "+".join(dev_providers)
+        out["derived.companies.developers_consensus_provider_count"] = len(dev_providers)
+    if pub_providers:
+        out["derived.companies.publishers_consensus_providers"] = "+".join(pub_providers)
+        out["derived.companies.publishers_consensus_provider_count"] = len(pub_providers)
+
+    def _display(
+        keys: list[str], originals: dict[str, dict[str, str]], providers: tuple[str, ...]
+    ) -> list[str]:
+        if not keys or not providers:
+            return []
+        out_list: list[str] = []
+        for k in keys:
+            chosen = ""
+            for prov in ("steam", "igdb", "rawg", "wikidata"):
+                if prov not in providers:
+                    continue
+                chosen = str((originals.get(prov) or {}).get(k, "") or "").strip()
+                if chosen:
+                    break
+            out_list.append(chosen or k)
+        return out_list
+
+    dev_names = _display(dev_keys, dev_originals, dev_providers)
+    pub_names = _display(pub_keys, pub_originals, pub_providers)
+    if dev_names:
+        out["derived.companies.developers_consensus"] = dev_names
+    if pub_names:
+        out["derived.companies.publishers_consensus"] = pub_names
+
+    # --- Content type (derived consensus) ---
+    ct, prov, signals, conflict = _content_type_consensus(row)
+    if ct:
+        out["derived.content_type.value"] = ct
+    if prov:
+        out["derived.content_type.consensus_providers"] = prov
+    if signals:
+        out["derived.content_type.source_signals"] = signals
+    if conflict:
+        out["derived.content_type.conflict"] = conflict
+
+    # --- IGDB related content presence (derived, filtered) ---
+    dlc_n, exp_n, port_n = _igdb_related_counts(row)
+    if dlc_n > 0:
+        out["derived.igdb.has_dlcs"] = True
+    if exp_n > 0:
+        out["derived.igdb.has_expansions"] = True
+    if port_n > 0:
+        out["derived.igdb.has_ports"] = True
+
+    # --- Main genre (derived) ---
+    g, src = _compute_main_genre(row)
+    if g:
+        out["derived.genre.main"] = g
+    if src:
+        out["derived.genre.sources"] = src
+
+    # --- Replayability & modding/UGC proxies (derived, best-effort) ---
+    rep, rep_sig = _compute_replayability(row)
+    rep_i = _parse_int_text(rep)
+    if rep_i is not None:
+        out["derived.replayability.score_100"] = rep_i
+    if rep_sig:
+        out["derived.replayability.source_signals"] = rep_sig
+
+    hw, ms, ms_sig = _compute_modding_signal(row)
+    if hw:
+        out["derived.modding.has_workshop"] = True
+    ms_i = _parse_int_text(ms)
+    if ms_i is not None:
+        out["derived.modding.score_100"] = ms_i
+    if ms_sig:
+        out["derived.modding.source_signals"] = ms_sig
+
+    # --- Production tier (optional mapping) ---
+    tier, reason = compute_production_tier(row, production_tiers)
+    if tier:
+        out["derived.production.tier"] = tier
+    if reason:
+        out["derived.production.tier_reason"] = reason
 
     # --- Now (current interest): SteamSpy activity proxies ---
-    out["Now_SteamSpyPlayers2Weeks"] = out.get("SteamSpy_Players2Weeks", "")
-    out["Now_SteamSpyPlaytimeAvg2Weeks"] = out.get("SteamSpy_PlaytimeAvg2Weeks", "")
-    out["Now_SteamSpyPlaytimeMedian2Weeks"] = out.get("SteamSpy_PlaytimeMedian2Weeks", "")
+    play_avg_2w = _int("steamspy.playtime_avg_2weeks")
+    if play_avg_2w is not None:
+        out["derived.now.steamspy_playtime_avg_2weeks"] = play_avg_2w
+    play_med_2w = _int("steamspy.playtime_median_2weeks")
+    if play_med_2w is not None:
+        out["derived.now.steamspy_playtime_median_2weeks"] = play_med_2w
 
-    # --- Now composite (0..100) ---
-    now_comp: list[str] = []
-    for _, r in out.iterrows():
-        pairs: list[tuple[float, float]] = []
+    now_pairs: list[tuple[float, float]] = []
+    ccu = _int("steamspy.ccu")
+    ccu_score = _log_scale_0_100(
+        ccu,
+        log10_min=SIGNALS.now_ccu_log10_min,
+        log10_max=SIGNALS.now_ccu_log10_max,
+    )
+    if ccu_score is not None:
+        now_pairs.append((ccu_score, SIGNALS.w_ccu))
 
-        ccu = _parse_int(r.get("SteamSpy_CCU", ""))
-        ccu_score = _log_scale_0_100(
-            ccu,
-            log10_min=SIGNALS.now_ccu_log10_min,
-            log10_max=SIGNALS.now_ccu_log10_max,
-        )
-        if ccu_score is not None:
-            pairs.append((ccu_score, SIGNALS.w_ccu))
+    p2w = _int("steamspy.players_2weeks")
+    p2w_score = _log_scale_0_100(
+        p2w,
+        log10_min=SIGNALS.now_players2w_log10_min,
+        log10_max=SIGNALS.now_players2w_log10_max,
+    )
+    if p2w_score is not None:
+        now_pairs.append((p2w_score, SIGNALS.w_players2w))
 
-        p2w = _parse_int(r.get("SteamSpy_Players2Weeks", ""))
-        p2w_score = _log_scale_0_100(
-            p2w,
-            log10_min=SIGNALS.now_players2w_log10_min,
-            log10_max=SIGNALS.now_players2w_log10_max,
-        )
-        if p2w_score is not None:
-            pairs.append((p2w_score, SIGNALS.w_players2w))
+    wiki_30 = _int("wikipedia.pageviews_30d")
+    wiki_30_score = _log_scale_0_100(
+        wiki_30,
+        log10_min=SIGNALS.now_pageviews_log10_min,
+        log10_max=SIGNALS.now_pageviews_log10_max,
+    )
+    if wiki_30_score is not None:
+        now_pairs.append((wiki_30_score, SIGNALS.w_now_pageviews))
 
-        wiki_30 = _parse_int(r.get("Wikidata_Pageviews30d", ""))
-        wiki_30_score = _log_scale_0_100(
-            wiki_30,
-            log10_min=SIGNALS.now_pageviews_log10_min,
-            log10_max=SIGNALS.now_pageviews_log10_max,
-        )
-        if wiki_30_score is not None:
-            pairs.append((wiki_30_score, SIGNALS.w_now_pageviews))
-
-        avg = _weighted_avg(pairs)
-        now_comp.append(str(int(round(avg))) if avg is not None else "")
-    out["Now_Composite"] = pd.Series(now_comp)
+    now_avg = _weighted_avg(now_pairs)
+    if now_avg is not None:
+        out["composite.now.score_100"] = int(round(now_avg))
 
     # --- Launch interest proxy (0..100, optional) ---
-    # Uses Wikipedia pageviews in the first 90 days since release when available.
-    launch_scores: list[str] = []
-    for v in out.get("Wikidata_PageviewsFirst90d", [""] * len(out)):
-        count = _parse_int(v)
-        scaled = _log_scale_0_100(
-            count,
-            log10_min=SIGNALS.now_pageviews_log10_min,
-            log10_max=SIGNALS.now_pageviews_log10_max,
-        )
-        launch_scores.append(str(int(round(scaled))) if scaled is not None else "")
-    out["Launch_Interest_100"] = pd.Series(launch_scores)
+    first_90 = _int("wikipedia.pageviews_first_90d")
+    launch_scaled = _log_scale_0_100(
+        first_90,
+        log10_min=SIGNALS.now_pageviews_log10_min,
+        log10_max=SIGNALS.now_pageviews_log10_max,
+    )
+    if launch_scaled is not None:
+        out["composite.launch_interest.score_100"] = int(round(launch_scaled))
 
     return out

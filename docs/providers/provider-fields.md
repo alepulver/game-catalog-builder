@@ -33,20 +33,21 @@ Current output columns:
 |---|---|---|
 | `RAWG_ID` | `id` | RAWG game id |
 | `RAWG_Name` | `name` | Provider title |
+| `RAWG_NameOriginal` | `name_original` | Original title (when present) |
 | `RAWG_Released` | `released` | Release date (`YYYY-MM-DD`) |
 | `RAWG_Year` | `released[:4]` | Release year |
 | `RAWG_Website` | `website` | Official website (if present) |
 | `RAWG_DescriptionRaw` | `description_raw` | Raw description (truncated for CSV ergonomics) |
-| `RAWG_Genre` | `genres[0].name` | Primary genre |
-| `RAWG_Genre2` | `genres[1].name` | Secondary genre |
+| `RAWG_RedditURL` | `reddit_url` | Reddit URL (when present) |
+| `RAWG_MetacriticURL` | `metacritic_url` | Metacritic URL (when present) |
+| `RAWG_BackgroundImage` | `background_image` | Stable image URL (when present) |
 | `RAWG_Genres` | `genres[].name` | Full genre list (comma-separated) |
 | `RAWG_Platforms` | `platforms[].platform.name` | Platform list |
 | `RAWG_Tags` | `tags[].name` | Tag list (project filters Cyrillic duplicates) |
 | `RAWG_ESRB` | `esrb_rating.name` | ESRB rating name (when present) |
 | `RAWG_Developers` | `developers[].name` | JSON array of developers |
 | `RAWG_Publishers` | `publishers[].name` | JSON array of publishers |
-| `RAWG_Rating` | `rating` | Average rating |
-| `Score_RAWG_100` | `rating` | Rating normalized to 0–100 |
+| `RAWG_Score_100` | `rating` | Rating normalized to 0–100 |
 | `RAWG_RatingsCount` | `ratings_count` | Rating count |
 | `RAWG_Metacritic` | `metacritic` | Metacritic score |
 | `RAWG_Added` | `added` | RAWG “added” count |
@@ -88,9 +89,11 @@ Current output columns (from the `/v4/games` object returned by the query):
 | `IGDB_Year` | `first_release_date` | First release year (Unix timestamp → year) |
 | `IGDB_Summary` | `summary` | Summary (truncated for CSV ergonomics) |
 | `IGDB_Websites` | `websites[].url` | Website URLs (comma-separated, capped) |
+| `IGDB_AlternativeNames` | `alternative_names[].name` | Alternate titles / aliases |
 | `IGDB_Platforms` | `platforms[].name` | Platform list |
 | `IGDB_Genres` | `genres[].name` | Genres |
 | `IGDB_Themes` | `themes[].name` | Themes |
+| `IGDB_Keywords` | `keywords[].name` | Keywords (useful identity signal) |
 | `IGDB_GameModes` | `game_modes[].name` | Game modes |
 | `IGDB_Perspectives` | `player_perspectives[].name` | Player perspectives |
 | `IGDB_Franchise` | `franchises[].name` | Franchise(s) |
@@ -103,12 +106,10 @@ Current output columns (from the `/v4/games` object returned by the query):
 | `IGDB_SteamAppID` | `external_games[]` | Cross-check Steam uid when `external_game_source == 1` |
 | `IGDB_Developers` | `involved_companies[]` | JSON array of developer companies |
 | `IGDB_Publishers` | `involved_companies[]` | JSON array of publisher companies |
-| `IGDB_Rating` | `rating` | IGDB user rating (0–100, float) |
-| `IGDB_RatingCount` | `rating_count` | Rating count |
-| `Score_IGDB_100` | `rating` | Rating normalized to 0–100 (rounded) |
-| `IGDB_AggregatedRating` | `aggregated_rating` | Critic aggregated rating (0–100, float) |
-| `IGDB_AggregatedRatingCount` | `aggregated_rating_count` | Critic rating count |
-| `Score_IGDBCritic_100` | `aggregated_rating` | Critic rating normalized to 0–100 (rounded) |
+| `IGDB_ScoreCount` | `rating_count` | Rating count (for `IGDB_Score_100`) |
+| `IGDB_Score_100` | `rating` | Rating normalized to 0–100 (rounded) |
+| `IGDB_CriticScoreCount` | `aggregated_rating_count` | Critic rating count (for `IGDB_CriticScore_100`) |
+| `IGDB_CriticScore_100` | `aggregated_rating` | Critic rating normalized to 0–100 (rounded) |
 
 Other useful fields you can request via `fields` (still in the same call):
 
@@ -182,9 +183,15 @@ Current output columns:
 | `SteamSpy_PlaytimeAvg` | `average_forever` | Average playtime |
 | `SteamSpy_PlaytimeAvg2Weeks` | `average_2weeks` | Average playtime (2 weeks) |
 | `SteamSpy_PlaytimeMedian2Weeks` | `median_2weeks` | Median playtime (2 weeks) |
+| `SteamSpy_PlaytimeMedian` | `median_forever` | Median playtime (lifetime) |
 | `SteamSpy_Positive` | `positive` | Positive reviews |
 | `SteamSpy_Negative` | `negative` | Negative reviews |
-| `Score_SteamSpy_100` | `positive/negative` | Positive ratio normalized to 0–100 |
+| `SteamSpy_Score_100` | `positive/negative` | Positive ratio normalized to 0–100 |
+| `SteamSpy_Price` | `price` | Price in cents (SteamSpy) |
+| `SteamSpy_InitialPrice` | `initialprice` | Initial price in cents (SteamSpy) |
+| `SteamSpy_DiscountPercent` | `discount` | Discount percent |
+| `SteamSpy_Developer` | `developer` | Developer string (SteamSpy) |
+| `SteamSpy_Publisher` | `publisher` | Publisher string (SteamSpy) |
 | `SteamSpy_Tags` | `tags{tag:count}` | Top tags (comma-separated; by weight) |
 | `SteamSpy_TagsTop` | `tags{tag:count}` | Top tags + weights (JSON list of `[tag,count]` pairs) |
 
@@ -216,7 +223,9 @@ Current output columns (from the best match object):
 | `HLTB_Completionist` | `completionist` | Completionist time (hours) |
 | `HLTB_ReleaseYear` | `release_world` | Release year (when present) |
 | `HLTB_Platforms` | `profile_platforms` | Platform list (when present) |
-| `Score_HLTB_100` | `review_score` | HLTB score normalized to 0–100 (when present) |
+| `HLTB_Score_100` | `review_score` | HLTB score normalized to 0–100 (when present) |
+| `HLTB_URL` | `game_web_link` | HLTB canonical URL (when present) |
+| `HLTB_Aliases` | `game_alias` | Alias list / alternate titles (when present) |
 
 Other useful attributes commonly present:
 

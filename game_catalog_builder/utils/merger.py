@@ -1,154 +1,98 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
-from .signals import apply_phase1_signals
-from .utilities import read_csv, write_csv
+from ..metrics.registry import MetricsRegistry, default_metrics_registry_path, load_metrics_registry
+from ..schema import PINNED_ID_COLS
 
 
-def merge_left(base: pd.DataFrame, other: pd.DataFrame) -> pd.DataFrame:
+def reorder_columns(
+    df: pd.DataFrame,
+    *,
+    registry: MetricsRegistry | None = None,
+    metrics_registry_path: str | Path | None = None,
+) -> pd.DataFrame:
     """
-    Left-join provider data onto the personal base using RowId.
-    """
-    if "RowId" not in base.columns or "RowId" not in other.columns:
-        raise ValueError(
-            "Missing RowId in base/provider CSV; run `import` and provider steps again."
-        )
-    return base.merge(other, on="RowId", how="left", suffixes=("", "_dup"))
+    Registry-driven column order.
 
+    Logical order:
+      - Personal (user) columns + pin columns (stable up front)
+      - Derived + composite metrics
+      - Provider metrics (grouped by provider)
+      - Diagnostics (review/matching columns)
 
-def drop_duplicate_suffixes(df: pd.DataFrame) -> pd.DataFrame:
+    Notes:
+    - CSV columns are a presentation layer; internal canonical identities are dotted metric keys.
+    - The metrics registry is the canonical source of "what is a metric" vs "user-owned field".
     """
-    Remove *_dup columns created by redundant merges.
-    """
-    dup_cols = [c for c in df.columns if c.endswith("_dup")]
-    return df.drop(columns=dup_cols)
+    reg = registry
+    if reg is None:
+        path = Path(metrics_registry_path) if metrics_registry_path else default_metrics_registry_path()
+        reg = load_metrics_registry(path)
 
+    metric_cols = reg.metric_columns
+    diag_cols = reg.diagnostic_columns
 
-def reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Logical order: Personal → Signals → Scores → RAWG → IGDB → Steam → SteamSpy → HLTB
-    → Wikidata
-    """
-    personal_cols = [
-        "RowId",
-        "Name",
-        "Status",
-        "Rating",
-        "Play again",
-        "Platform",
-        "Added to List On",
-        "Notes",
+    def _is_personal(col: str) -> bool:
+        if col.startswith("__"):
+            return False
+        if col in diag_cols:
+            return False
+        if col in metric_cols:
+            return False
+        return True
+
+    base_front = ["RowId", "Name", "Disabled", "YearHint", "Platform"]
+    pinned_front = [
+        c
+        for c in ("RAWG_ID", "IGDB_ID", "Steam_AppID", "HLTB_ID", "HLTB_Query", "Wikidata_QID")
+        if c in df.columns
     ]
 
-    signal_cols = [
-        "Reach_SteamSpyOwners_Low",
-        "Reach_SteamSpyOwners_High",
-        "Reach_SteamSpyOwners_Mid",
-        "Reach_Composite",
-        "Reach_SteamReviews",
-        "Reach_RAWGRatingsCount",
-        "Reach_IGDBRatingCount",
-        "Reach_IGDBAggregatedRatingCount",
-        "Launch_Interest_100",
-        "CommunityRating_Composite_100",
-        "CriticRating_Composite_100",
-        "Developers_ConsensusProviders",
-        "Developers_Consensus",
-        "Developers_ConsensusProviderCount",
-        "Publishers_ConsensusProviders",
-        "Publishers_Consensus",
-        "Publishers_ConsensusProviderCount",
-        "ContentType",
-        "ContentType_ConsensusProviders",
-        "ContentType_SourceSignals",
-        "ContentType_Conflict",
-        "HasDLCs",
-        "HasExpansions",
-        "HasPorts",
-        "Replayability_100",
-        "Replayability_SourceSignals",
-        "HasWorkshop",
-        "ModdingSignal_100",
-        "Modding_SourceSignals",
-        "Production_Tier",
-        "Production_TierReason",
-        "Now_SteamSpyPlaytimeAvg2Weeks",
-        "Now_SteamSpyPlaytimeMedian2Weeks",
-        "Now_Composite",
-    ]
+    personal_cols = [c for c in df.columns if _is_personal(c) and c not in PINNED_ID_COLS]
 
-    rawg_cols = [c for c in df.columns if c.startswith("RAWG_")]
-    igdb_cols = [c for c in df.columns if c.startswith("IGDB_")]
-    steam_cols = [c for c in df.columns if c.startswith("Steam_")]
-    steamspy_cols = [c for c in df.columns if c.startswith("SteamSpy_")]
-    hltb_cols = [c for c in df.columns if c.startswith("HLTB_")]
-    wikidata_cols = [c for c in df.columns if c.startswith("Wikidata_")]
-    score_cols = [c for c in df.columns if c.startswith("Score_")]
+    derived_cols: list[str] = []
+    for key, (col, _typ) in reg.by_key.items():
+        if key.startswith(("derived.", "composite.")) and col in df.columns:
+            derived_cols.append(col)
 
-    ordered = (
-        personal_cols
-        + signal_cols
-        + score_cols
-        + rawg_cols
-        + igdb_cols
-        + steam_cols
-        + steamspy_cols
-        + hltb_cols
-        + wikidata_cols
-    )
+    provider_heads = ["rawg", "igdb", "steam", "steamspy", "hltb", "wikidata", "wikipedia"]
+    provider_cols_by_head: dict[str, list[str]] = {h: [] for h in provider_heads}
+    for key, (col, _typ) in reg.by_key.items():
+        head = str(key.split(".", 1)[0] if "." in key else key).casefold()
+        if head in provider_cols_by_head and col in df.columns and col not in PINNED_ID_COLS:
+            if key.startswith(("derived.", "composite.")):
+                continue
+            provider_cols_by_head[head].append(col)
 
-    existing = [c for c in ordered if c in df.columns]
-    remaining = [c for c in df.columns if c not in existing]
+    diagnostics_cols = [c for c in sorted(diag_cols) if c in df.columns]
 
-    return df[existing + remaining]
+    ordered: list[str] = []
+    for c in base_front:
+        if c in df.columns and c not in ordered:
+            ordered.append(c)
+    for c in pinned_front:
+        if c not in ordered:
+            ordered.append(c)
+    for c in personal_cols:
+        if c not in ordered:
+            ordered.append(c)
 
+    for c in sorted(set(derived_cols)):
+        if c not in ordered:
+            ordered.append(c)
 
-def merge_all(
-    personal_csv: Path,
-    rawg_csv: Path,
-    hltb_csv: Path,
-    steam_csv: Path,
-    steamspy_csv: Path,
-    output_csv: Path,
-    igdb_csv: Path,
-    wikidata_csv: Path | None = None,
-):
-    # Personal base (NEVER overwritten)
-    df = read_csv(personal_csv)
-    if "RowId" not in df.columns:
-        raise ValueError("Missing RowId in personal CSV; run `import` first.")
+    for head in provider_heads:
+        for c in sorted(set(provider_cols_by_head.get(head, []))):
+            if c not in ordered:
+                ordered.append(c)
 
-    # Incremental merges
-    if rawg_csv.exists():
-        df = merge_left(df, read_csv(rawg_csv))
-        df = drop_duplicate_suffixes(df)
+    for c in diagnostics_cols:
+        if c not in ordered:
+            ordered.append(c)
 
-    if hltb_csv.exists():
-        df = merge_left(df, read_csv(hltb_csv))
-        df = drop_duplicate_suffixes(df)
-
-    if steam_csv.exists():
-        df = merge_left(df, read_csv(steam_csv))
-        df = drop_duplicate_suffixes(df)
-
-    if steamspy_csv.exists():
-        df = merge_left(df, read_csv(steamspy_csv))
-        df = drop_duplicate_suffixes(df)
-
-    if igdb_csv.exists():
-        df = merge_left(df, read_csv(igdb_csv))
-        df = drop_duplicate_suffixes(df)
-
-    if wikidata_csv and wikidata_csv.exists():
-        df = merge_left(df, read_csv(wikidata_csv))
-        df = drop_duplicate_suffixes(df)
-
-    df = apply_phase1_signals(df)
-
-    # Final order
-    df = reorder_columns(df)
-
-    write_csv(df, output_csv)
+    remaining = [c for c in df.columns if c not in ordered]
+    return cast(pd.DataFrame, df[ordered + remaining])

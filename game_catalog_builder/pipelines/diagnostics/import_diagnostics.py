@@ -5,18 +5,35 @@ Import diagnostics/tagging helpers.
 from __future__ import annotations
 
 import re
+from typing import cast
 
 import pandas as pd
 
-from ..schema import DIAGNOSTIC_COLUMNS
-from ..utils.consistency import (
+from ...metrics.registry import MetricsRegistry, default_metrics_registry_path, load_metrics_registry
+from ...utils.consistency import (
     actionable_mismatch_tags,
     compute_provider_consensus,
     platform_outlier_tags,
     year_outlier_tags,
 )
-from ..utils.cross_refs import extract_steam_appid_from_rawg_stores
-from ..utils.utilities import IDENTITY_NOT_FOUND, normalize_game_name
+from ...utils.cross_refs import extract_steam_appid_from_rawg_stores
+from ...utils.utilities import IDENTITY_NOT_FOUND, normalize_game_name
+from ..protocols import HLTBClientLike, IGDBClientLike, RAWGClientLike, SteamClientLike
+
+
+def _diag_col(registry: MetricsRegistry, key: str) -> str | None:
+    mapped = registry.diagnostic_column_for_key(key)
+    if mapped is None:
+        return None
+    col, _typ = mapped
+    return col
+
+
+def _diag_get(row: pd.Series, registry: MetricsRegistry, key: str) -> str:
+    col = _diag_col(registry, key)
+    if not col:
+        return ""
+    return str(row.get(col, "") or "").strip()
 
 
 def platform_is_pc_like(platform_value: object) -> bool:
@@ -27,7 +44,11 @@ def platform_is_pc_like(platform_value: object) -> bool:
 
 
 def fill_eval_tags(
-    df: pd.DataFrame, *, sources: set[str] | None = None, clients: dict[str, object] | None = None
+    df: pd.DataFrame,
+    *,
+    sources: set[str] | None = None,
+    clients: dict[str, object] | None = None,
+    registry: MetricsRegistry | None = None,
 ) -> pd.DataFrame:
     """
     Compute compact import diagnostics (`ReviewTags`, `MatchConfidence`) using both:
@@ -37,10 +58,14 @@ def fill_eval_tags(
     This function is pure with respect to provider caches: it only calls client getters and
     does not perform pin/unpin mutations.
     """
-    from ..utils.utilities import ensure_columns
+    from ...utils.utilities import ensure_columns
+
+    reg = registry or load_metrics_registry(default_metrics_registry_path())
 
     out = df.copy()
-    out = ensure_columns(out, {"ReviewTags": "", "MatchConfidence": ""})
+    tags_col = _diag_col(reg, "diagnostics.review.tags") or "ReviewTags"
+    conf_col = _diag_col(reg, "diagnostics.match.confidence") or "MatchConfidence"
+    out = ensure_columns(out, {tags_col: "", conf_col: ""})
 
     preserve_prefixes = (
         "autounpinned:",
@@ -122,9 +147,13 @@ def fill_eval_tags(
             return "mobile"
         return None
 
-    def _platforms_from_csv_list(s: str) -> set[str]:
+    def _platforms_from_list(value: object) -> set[str]:
         out_set: set[str] = set()
-        for part in [p.strip() for p in s.split(",") if p.strip()]:
+        if isinstance(value, list):
+            parts = [str(x or "").strip() for x in value if str(x or "").strip()]
+        else:
+            parts = []
+        for part in parts:
             b = _platform_bucket(part)
             if b:
                 out_set.add(b)
@@ -148,7 +177,7 @@ def fill_eval_tags(
     def _platforms_from_hltb(obj: object) -> set[str]:
         if not isinstance(obj, dict):
             return set()
-        return _platforms_from_csv_list(str(obj.get("HLTB_Platforms", "") or ""))
+        return _platforms_from_list(obj.get("hltb.platforms"))
 
     def _genres_from_steam(details: object) -> set[str]:
         if not isinstance(details, dict):
@@ -174,9 +203,13 @@ def fill_eval_tags(
                 out_set.add(normalize_game_name(name))
         return out_set
 
-    def _genres_from_csv_list(s: str) -> set[str]:
+    def _genres_from_list(value: object) -> set[str]:
         out_set: set[str] = set()
-        for part in [p.strip() for p in str(s or "").split(",") if p.strip()]:
+        if isinstance(value, list):
+            parts = [str(x or "").strip() for x in value if str(x or "").strip()]
+        else:
+            parts = []
+        for part in parts:
             out_set.add(normalize_game_name(part))
         return {x for x in out_set if x}
 
@@ -211,7 +244,7 @@ def fill_eval_tags(
             elif not rawg_id:
                 tags.append("missing_rawg")
                 has_missing_provider = True
-            elif not str(row.get("RAWG_MatchedName", "") or "").strip():
+            elif not _diag_get(row, reg, "diagnostics.rawg.matched_name"):
                 tags.append("rawg_id_unresolved")
                 has_low_issue = True
 
@@ -222,7 +255,7 @@ def fill_eval_tags(
             elif not igdb_id:
                 tags.append("missing_igdb")
                 has_missing_provider = True
-            elif not str(row.get("IGDB_MatchedName", "") or "").strip():
+            elif not _diag_get(row, reg, "diagnostics.igdb.matched_name"):
                 tags.append("igdb_id_unresolved")
                 has_low_issue = True
 
@@ -233,19 +266,19 @@ def fill_eval_tags(
                 tags.append("steam_not_found")
             elif not steam_id and steam_expected:
                 steam_missing_expected = True
-                rejected = str(row.get("Steam_RejectedReason", "") or "").strip()
+                rejected = _diag_get(row, reg, "diagnostics.steam.rejected_reason")
                 if rejected:
                     tags.append("steam_rejected")
                     tags.append(f"steam_rejected:{rejected}")
                     has_low_issue = True
-            elif steam_id and not str(row.get("Steam_MatchedName", "") or "").strip():
+            elif steam_id and not _diag_get(row, reg, "diagnostics.steam.matched_name"):
                 tags.append("steam_id_unresolved")
                 has_low_issue = True
 
         if include_hltb:
             hltb_id = str(row.get("HLTB_ID", "") or "").strip()
             hltb_query = str(row.get("HLTB_Query", "") or "").strip()
-            hltb_name = str(row.get("HLTB_MatchedName", "") or "").strip()
+            hltb_name = _diag_get(row, reg, "diagnostics.hltb.matched_name")
             if hltb_id == IDENTITY_NOT_FOUND or hltb_query == IDENTITY_NOT_FOUND:
                 tags.append("hltb_not_found")
             elif not hltb_name:
@@ -259,7 +292,7 @@ def fill_eval_tags(
                 igdb_id = str(row.get("IGDB_ID", "") or "").strip()
                 if igdb_id and igdb_id != IDENTITY_NOT_FOUND:
                     igdb_obj = clients["igdb"].get_by_id(igdb_id)  # type: ignore[attr-defined]
-                    igdb_steam = str((igdb_obj or {}).get("IGDB_SteamAppID", "") or "").strip()
+                    igdb_steam = str((igdb_obj or {}).get("igdb.cross_ids.steam_app_id", "") or "").strip()
                     if igdb_steam and igdb_steam.isdigit() and igdb_steam != steam_id:
                         tags.append("steam_appid_disagree:igdb")
                         has_low_issue = True
@@ -272,15 +305,15 @@ def fill_eval_tags(
                         tags.append("steam_appid_disagree:rawg")
                         has_low_issue = True
 
-        for score_col, tag_prefix, enabled in (
-            ("RAWG_MatchScore", "rawg_score", include_rawg),
-            ("IGDB_MatchScore", "igdb_score", include_igdb),
-            ("Steam_MatchScore", "steam_score", include_steam),
-            ("HLTB_MatchScore", "hltb_score", include_hltb),
+        for score_key, tag_prefix, enabled in (
+            ("diagnostics.rawg.match_score", "rawg_score", include_rawg),
+            ("diagnostics.igdb.match_score", "igdb_score", include_igdb),
+            ("diagnostics.steam.match_score", "steam_score", include_steam),
+            ("diagnostics.hltb.match_score", "hltb_score", include_hltb),
         ):
             if not enabled:
                 continue
-            s = str(row.get(score_col, "") or "").strip()
+            s = _diag_get(row, reg, score_key)
             if s.isdigit() and int(s) < 100:
                 tags.append(f"{tag_prefix}:{s}")
                 score = int(s)
@@ -294,13 +327,18 @@ def fill_eval_tags(
         platforms: dict[str, set[str]] = {}
         genres: dict[str, set[str]] = {}
         igdb_payload: dict[str, object] | None = None
+        steam_details: dict[str, object] | None = None
 
         if clients and isinstance(clients, dict):
             if include_rawg:
                 rawg_id = str(row.get("RAWG_ID", "") or "").strip()
                 if rawg_id and rawg_id != IDENTITY_NOT_FOUND:
                     rawg_client = clients.get("rawg")
-                    rawg_obj = rawg_client.get_by_id(rawg_id) if rawg_client else None
+                    rawg_obj = (
+                        cast(RAWGClientLike, rawg_client).get_by_id(rawg_id)
+                        if rawg_client and hasattr(rawg_client, "get_by_id")
+                        else None
+                    )
                     y = _rawg_year(rawg_obj)
                     if y is not None:
                         years["rawg"] = y
@@ -311,25 +349,30 @@ def fill_eval_tags(
                 igdb_id = str(row.get("IGDB_ID", "") or "").strip()
                 if igdb_id and igdb_id != IDENTITY_NOT_FOUND:
                     igdb_client = clients.get("igdb")
-                    igdb_obj = igdb_client.get_by_id(igdb_id) if igdb_client else None
+                    igdb_obj = (
+                        cast(IGDBClientLike, igdb_client).get_by_id(igdb_id)
+                        if igdb_client and hasattr(igdb_client, "get_by_id")
+                        else None
+                    )
                     if isinstance(igdb_obj, dict):
                         igdb_payload = igdb_obj
-                        y = _int_year(igdb_obj.get("IGDB_Year", ""))
+                        y = _int_year(igdb_obj.get("igdb.year", ""))
                         if y is not None:
                             years["igdb"] = y
-                        plats = str(igdb_obj.get("IGDB_Platforms", "") or "")
-                        platforms["igdb"] = _platforms_from_csv_list(plats)
-                        genres["igdb"] = _genres_from_csv_list(
-                            str(igdb_obj.get("IGDB_Genres", "") or "")
-                        )
+                        platforms["igdb"] = _platforms_from_list(igdb_obj.get("igdb.platforms"))
+                        genres["igdb"] = _genres_from_list(igdb_obj.get("igdb.genres"))
 
                 if include_steam:
                     steam_id = str(row.get("Steam_AppID", "") or "").strip()
                     if steam_id and steam_id.isdigit() and steam_id != IDENTITY_NOT_FOUND:
                         steam_client = clients.get("steam")
                         details = (
-                            steam_client.get_app_details(int(steam_id)) if steam_client else None
+                            cast(SteamClientLike, steam_client).get_app_details(int(steam_id))
+                            if steam_client and hasattr(steam_client, "get_app_details")
+                            else None
                         )
+                        if isinstance(details, dict):
+                            steam_details = details
                         y = _steam_year(details)
                         if y is not None:
                             years["steam"] = y
@@ -340,9 +383,13 @@ def fill_eval_tags(
                 hltb_id = str(row.get("HLTB_ID", "") or "").strip()
                 if hltb_id and hltb_id != IDENTITY_NOT_FOUND:
                     hltb_client = clients.get("hltb")
-                    hltb_obj = hltb_client.get_by_id(hltb_id) if hltb_client else None
+                    hltb_obj = (
+                        cast(HLTBClientLike, hltb_client).get_by_id(hltb_id)
+                        if hltb_client and hasattr(hltb_client, "get_by_id")
+                        else None
+                    )
                     if isinstance(hltb_obj, dict):
-                        y = _int_year(hltb_obj.get("HLTB_ReleaseYear", ""))
+                        y = _int_year(hltb_obj.get("hltb.release_year", ""))
                         if y is not None:
                             years["hltb"] = y
                         platforms["hltb"] = _platforms_from_hltb(hltb_obj)
@@ -373,30 +420,30 @@ def fill_eval_tags(
             if any(
                 str(igdb_payload.get(k) or "").strip()
                 for k in (
-                    "IGDB_ParentGame",
-                    "IGDB_VersionParent",
-                    "IGDB_DLCs",
-                    "IGDB_Expansions",
-                    "IGDB_Ports",
+                    "igdb.relationships.parent_game",
+                    "igdb.relationships.version_parent",
+                    "igdb.relationships.dlcs",
+                    "igdb.relationships.expansions",
+                    "igdb.relationships.ports",
                 )
             ):
                 tags.append("edition_or_port_suspected")
 
         titles: dict[str, str] = {}
         if include_rawg:
-            t = str(row.get("RAWG_MatchedName", "") or "").strip()
+            t = _diag_get(row, reg, "diagnostics.rawg.matched_name")
             if t:
                 titles["rawg"] = t
         if include_igdb:
-            t = str(row.get("IGDB_MatchedName", "") or "").strip()
+            t = _diag_get(row, reg, "diagnostics.igdb.matched_name")
             if t:
                 titles["igdb"] = t
         if include_steam:
-            t = str(row.get("Steam_MatchedName", "") or "").strip()
+            t = _diag_get(row, reg, "diagnostics.steam.matched_name")
             if t:
                 titles["steam"] = t
         if include_hltb:
-            t = str(row.get("HLTB_MatchedName", "") or "").strip()
+            t = _diag_get(row, reg, "diagnostics.hltb.matched_name")
             if t:
                 titles["hltb"] = t
 
@@ -458,7 +505,7 @@ def fill_eval_tags(
             has_low_issue = True
 
         if include_steam:
-            steam_name = str(row.get("Steam_MatchedName", "") or "").strip()
+            steam_name = _diag_get(row, reg, "diagnostics.steam.matched_name")
             steam_id = str(row.get("Steam_AppID", "") or "").strip()
             if steam_id and steam_id != IDENTITY_NOT_FOUND and name and steam_name:
                 q_nums = _series_numbers(name)
@@ -466,7 +513,7 @@ def fill_eval_tags(
                 if q_nums != s_nums:
                     tags.append("steam_series_mismatch")
                     has_low_issue = True
-                store_type = str(row.get("Steam_StoreType", "") or "").strip().lower()
+                store_type = str((steam_details or {}).get("type") or "").strip().lower()
                 if store_type and store_type != "game":
                     tags.append(f"store_type_not_game:{store_type}")
                     has_low_issue = True
@@ -483,7 +530,7 @@ def fill_eval_tags(
         # Preserve a small set of stable, tool-emitted tags across recomputations.
         prev = ""
         try:
-            prev = str(df.at[idx, "ReviewTags"] or "")
+            prev = str(df.at[idx, tags_col] or "")
         except Exception:
             prev = ""
         if prev:
@@ -495,12 +542,13 @@ def fill_eval_tags(
         tags_list.append(", ".join(tags))
         confidence_list.append(confidence)
 
-    out["ReviewTags"] = pd.Series(tags_list, index=out.index)
-    out["MatchConfidence"] = pd.Series(confidence_list, index=out.index)
+    out[tags_col] = pd.Series(tags_list, index=out.index)
+    out[conf_col] = pd.Series(confidence_list, index=out.index)
     if "NeedsReview" in out.columns:
         out = out.drop(columns=["NeedsReview"])
-    # Ensure any missing diagnostic cols are present for downstream commands.
-    from ..utils.utilities import ensure_columns as _ensure_cols
-
-    out = _ensure_cols(out, {c: "" for c in DIAGNOSTIC_COLUMNS if c not in out.columns})
+    # Always ensure these stable outputs exist.
+    if tags_col not in out.columns:
+        out[tags_col] = ""
+    if conf_col not in out.columns:
+        out[conf_col] = ""
     return out

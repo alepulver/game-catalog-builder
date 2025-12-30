@@ -43,7 +43,7 @@ def test_igdb_search_uses_year_window_then_falls_back(tmp_path, monkeypatch):
 
     out = client.search("Example Game (2000)", year_hint=2000)
     assert out is not None
-    assert out["IGDB_ID"] == "42"
+    assert out["igdb.id"] == "42"
     assert len(queries) == 2
     assert "where first_release_date" in queries[0]
     assert "where first_release_date" not in queries[1]

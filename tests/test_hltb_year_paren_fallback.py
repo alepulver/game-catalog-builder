@@ -26,7 +26,7 @@ def test_hltb_strips_trailing_year_parentheses_for_search(tmp_path, monkeypatch)
 
     out = client.search("Spider-Man 2 (2004)")
     assert out is not None
-    assert out["HLTB_Name"] == "Spider-Man 2"
+    assert out["hltb.name"] == "Spider-Man 2"
     assert calls == ["Spider-Man 2 (2004)", "Spider-Man 2"]
 
     # Original key should be cached as a hit (so we don't keep searching).

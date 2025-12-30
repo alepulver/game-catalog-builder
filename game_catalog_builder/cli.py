@@ -13,7 +13,16 @@ from pathlib import Path
 
 from .pipelines.context import PipelineContext
 from .pipelines.enrich_pipeline import run_enrich
+from .pipelines.export_pipeline import (
+    export_enriched_csv,
+    export_enriched_json,
+    export_enriched_jsonl_view,
+    export_provider_csv,
+    export_provider_json,
+    export_provider_jsonl_view,
+)
 from .pipelines.import_pipeline import run_import
+from .pipelines.metrics_registry_pipeline import check_metrics_registry
 from .pipelines.resolve_pipeline import run_resolve
 from .pipelines.sync_pipeline import sync_back_catalog
 from .schema import (
@@ -34,9 +43,7 @@ from .utils import (
 from .utils.source_selection import parse_sources
 
 
-def _parse_sources(
-    raw: str, *, allowed: set[str], aliases: dict[str, list[str]] | None = None
-) -> list[str]:
+def _parse_sources(raw: str, *, allowed: set[str], aliases: dict[str, list[str]] | None = None) -> list[str]:
     return parse_sources(raw, allowed=allowed, aliases=aliases)
 
 
@@ -183,9 +190,7 @@ def _setup_logging_from_args(
     *,
     command_name: str,
 ) -> None:
-    setup_logging(
-        log_file or _default_log_file(command_name=command_name, logs_dir=run_paths.logs_dir)
-    )
+    setup_logging(log_file or _default_log_file(command_name=command_name, logs_dir=run_paths.logs_dir))
     if debug:
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.DEBUG)
@@ -215,11 +220,15 @@ def _command_normalize(args: argparse.Namespace) -> None:
     include_diagnostics = bool(args.diagnostics)
 
     credentials_path = args.credentials or (project_root / "data" / "credentials.yaml")
-    sources = _parse_sources(
-        args.source, allowed=set(IMPORT_ALLOWED_SOURCES), aliases=SOURCE_ALIASES
-    )
+    sources = _parse_sources(args.source, allowed=set(IMPORT_ALLOWED_SOURCES), aliases=SOURCE_ALIASES)
     ctx = PipelineContext(cache_dir=cache_dir, credentials_path=credentials_path, sources=sources)
-    run_import(ctx, input_csv=args.input, output_csv=out, include_diagnostics=include_diagnostics)
+    run_import(
+        ctx,
+        input_csv=args.input,
+        output_csv=out,
+        include_diagnostics=include_diagnostics,
+        write_jsonl=not bool(getattr(args, "no_jsonl", False)),
+    )
     return
 
 
@@ -247,9 +256,7 @@ def _command_resolve(args: argparse.Namespace) -> None:
 
     apply = bool(getattr(args, "apply", False))
 
-    sources = _parse_sources(
-        args.source, allowed=set(RESOLVE_ALLOWED_SOURCES), aliases=SOURCE_ALIASES
-    )
+    sources = _parse_sources(args.source, allowed=set(RESOLVE_ALLOWED_SOURCES), aliases=SOURCE_ALIASES)
     ctx = PipelineContext(cache_dir=cache_dir, credentials_path=credentials_path, sources=sources)
     stats = run_resolve(
         ctx,
@@ -257,6 +264,7 @@ def _command_resolve(args: argparse.Namespace) -> None:
         out_csv=out,
         retry_missing=bool(args.retry_missing),
         apply=apply,
+        use_jsonl=not bool(getattr(args, "no_jsonl", False)),
     )
     logging.info(
         f"✔ Resolve completed: {out} (apply={str(apply).lower()}, attempted={stats.attempted}, "
@@ -288,6 +296,13 @@ def _command_enrich(args: argparse.Namespace) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     merge_output = args.merge_output or (output_dir / "Games_Enriched.csv")
+    metrics_registry = args.metrics_registry
+    if metrics_registry is not None:
+        metrics_registry = (
+            metrics_registry
+            if metrics_registry.is_absolute()
+            else (project_root / metrics_registry).resolve()
+        )
 
     sources_to_process = _parse_sources(
         args.source,
@@ -305,6 +320,13 @@ def _command_enrich(args: argparse.Namespace) -> None:
         merge_output=merge_output,
         validate=bool(args.validate),
         validate_output=args.validate_output,
+        write_csv=bool(args.write_csv),
+        write_jsonl=bool(args.write_jsonl) and (not bool(getattr(args, "no_jsonl", False))),
+        metrics_registry_path=metrics_registry,
+        export_json=bool(args.export_json),
+        all_metrics=bool(args.all_metrics),
+        use_catalog_jsonl=not bool(getattr(args, "no_jsonl", False)),
+        reuse_provider_jsonl=bool(getattr(args, "reuse_jsonl", False)),
     )
 
 
@@ -318,11 +340,115 @@ def _command_sync_back(args: argparse.Namespace) -> None:
     )
     _setup_logging_from_args(run_paths, args.log_file, args.debug, command_name="sync")
     out = args.out or args.catalog
-    sync_back_catalog(catalog_csv=args.catalog, enriched_csv=args.enriched, output_csv=out)
+    internal_jsonl = args.catalog.parent / "jsonl" / f"{args.catalog.stem}.jsonl"
+    sync_back_catalog(
+        catalog_csv=args.catalog,
+        enriched_csv=args.enriched,
+        output_csv=out,
+        internal_jsonl=internal_jsonl,
+    )
     return
 
 
+def _command_export(args: argparse.Namespace) -> None:
+    project_root, _paths = _common_paths()
+    run_paths = _prepare_run_paths(
+        project_root=project_root,
+        args=args,
+        input_path=getattr(args, "jsonl", None),
+        allow_cache_override=False,
+    )
+    _setup_logging_from_args(run_paths, args.log_file, args.debug, command_name="export")
+
+    output_dir = args.output or run_paths.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_dir = output_dir / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    json_dir = output_dir / "json"
+    json_dir.mkdir(parents=True, exist_ok=True)
+
+    metrics_registry = args.metrics_registry
+    if metrics_registry is not None:
+        metrics_registry = (
+            metrics_registry
+            if metrics_registry.is_absolute()
+            else (project_root / metrics_registry).resolve()
+        )
+
+    kind = str(args.kind or "enriched").strip().lower()
+    fmt = str(args.format or "csv").strip().lower()
+    if kind == "enriched":
+        jsonl_path = args.jsonl or (output_dir / "jsonl" / "Games_Enriched.jsonl")
+        if fmt == "jsonl":
+            out_jsonl = args.out or (json_dir / "Games_Enriched.jsonl")
+            export_enriched_jsonl_view(
+                run_dir=run_paths.run_dir,
+                input_jsonl=jsonl_path,
+                output_jsonl=out_jsonl,
+                metrics_registry=metrics_registry,
+            )
+        elif fmt == "json":
+            out_json = args.out or (json_dir / "Games_Enriched.json")
+            export_enriched_json(
+                run_dir=run_paths.run_dir,
+                input_jsonl=jsonl_path,
+                output_json=out_json,
+                metrics_registry=metrics_registry,
+            )
+        else:
+            out_csv = args.out or (csv_dir / "Games_Enriched.csv")
+            export_enriched_csv(
+                run_dir=run_paths.run_dir,
+                input_jsonl=jsonl_path,
+                output_csv=out_csv,
+                metrics_registry=metrics_registry,
+            )
+        return
+
+    if kind == "provider":
+        provider = str(args.provider or "").strip().lower()
+        if not provider:
+            raise SystemExit("--provider is required when --kind=provider")
+        jsonl_path = args.jsonl or (output_dir / "jsonl" / f"Provider_{provider}.jsonl")
+        if fmt == "jsonl":
+            out_jsonl = args.out or (json_dir / f"Provider_{provider}.jsonl")
+            export_provider_jsonl_view(
+                run_dir=run_paths.run_dir,
+                provider=provider,
+                input_jsonl=jsonl_path,
+                output_jsonl=out_jsonl,
+                metrics_registry=metrics_registry,
+            )
+        elif fmt == "json":
+            out_json = args.out or (json_dir / f"Provider_{provider}.json")
+            export_provider_json(
+                run_dir=run_paths.run_dir,
+                provider=provider,
+                input_jsonl=jsonl_path,
+                output_json=out_json,
+                metrics_registry=metrics_registry,
+            )
+        else:
+            out_csv = args.out or (csv_dir / f"Provider_{provider}.csv")
+            export_provider_csv(
+                run_dir=run_paths.run_dir,
+                provider=provider,
+                input_jsonl=jsonl_path,
+                output_csv=out_csv,
+                metrics_registry=metrics_registry,
+            )
+        return
+
+    raise SystemExit(f"Unknown export kind: {kind}")
+
+
 def _command_validate(args: argparse.Namespace) -> None:
+    from .metrics.jsonl import (
+        jsonl_rows_to_registered_dataframe,
+        load_jsonl_strict,
+        validate_jsonl_rows_against_registry,
+    )
+    from .pipelines.helpers import resolve_metrics_registry
     project_root, _paths = _common_paths()
     run_paths = _prepare_run_paths(
         project_root=project_root,
@@ -334,15 +460,38 @@ def _command_validate(args: argparse.Namespace) -> None:
     output_dir = args.output_dir or run_paths.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     out = args.out or (output_dir / "Validation_Report.csv")
+
+    # Prefer internal typed JSONL so validation doesn't parse list/dict data back from CSV.
+    registry = resolve_metrics_registry(run_dir=run_paths.run_dir, override=None)
+
+    enriched_jsonl = output_dir / "jsonl" / "Games_Enriched.jsonl"
+    enriched_csv = output_dir / "Games_Enriched.csv"
     if args.enriched:
-        enriched = read_csv(args.enriched)
+        p = Path(args.enriched)
+        if p.suffix.lower() == ".jsonl":
+            enriched_jsonl = p
+        else:
+            enriched_csv = p
+
+    if enriched_jsonl.exists():
+        rows = load_jsonl_strict(enriched_jsonl)
+        validate_jsonl_rows_against_registry(rows, registry=registry, context=f"validate {enriched_jsonl.name}")
+        enriched = jsonl_rows_to_registered_dataframe(
+            rows,
+            registry=registry,
+            include_personal=True,
+            include_pins=True,
+            include_diagnostics=False,
+        )
     else:
-        enriched_path = output_dir / "Games_Enriched.csv"
-        if not enriched_path.exists():
-            raise SystemExit(
-                f"Missing {enriched_path}; run `enrich` first or pass --enriched explicitly"
-            )
-        enriched = read_csv(enriched_path)
+        if not enriched_csv.exists():
+            raise SystemExit(f"Missing {enriched_csv}; run `enrich` first or pass --enriched explicitly")
+        logging.warning(
+            "Validation is using CSV-only input; list/dict signals (dev/pub/platforms) will be weaker. "
+            f"To enable full validation, generate JSONL via `enrich` and use {enriched_jsonl}."
+        )
+        enriched = read_csv(enriched_csv)
+
     report = generate_validation_report(enriched)
     write_csv(report, out)
     logging.info(f"✔ Validation report generated: {out}")
@@ -385,15 +534,13 @@ def _command_collect_production_tiers(args: argparse.Namespace) -> None:
         input_path=args.enriched,
         allow_cache_override=False,
     )
-    _setup_logging_from_args(
-        run_paths, args.log_file, args.debug, command_name="collect-production-tiers"
-    )
+    _setup_logging_from_args(run_paths, args.log_file, args.debug, command_name="collect-production-tiers")
 
     out = args.out or (run_paths.run_dir / "production_tiers.yaml")
     base = args.base or out
     out.parent.mkdir(parents=True, exist_ok=True)
     res = collect_production_tiers_yaml(
-        enriched_csv=args.enriched,
+        enriched_jsonl=args.enriched,
         out_yaml=out,
         base_yaml=base,
         min_count=args.min_count,
@@ -420,9 +567,7 @@ def _command_normalize_production_tiers(args: argparse.Namespace) -> None:
         input_path=args.in_yaml,
         allow_cache_override=False,
     )
-    _setup_logging_from_args(
-        run_paths, args.log_file, args.debug, command_name="normalize-production-tiers"
-    )
+    _setup_logging_from_args(run_paths, args.log_file, args.debug, command_name="normalize-production-tiers")
 
     res = normalize_production_tiers_yaml(in_yaml=args.in_yaml, out_yaml=args.out)
     logging.info(
@@ -433,6 +578,31 @@ def _command_normalize_production_tiers(args: argparse.Namespace) -> None:
         f"developers={res.developers_in}->{res.developers_out} "
         f"merged={res.developers_merged} conflicts={res.developers_conflicts})"
     )
+
+
+def _command_metrics_registry(args: argparse.Namespace) -> None:
+    project_root, _paths = _common_paths()
+    run_paths = _prepare_run_paths(
+        project_root=project_root,
+        args=args,
+        input_path=getattr(args, "csv", None),
+        allow_cache_override=False,
+    )
+    _setup_logging_from_args(run_paths, args.log_file, args.debug, command_name="metrics-registry")
+
+    registry = args.registry
+    if registry is None:
+        from .metrics.registry import default_metrics_registry_path
+
+        registry = default_metrics_registry_path(run_dir=run_paths.run_dir)
+
+    csv_path = args.csv
+    if csv_path is None:
+        csv_path = run_paths.output_dir / "Games_Enriched.csv"
+    if not csv_path.exists():
+        raise SystemExit(f"Missing CSV to check: {csv_path}")
+
+    check_metrics_registry(registry_yaml=registry, csv_path=csv_path)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -451,10 +621,7 @@ def main(argv: list[str] | None = None) -> None:
     p_common_paths.add_argument(
         "--run-dir",
         type=Path,
-        help=(
-            "Run directory containing input/output/cache/logs "
-            "(default: infer from input, else ./data)"
-        ),
+        help=("Run directory containing input/output/cache/logs (default: infer from input, else ./data)"),
     )
     p_common_paths.add_argument(
         "--logs-dir",
@@ -495,8 +662,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Include match diagnostics columns in the output (default: true)",
     )
     p_import.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
+        "--no-jsonl",
+        action="store_true",
+        help="Do not write internal JSONL next to the output catalog CSV (default: false)",
     )
+    p_import.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
     p_import.set_defaults(_fn=_command_normalize)
 
     p_resolve = sub.add_parser(
@@ -536,24 +706,24 @@ def main(argv: list[str] | None = None) -> None:
         "--retry-missing",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help=(
-            "Also attempt to fill missing provider IDs when a strict consensus exists "
-            "(default: false)"
-        ),
+        help=("Also attempt to fill missing provider IDs when a strict consensus exists (default: false)"),
+    )
+    p_resolve.add_argument(
+        "--no-jsonl",
+        action="store_true",
+        help="Do not read/write internal JSONL for resolve (operate from CSV only) (default: false)",
     )
     p_resolve.add_argument(
         "--log-file",
         type=Path,
         help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
     )
-    p_resolve.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-    )
+    p_resolve.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
     p_resolve.set_defaults(_fn=_command_resolve)
 
     p_enrich = sub.add_parser(
         "enrich",
-        help="Generate provider outputs + Games_Enriched.csv from Games_Catalog.csv",
+        help="Generate provider outputs + internal JSONL from Games_Catalog.csv",
         parents=[p_common_paths],
     )
     p_enrich.add_argument("input", type=Path, help="Catalog CSV (source of truth)")
@@ -563,6 +733,19 @@ def main(argv: list[str] | None = None) -> None:
         "--credentials", type=Path, help="Credentials YAML (default: data/credentials.yaml)"
     )
     p_enrich.add_argument("--source", type=str, default="all")
+    p_enrich.add_argument(
+        "--no-jsonl",
+        action="store_true",
+        help="Do not read/write internal JSONL for enrich (operate from CSV only) (default: false)",
+    )
+    p_enrich.add_argument(
+        "--reuse-jsonl",
+        action="store_true",
+        help=(
+            "Reuse existing provider JSONL under <output>/jsonl to skip provider calls when possible "
+            "(default: false)"
+        ),
+    )
     p_enrich.add_argument(
         "--clean-output",
         action=argparse.BooleanOptionalAction,
@@ -574,23 +757,94 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         help="Output file for merged results (default: data/output/Games_Enriched.csv)",
     )
-    p_enrich.add_argument(
-        "--validate", action="store_true", help="Generate validation report (default: off)"
-    )
+    p_enrich.add_argument("--validate", action="store_true", help="Generate validation report (default: off)")
     p_enrich.add_argument(
         "--validate-output",
         type=Path,
         help="Output file for validation report (default: data/output/Validation_Report.csv)",
     )
     p_enrich.add_argument(
+        "--write-csv",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Write final CSV outputs (Games_Enriched.csv + Provider_*.csv). "
+            "Prefer using `export` for user-facing CSV/JSON views (default: false)"
+        ),
+    )
+    p_enrich.add_argument(
+        "--write-jsonl",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write internal JSONL + manifests under <output>/jsonl (default: true)",
+    )
+    p_enrich.add_argument(
+        "--metrics-registry",
+        type=Path,
+        help="Metrics registry YAML (default: <run-dir>/metrics-registry.yaml, else example)",
+    )
+    p_enrich.add_argument(
+        "--export-json",
+        action="store_true",
+        help=(
+            "Also export user-friendly JSON (default: off; internal JSONL is written when registry is"
+            " available)"
+        ),
+    )
+    p_enrich.add_argument(
+        "--all-metrics",
+        action="store_true",
+        help="Include all provider/derived columns even if not mapped in the metrics registry (default: off)",
+    )
+    p_enrich.add_argument(
         "--log-file",
         type=Path,
         help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
     )
-    p_enrich.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-    )
+    p_enrich.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
     p_enrich.set_defaults(_fn=_command_enrich)
+
+    p_export = sub.add_parser(
+        "export",
+        help="Export CSV views from internal JSONL outputs",
+        parents=[p_common_paths],
+    )
+    p_export.add_argument(
+        "--kind",
+        type=str,
+        default="enriched",
+        help="Export kind: enriched|provider (default: enriched)",
+    )
+    p_export.add_argument(
+        "--provider",
+        type=str,
+        help="Provider name for --kind=provider (rawg|igdb|steam|steamspy|hltb|wikidata)",
+    )
+    p_export.add_argument(
+        "--jsonl",
+        type=Path,
+        help="Input JSONL path (default: data/output/jsonl/<...>.jsonl)",
+    )
+    p_export.add_argument(
+        "--format",
+        type=str,
+        default="csv",
+        help="Export format: csv|json|jsonl (default: csv)",
+    )
+    p_export.add_argument("--out", type=Path, help="Output path (CSV or JSON)")
+    p_export.add_argument("--output", type=Path, help="Output directory (default: data/output)")
+    p_export.add_argument(
+        "--metrics-registry",
+        type=Path,
+        help="Metrics registry YAML (default: <run-dir>/metrics-registry.yaml, else example)",
+    )
+    p_export.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_export.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
+    p_export.set_defaults(_fn=_command_export)
 
     p_sync = sub.add_parser(
         "sync",
@@ -666,20 +920,18 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
     )
-    p_review.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-    )
+    p_review.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
     p_review.set_defaults(_fn=_command_review)
 
     p_tiers = sub.add_parser(
         "collect-production-tiers",
-        help="Collect publisher/developer tiers candidates from an enriched CSV into a YAML file",
+        help="Collect publisher/developer tiers candidates from an enriched JSONL into a YAML file",
         parents=[p_common_paths],
     )
     p_tiers.add_argument(
         "enriched",
         type=Path,
-        help="Enriched CSV (must contain at least one provider *_Publishers/_Developers column)",
+        help="Enriched JSONL (data/output/jsonl/Games_Enriched.jsonl)",
     )
     p_tiers.add_argument(
         "--out",
@@ -720,9 +972,7 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
     )
-    p_tiers.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-    )
+    p_tiers.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
     p_tiers.set_defaults(_fn=_command_collect_production_tiers)
 
     p_tiers_norm = sub.add_parser(
@@ -742,10 +992,31 @@ def main(argv: list[str] | None = None) -> None:
         type=Path,
         help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
     )
-    p_tiers_norm.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG logging (default: INFO)"
-    )
+    p_tiers_norm.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
     p_tiers_norm.set_defaults(_fn=_command_normalize_production_tiers)
+
+    p_metrics = sub.add_parser(
+        "metrics-registry",
+        help="Check a metrics registry against a CSV header (informational)",
+        parents=[p_common_paths],
+    )
+    p_metrics.add_argument(
+        "--registry",
+        type=Path,
+        help=("Metrics registry YAML to check (default: <run-dir>/metrics-registry.yaml, else example)"),
+    )
+    p_metrics.add_argument(
+        "--csv",
+        type=Path,
+        help="CSV path to check (default: <run-dir>/output/Games_Enriched.csv)",
+    )
+    p_metrics.add_argument(
+        "--log-file",
+        type=Path,
+        help="Log file path (default: data/logs/log-<timestamp>-<command>.log)",
+    )
+    p_metrics.add_argument("--debug", action="store_true", help="Enable DEBUG logging (default: INFO)")
+    p_metrics.set_defaults(_fn=_command_metrics_registry)
 
     ns = parser.parse_args(argv)
     ns._fn(ns)

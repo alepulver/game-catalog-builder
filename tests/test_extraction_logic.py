@@ -3,14 +3,18 @@ from __future__ import annotations
 import json
 
 
-def test_rawg_extract_fields_fixture():
+def test_rawg_extract_metrics_fixture():
     from game_catalog_builder.clients.rawg_client import RAWGClient
 
     rawg_obj = {
         "id": 2454,
         "name": "DOOM (2016)",
+        "name_original": "DOOM",
         "released": "2016-05-13",
         "website": "https://slayersclub.bethesda.net/",
+        "reddit_url": "https://www.reddit.com/r/doom/",
+        "metacritic_url": "https://www.metacritic.com/game/pc/doom/",
+        "background_image": "https://example.com/bg.jpg",
         "description_raw": "A long description " * 100,
         "genres": [{"name": "Action"}, {"name": "Shooter"}],
         "esrb_rating": {"name": "Mature"},
@@ -31,30 +35,33 @@ def test_rawg_extract_fields_fixture():
         },
     }
 
-    fields = RAWGClient.extract_fields(rawg_obj)
-    assert fields["RAWG_ID"] == "2454"
-    assert fields["RAWG_Name"] == "DOOM (2016)"
-    assert fields["RAWG_Released"] == "2016-05-13"
-    assert fields["RAWG_Year"] == "2016"
-    assert fields["RAWG_Website"] == "https://slayersclub.bethesda.net/"
-    assert fields["RAWG_DescriptionRaw"].endswith("…")
-    assert fields["RAWG_Genre"] == "Action"
-    assert fields["RAWG_Genre2"] == "Shooter"
-    assert fields["RAWG_Genres"] == "Action, Shooter"
-    assert fields["RAWG_ESRB"] == "Mature"
-    assert fields["RAWG_Platforms"] == "PC, PlayStation 4"
-    assert fields["RAWG_Tags"] == "Singleplayer, Atmospheric"
-    assert fields["RAWG_Rating"] == "4.2"
-    assert fields["RAWG_RatingsCount"] == "1234"
-    assert fields["RAWG_Metacritic"] == "85"
-    assert fields["RAWG_Added"] == "999"
-    assert fields["RAWG_AddedByStatusOwned"] == "500"
-    assert fields["RAWG_AddedByStatusPlaying"] == "10"
-    assert fields["RAWG_AddedByStatusBeaten"] == "100"
-    assert fields["RAWG_AddedByStatusToplay"] == "250"
-    assert fields["RAWG_AddedByStatusDropped"] == "5"
-    assert fields["RAWG_Developers"] == json.dumps(["id Software"], ensure_ascii=False)
-    assert fields["RAWG_Publishers"] == json.dumps(["Bethesda Softworks"], ensure_ascii=False)
+    m = RAWGClient.extract_metrics(rawg_obj)
+    assert m["rawg.id"] == "2454"
+    assert m["rawg.name"] == "DOOM (2016)"
+    assert m["rawg.name_original"] == "DOOM"
+    assert m["rawg.released"] == "2016-05-13"
+    assert m["rawg.year"] == 2016
+    assert m["rawg.website"] == "https://slayersclub.bethesda.net/"
+    desc = m["rawg.description_raw"]
+    assert isinstance(desc, str)
+    assert desc.endswith("…")
+    assert m["rawg.reddit_url"] == "https://www.reddit.com/r/doom/"
+    assert m["rawg.metacritic_url"] == "https://www.metacritic.com/game/pc/doom/"
+    assert m["rawg.background_image"] == "https://example.com/bg.jpg"
+    assert m["rawg.genres"] == ["Action", "Shooter"]
+    assert m["rawg.esrb"] == "Mature"
+    assert m["rawg.platforms"] == ["PC", "PlayStation 4"]
+    assert m["rawg.tags"] == ["Singleplayer", "Atmospheric"]
+    assert m["rawg.ratings_count"] == 1234
+    assert m["rawg.metacritic_100"] == 85
+    assert m["rawg.popularity.added_total"] == 999
+    assert m["rawg.popularity.added_by_status.owned"] == 500
+    assert m["rawg.popularity.added_by_status.playing"] == 10
+    assert m["rawg.popularity.added_by_status.beaten"] == 100
+    assert m["rawg.popularity.added_by_status.toplay"] == 250
+    assert m["rawg.popularity.added_by_status.dropped"] == 5
+    assert m["rawg.developers"] == ["id Software"]
+    assert m["rawg.publishers"] == ["Bethesda Softworks"]
 
 
 def test_rawg_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
@@ -87,7 +94,7 @@ def test_rawg_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
     assert calls["rawg"] == 1
 
 
-def test_steam_extract_fields_fixture():
+def test_steam_extract_metrics_fixture():
     from game_catalog_builder.clients.steam_client import SteamClient
 
     details = {
@@ -101,17 +108,19 @@ def test_steam_extract_fields_fixture():
         "recommendations": {"total": 999},
     }
 
-    fields = SteamClient.extract_fields(123, details)
-    assert fields["Steam_AppID"] == "123"
-    assert fields["Steam_Name"] == "Example Game"
-    assert fields["Steam_URL"].endswith("/123/")
-    assert fields["Steam_StoreType"] == "game"
-    assert fields["Steam_ReleaseYear"] == "2016"
-    assert fields["Steam_Platforms"] == "Windows, Linux"
-    assert fields["Steam_Tags"] == "Action, Shooter"
-    assert fields["Steam_ReviewCount"] == "999"
-    assert fields["Steam_Price"] == "Free"
-    assert fields["Steam_Categories"] == "Single-player, Steam Achievements"
+    m = SteamClient.extract_metrics(123, details)
+    assert m["steam.app_id"] == "123"
+    assert m["steam.name"] == "Example Game"
+    url = m["steam.url"]
+    assert isinstance(url, str)
+    assert url.endswith("/123/")
+    assert m["steam.store_type"] == "game"
+    assert m["steam.release_year"] == 2016
+    assert m["steam.platforms"] == ["Windows", "Linux"]
+    assert m["steam.tags"] == ["Action", "Shooter"]
+    assert m["steam.review_count"] == 999
+    assert m["steam.price"] == "Free"
+    assert m["steam.categories"] == ["Single-player", "Steam Achievements"]
 
 
 def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
@@ -130,9 +139,7 @@ def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
             def json(self):
                 if "appdetails" in url:
                     calls["appdetails"] += 1
-                    return {
-                        "123": {"success": True, "data": {"name": "Example Game", "is_free": True}}
-                    }
+                    return {"123": {"success": True, "data": {"name": "Example Game", "is_free": True}}}
                 raise AssertionError(f"unexpected url {url}")
 
         return Resp()
@@ -142,6 +149,8 @@ def test_steam_details_are_cached_by_appid(tmp_path, monkeypatch):
     client = SteamClient(cache_path=tmp_path / "steam_cache.json", min_interval_s=0.0)
     d1 = client.get_app_details(123)
     d2 = client.get_app_details(123)
+    assert d1 is not None
+    assert d2 is not None
     assert d1["name"] == "Example Game"
     assert d2["name"] == "Example Game"
     assert calls["appdetails"] == 1
@@ -161,6 +170,12 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
                     "players_forever": 1234,
                     "ccu": 12,
                     "average_forever": 56,
+                    "median_forever": 12,
+                    "price": 999,
+                    "initialprice": 1999,
+                    "discount": 50,
+                    "developer": "Example Dev",
+                    "publisher": "Example Pub",
                 }
 
         return Resp()
@@ -169,20 +184,26 @@ def test_steamspy_fetch_extracts_expected_fields(tmp_path, monkeypatch):
 
     client = SteamSpyClient(cache_path=tmp_path / "steamspy_cache.json", min_interval_s=0.0)
     data = client.fetch(999)
+    assert data is not None
     assert data == {
-        "SteamSpy_Owners": "10,000 .. 20,000",
-        "SteamSpy_Players": "1234",
-        "SteamSpy_Players2Weeks": "",
-        "SteamSpy_CCU": "12",
-        "SteamSpy_PlaytimeAvg": "56",
-        "SteamSpy_PlaytimeAvg2Weeks": "",
-        "SteamSpy_PlaytimeMedian2Weeks": "",
-        "SteamSpy_Positive": "",
-        "SteamSpy_Negative": "",
-        "SteamSpy_PositiveRate": "",
-        "Score_SteamSpy_100": "",
-        "SteamSpy_Tags": "",
-        "SteamSpy_TagsTop": "",
+        "steamspy.owners": "10,000 .. 20,000",
+        "steamspy.players": 1234,
+        "steamspy.players_2weeks": None,
+        "steamspy.ccu": 12,
+        "steamspy.playtime_avg": 56,
+        "steamspy.playtime_avg_2weeks": None,
+        "steamspy.playtime_median_2weeks": None,
+        "steamspy.playtime_median": 12,
+        "steamspy.positive": None,
+        "steamspy.negative": None,
+        "steamspy.score_100": None,
+        "steamspy.price": 999,
+        "steamspy.initial_price": 1999,
+        "steamspy.discount_percent": 50,
+        "steamspy.developer": "Example Dev",
+        "steamspy.publisher": "Example Pub",
+        "steamspy.popularity.tags": [],
+        "steamspy.popularity.tags_top": [],
     }
 
     client._cache_io.flush()
@@ -211,8 +232,8 @@ def test_steamspy_extracts_tag_cloud(tmp_path, monkeypatch):
     client = SteamSpyClient(cache_path=tmp_path / "steamspy_cache.json", min_interval_s=0.0)
     data = client.fetch(111)
     assert data is not None
-    assert data["SteamSpy_Tags"].startswith("Roguelike")
-    assert data["SteamSpy_TagsTop"].startswith("[[")
+    assert data["steamspy.popularity.tags"][0] == "Roguelike"
+    assert data["steamspy.popularity.tags_top"][0][0] == "Roguelike"
 
 
 def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatch):
@@ -232,6 +253,7 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
                 "name": "Doom",
                 "first_release_date": 1463097600,
                 "summary": "Rip and tear until it is done.",
+                "alternative_names": [{"name": "DOOM"}],
                 "websites": [
                     {"url": "https://slayersclub.bethesda.net/"},
                     {"url": "https://doom.com/"},
@@ -239,6 +261,7 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
                 "platforms": [{"name": "PC (Microsoft Windows)"}],
                 "genres": [{"name": "Shooter"}],
                 "themes": [{"name": "Action"}],
+                "keywords": [{"name": "gore"}],
                 "game_modes": [{"name": "Single player"}],
                 "player_perspectives": [{"name": "First person"}],
                 "franchises": [{"name": "Doom"}],
@@ -271,27 +294,30 @@ def test_igdb_expanded_single_call_extracts_expected_fields(tmp_path, monkeypatc
     monkeypatch.setattr(client, "_post", fake_post)
 
     enriched = client.search("Doom (2016)")
+    assert enriched is not None
     assert calls == ["games"]
-    assert enriched["IGDB_ID"] == "7351"
-    assert enriched["IGDB_Name"] == "Doom"
-    assert enriched["IGDB_Year"] == "2016"
-    assert enriched["IGDB_Summary"] == "Rip and tear until it is done."
-    assert "https://slayersclub.bethesda.net/" in enriched["IGDB_Websites"]
-    assert enriched["IGDB_Platforms"] == "PC (Microsoft Windows)"
-    assert enriched["IGDB_Genres"] == "Shooter"
-    assert enriched["IGDB_Themes"] == "Action"
-    assert enriched["IGDB_GameModes"] == "Single player"
-    assert enriched["IGDB_Perspectives"] == "First person"
-    assert enriched["IGDB_Franchise"] == "Doom"
-    assert enriched["IGDB_Engine"] == "id Tech 6"
-    assert enriched["IGDB_ParentGame"] == "Doom"
-    assert enriched["IGDB_VersionParent"] == "Doom"
-    assert enriched["IGDB_DLCs"] == "Doom - DLC Pack"
-    assert enriched["IGDB_Expansions"] == "Doom: Expansion"
-    assert enriched["IGDB_Ports"] == "Doom (Switch)"
-    assert enriched["IGDB_SteamAppID"] == "379720"
-    assert enriched["IGDB_Developers"] == json.dumps(["id Software"], ensure_ascii=False)
-    assert enriched["IGDB_Publishers"] == json.dumps(["Bethesda Softworks"], ensure_ascii=False)
+    assert enriched["igdb.id"] == "7351"
+    assert enriched["igdb.name"] == "Doom"
+    assert enriched["igdb.year"] == 2016
+    assert enriched["igdb.summary"] == "Rip and tear until it is done."
+    assert "https://slayersclub.bethesda.net/" in enriched["igdb.websites"]
+    assert enriched["igdb.alternative_names"] == ["DOOM"]
+    assert enriched["igdb.platforms"] == ["PC (Microsoft Windows)"]
+    assert enriched["igdb.genres"] == ["Shooter"]
+    assert enriched["igdb.themes"] == ["Action"]
+    assert enriched["igdb.keywords"] == ["gore"]
+    assert enriched["igdb.game_modes"] == ["Single player"]
+    assert enriched["igdb.perspectives"] == ["First person"]
+    assert enriched["igdb.franchise"] == ["Doom"]
+    assert enriched["igdb.engine"] == ["id Tech 6"]
+    assert enriched["igdb.relationships.parent_game"] == "Doom"
+    assert enriched["igdb.relationships.version_parent"] == "Doom"
+    assert enriched["igdb.relationships.dlcs"] == ["Doom - DLC Pack"]
+    assert enriched["igdb.relationships.expansions"] == ["Doom: Expansion"]
+    assert enriched["igdb.relationships.ports"] == ["Doom (Switch)"]
+    assert enriched["igdb.cross_ids.steam_app_id"] == "379720"
+    assert enriched["igdb.developers"] == ["id Software"]
+    assert enriched["igdb.publishers"] == ["Bethesda Softworks"]
 
 
 def test_igdb_similarity_threshold_negative_cache(tmp_path, monkeypatch):
@@ -321,7 +347,7 @@ def test_igdb_similarity_threshold_negative_cache(tmp_path, monkeypatch):
     assert calls["games"] == 1
 
 
-def test_wikidata_extract_fields_fixture(tmp_path) -> None:
+def test_wikidata_extract_metrics_fixture(tmp_path) -> None:
     from game_catalog_builder.clients.wikidata_client import WikidataClient
 
     client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
@@ -348,20 +374,22 @@ def test_wikidata_extract_fields_fixture(tmp_path) -> None:
         "sitelinks": {"enwiki": {"title": "Doom (1993 video game)"}},
     }
 
-    fields = client._extract_fields(entity)
-    assert fields["Wikidata_QID"] == "Q123"
-    assert fields["Wikidata_Label"] == "Doom"
-    assert fields["Wikidata_Description"] == "1993 video game"
-    assert fields["Wikidata_ReleaseYear"] == "1993"
-    assert fields["Wikidata_Developers"] == '["id Software"]'
-    assert fields["Wikidata_Publishers"] == '["GT Interactive"]'
-    assert fields["Wikidata_Platforms"] == "PC (MS-DOS)"
-    assert fields["Wikidata_Series"] == "Doom"
-    assert fields["Wikidata_Genres"] == "first-person shooter"
-    assert fields["Wikidata_Wikipedia"].endswith("/Doom_(1993_video_game)")
+    m = client._extract_metrics(entity)
+    assert m["wikidata.qid"] == "Q123"
+    assert m["wikidata.label"] == "Doom"
+    assert m["wikidata.description"] == "1993 video game"
+    assert m["wikidata.release_year"] == 1993
+    assert m["wikidata.developers"] == ["id Software"]
+    assert m["wikidata.publishers"] == ["GT Interactive"]
+    assert m["wikidata.platforms"] == ["PC (MS-DOS)"]
+    assert m["wikidata.series"] == ["Doom"]
+    assert m["wikidata.genres"] == ["first-person shooter"]
+    wiki = m["wikidata.wikipedia"]
+    assert isinstance(wiki, str)
+    assert wiki.endswith("/Doom_(1993_video_game)")
 
 
-def test_wikidata_extract_fields_falls_back_to_non_en_label(tmp_path) -> None:
+def test_wikidata_extract_metrics_falls_back_to_non_en_label(tmp_path) -> None:
     from game_catalog_builder.clients.wikidata_client import WikidataClient
 
     client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
@@ -372,12 +400,12 @@ def test_wikidata_extract_fields_falls_back_to_non_en_label(tmp_path) -> None:
         "claims": {},
         "sitelinks": {},
     }
-    fields = client._extract_fields(entity)
-    assert fields["Wikidata_Label"] == "Example Label"
-    assert fields["Wikidata_Description"] == "Example description"
+    m = client._extract_metrics(entity)
+    assert m["wikidata.label"] == "Example Label"
+    assert m["wikidata.description"] == "Example description"
 
 
-def test_wikidata_extract_fields_falls_back_to_enwiki_title(tmp_path) -> None:
+def test_wikidata_extract_metrics_falls_back_to_enwiki_title(tmp_path) -> None:
     from game_catalog_builder.clients.wikidata_client import WikidataClient
 
     client = WikidataClient(cache_path=tmp_path / "wikidata_cache.json", min_interval_s=0.0)
@@ -388,8 +416,8 @@ def test_wikidata_extract_fields_falls_back_to_enwiki_title(tmp_path) -> None:
         "claims": {},
         "sitelinks": {"enwiki": {"title": "Left 4 Dead"}},
     }
-    fields = client._extract_fields(entity)
-    assert fields["Wikidata_Label"] == "Left 4 Dead"
+    m = client._extract_metrics(entity)
+    assert m["wikidata.label"] == "Left 4 Dead"
 
 
 def test_hltb_caches_by_id_or_name_fallback(tmp_path):
@@ -422,8 +450,10 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
 
     data1 = client.search("Example Game")
     data2 = client.search("Example Game")
+    assert data1 is not None
+    assert data2 is not None
     assert data1 == data2
-    assert data1["HLTB_Name"] == "Example Game"
+    assert data1["hltb.name"] == "Example Game"
     assert fake.calls == 1
 
     client._cache_io.flush()
@@ -436,6 +466,7 @@ def test_hltb_caches_by_id_or_name_fallback(tmp_path):
 def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
     import csv
 
+    from game_catalog_builder.metrics.registry import load_metrics_registry
     from game_catalog_builder.pipelines.enrich_pipeline import process_steam_and_steamspy_streaming
 
     input_csv = tmp_path / "in.csv"
@@ -502,12 +533,52 @@ def test_steam_to_steamspy_pipeline_streaming(tmp_path, monkeypatch):
 
     monkeypatch.setattr("requests.sessions.Session.get", fake_get)
 
+    (tmp_path / "metrics.yaml").write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "metrics:",
+                "  steam.app_id: { column: Steam_AppID, type: string }",
+                "  steam.name: { column: Steam_Name, type: string }",
+                "  steam.url: { column: Steam_URL, type: string }",
+                "  steam.website: { column: Steam_Website, type: string }",
+                "  steam.short_description: { column: Steam_ShortDescription, type: string }",
+                "  steam.store_type: { column: Steam_StoreType, type: string }",
+                "  steam.release_year: { column: Steam_ReleaseYear, type: string }",
+                "  steam.platforms: { column: Steam_Platforms, type: json }",
+                "  steam.tags: { column: Steam_Tags, type: json }",
+                "  steam.review_count: { column: Steam_ReviewCount, type: string }",
+                "  steam.price: { column: Steam_Price, type: string }",
+                "  steam.categories: { column: Steam_Categories, type: json }",
+                "  steam.metacritic_100: { column: Steam_Metacritic, type: string }",
+                "  steam.developers: { column: Steam_Developers, type: json }",
+                "  steam.publishers: { column: Steam_Publishers, type: json }",
+                "  steamspy.owners: { column: SteamSpy_Owners, type: string }",
+                "  steamspy.players: { column: SteamSpy_Players, type: string }",
+                "  steamspy.players_2weeks: { column: SteamSpy_Players2Weeks, type: string }",
+                "  steamspy.ccu: { column: SteamSpy_CCU, type: string }",
+                "  steamspy.playtime_avg: { column: SteamSpy_PlaytimeAvg, type: string }",
+                "  steamspy.playtime_avg_2weeks: { column: SteamSpy_PlaytimeAvg2Weeks, type: string }",
+                "  steamspy.playtime_median_2weeks: { column: SteamSpy_PlaytimeMedian2Weeks, type: string }",
+                "  steamspy.positive: { column: SteamSpy_Positive, type: string }",
+                "  steamspy.negative: { column: SteamSpy_Negative, type: string }",
+                "  steamspy.popularity.tags: { column: SteamSpy_Tags, type: json }",
+                "  steamspy.popularity.tags_top: { column: SteamSpy_TagsTop, type: string }",
+                "  steamspy.score_100: { column: SteamSpy_Score_100, type: string }",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = load_metrics_registry(tmp_path / "metrics.yaml")
+
     process_steam_and_steamspy_streaming(
         input_csv=input_csv,
         steam_output_csv=steam_out,
         steamspy_output_csv=steamspy_out,
         steam_cache_path=tmp_path / "steam_cache.json",
         steamspy_cache_path=tmp_path / "steamspy_cache.json",
+        registry=registry,
     )
 
     with steam_out.open(newline="", encoding="utf-8") as f:

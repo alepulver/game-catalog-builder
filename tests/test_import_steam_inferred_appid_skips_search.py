@@ -15,10 +15,10 @@ def test_import_inferred_steam_appid_does_not_overwrite_with_name_search(tmp_pat
 
         def get_by_id(self, _igdb_id: str):
             return {
-                "IGDB_ID": "123",
-                "IGDB_Name": "Half-Life 2: Episode One",
-                "IGDB_SteamAppID": "380",
-                "IGDB_Year": "2006",
+                "igdb.id": "123",
+                "igdb.name": "Half-Life 2: Episode One",
+                "igdb.cross_ids.steam_app_id": "380",
+                "igdb.year": "2006",
             }
 
         def search(self, *_args, **_kwargs):
@@ -36,9 +36,7 @@ def test_import_inferred_steam_appid_does_not_overwrite_with_name_search(tmp_pat
             return {"name": "Half-Life 2: Episode One", "type": "game"}
 
         def search_appid(self, *_args, **_kwargs):
-            raise AssertionError(
-                "name-based Steam search should be skipped when inferred ID exists"
-            )
+            raise AssertionError("name-based Steam search should be skipped when inferred ID exists")
 
         def format_cache_stats(self) -> str:
             return "by_query hit=0 fetch=0 (neg hit=0 fetch=0), by_id hit=0 fetch=0"
@@ -55,9 +53,7 @@ def test_import_inferred_steam_appid_does_not_overwrite_with_name_search(tmp_pat
     output_csv = tmp_path / "Games_Catalog.csv"
     log_file = tmp_path / "log.txt"
 
-    pd.DataFrame([{"Name": "Half-Life 2: Episode One", "IGDB_ID": "123"}]).to_csv(
-        input_csv, index=False
-    )
+    pd.DataFrame([{"Name": "Half-Life 2: Episode One", "IGDB_ID": "123"}]).to_csv(input_csv, index=False)
 
     args = argparse.Namespace(
         input=input_csv,

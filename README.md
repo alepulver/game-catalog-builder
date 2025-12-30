@@ -129,17 +129,38 @@ python run.py import path/to/exported_user_sheet.csv --out data/input/Games_Cata
 # (dry-run by default; pass --apply to persist changes)
 python run.py resolve --catalog data/input/Games_Catalog.csv --out data/input/Games_Catalog.csv --apply
 
-# 3) enrich: generate provider outputs + an editable enriched sheet (does not modify the catalog)
+# 3) enrich: generate internal JSONL outputs (does not modify the catalog)
 python run.py enrich data/input/Games_Catalog.csv --source all
 
-# 4) edit: open `data/output/Games_Enriched.csv` in Google Sheets / Excel and edit your user fields
+# 4) export: generate a user-facing spreadsheet view (CSV) from JSONL
+python run.py export --kind enriched --format csv --out data/output/Games_Enriched.csv
 
-# 5) sync: copy user-editable columns (and pinned provider IDs) back into the catalog by RowId
+# 5) edit: open `data/output/Games_Enriched.csv` in Google Sheets / Excel and edit your user fields
+
+# 6) sync: copy user-editable columns (and pinned provider IDs) back into the catalog by RowId
 python run.py sync data/input/Games_Catalog.csv data/output/Games_Enriched.csv
 
-# 6) enrich again (optional): regenerate public data after edits / pinned ID fixes
+# 7) enrich again (optional): regenerate public data after edits / pinned ID fixes
 python run.py enrich data/input/Games_Catalog.csv --source all
 ```
+
+#### Internal JSONL vs user-facing CSV
+
+- CSV files (`Games_Catalog.csv`, `Games_Enriched.csv`, `Provider_*.csv`) are **user-facing views**.
+- JSONL files (`*/jsonl/*.jsonl`) are the **typed internal representation** used by the code
+  (lists/dicts are preserved; no JSON is parsed from CSV cells).
+
+Options:
+
+- Memory-only mode (no JSONL read/write): add `--no-jsonl` to `import`, `enrich`, or `resolve`.
+- Fast re-run mode (enrich only): add `--reuse-jsonl` to reuse existing provider JSONLs under
+  `data/output/jsonl/` and skip provider calls when possible.
+  - If reuse fails due to an incompatible/old JSONL format, delete the referenced provider JSONL
+    (and its `.manifest.json`) and rerun without `--reuse-jsonl` once to regenerate.
+  - Partial reuse is supported: if a provider JSONL exists but is missing some RowIds, only the
+    missing rows are recomputed and the JSONL is rewritten.
+
+See `docs/metrics-registry.md` for how metric keys, the registry, and JSONL manifests work.
 
 Your original export does not need a `RowId` column. If it’s missing, `import` will generate stable
 RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must be unique.
@@ -163,6 +184,12 @@ RowIds in `Games_Catalog.csv`. If your export already includes `RowId`, it must 
 Import notes:
 - `import` emits warnings and diagnostics but does not auto-unpin pins.
 - `resolve` is the optional third pass that can repin-or-unpin likely-wrong pins (and conservatively retry repins).
+
+Enrich/export notes:
+- By default, `enrich` writes internal JSONL + manifests under `data/output/jsonl/` and does not write CSVs.
+- Use `export` to generate user-facing CSV/JSON/JSONL views.
+- Compatibility: `enrich --write-csv` restores the legacy behavior of writing `data/output/Games_Enriched.csv`
+  and `data/output/Provider_*.csv` directly.
 
 It refreshes match diagnostics by fetching the provider name for any pinned IDs. Evaluation columns
 are not carried into `Games_Enriched.csv`. `sync` writes back a clean catalog without evaluation
@@ -290,7 +317,7 @@ Provider caches are stored under `data/cache/`:
 - `by_id`: provider ID → raw provider payload.
 
 Enriched outputs also include unified provider score columns (0–100 where available):
-- `Score_RAWG_100`, `Score_IGDB_100`, `Score_SteamSpy_100`, `Score_HLTB_100`
+- `RAWG_Score_100`, `IGDB_Score_100`, `SteamSpy_Score_100`, `HLTB_Score_100`
 - Provider-specific Metacritic scores when available: `RAWG_Metacritic`, `Steam_Metacritic`
 
 If you delete a cache file under `data/cache/`, the tool will refetch it as needed.
@@ -348,11 +375,8 @@ The tool adds various columns to your CSV:
 ### RAWG Fields
 - `RAWG_ID`: RAWG game ID
 - `RAWG_Year`: Release year
-- `RAWG_Genre`: Primary genre
-- `RAWG_Genre2`: Secondary genre
 - `RAWG_Platforms`: Available platforms
 - `RAWG_Tags`: Game tags
-- `RAWG_Rating`: User rating
 - `RAWG_RatingsCount`: Number of ratings
 - `RAWG_Metacritic`: Metacritic score
 
@@ -386,6 +410,7 @@ python -m pip install -e ".[dev]"
 ```
 
 This installs the package in editable mode, allowing you to modify the code without reinstalling.
+The `dev` extra installs `pyright` with a bundled Node runtime (so it runs without `nodeenv`).
 
 ### Running Tests
 

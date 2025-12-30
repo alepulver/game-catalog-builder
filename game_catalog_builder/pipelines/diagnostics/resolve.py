@@ -6,10 +6,11 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..analysis.import_diagnostics import fill_eval_tags
-from ..utils import extract_year_hint, fuzzy_score
-from ..utils.consistency import compute_provider_consensus, compute_year_consensus
-from ..utils.utilities import IDENTITY_NOT_FOUND
+from ...metrics.registry import MetricsRegistry
+from ...utils import extract_year_hint, fuzzy_score
+from ...utils.consistency import compute_provider_consensus, compute_year_consensus
+from ...utils.utilities import IDENTITY_NOT_FOUND
+from .import_diagnostics import fill_eval_tags
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,33 @@ class ResolveStats:
     wikidata_hint_added: int
 
 
-def auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame, int, list[int]]:
+def _diag_col(registry: MetricsRegistry, key: str) -> str | None:
+    mapped = registry.diagnostic_column_for_key(key)
+    if mapped is None:
+        return None
+    col, _typ = mapped
+    return col
+
+
+def _diag_get(row: pd.Series, registry: MetricsRegistry, key: str) -> str:
+    col = _diag_col(registry, key)
+    if not col:
+        return ""
+    return str(row.get(col, "") or "").strip()
+
+
+def _diag_set(df: pd.DataFrame, idx: object, registry: MetricsRegistry, key: str, value: object) -> None:
+    col = _diag_col(registry, key)
+    if not col:
+        return
+    if col not in df.columns:
+        df[col] = ""
+    df.at[idx, col] = value
+
+
+def auto_unpin_likely_wrong_provider_ids(
+    df: pd.DataFrame, *, registry: MetricsRegistry
+) -> tuple[pd.DataFrame, int, list[int]]:
     """
     Clear provider IDs when the row already indicates a strict-majority consensus that the
     provider is the outlier and likely wrong.
@@ -38,19 +65,39 @@ def auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame
             "steam",
             "Steam_AppID",
             [
-                "Steam_MatchedName",
-                "Steam_MatchScore",
-                "Steam_MatchedYear",
-                "Steam_RejectedReason",
-                "Steam_StoreType",
+                "diagnostics.steam.matched_name",
+                "diagnostics.steam.match_score",
+                "diagnostics.steam.matched_year",
+                "diagnostics.steam.rejected_reason",
             ],
         ),
-        ("rawg", "RAWG_ID", ["RAWG_MatchedName", "RAWG_MatchScore", "RAWG_MatchedYear"]),
-        ("igdb", "IGDB_ID", ["IGDB_MatchedName", "IGDB_MatchScore", "IGDB_MatchedYear"]),
+        (
+            "rawg",
+            "RAWG_ID",
+            [
+                "diagnostics.rawg.matched_name",
+                "diagnostics.rawg.match_score",
+                "diagnostics.rawg.matched_year",
+            ],
+        ),
+        (
+            "igdb",
+            "IGDB_ID",
+            [
+                "diagnostics.igdb.matched_name",
+                "diagnostics.igdb.match_score",
+                "diagnostics.igdb.matched_year",
+            ],
+        ),
         (
             "hltb",
             "HLTB_ID",
-            ["HLTB_MatchedName", "HLTB_MatchScore", "HLTB_MatchedYear", "HLTB_MatchedPlatforms"],
+            [
+                "diagnostics.hltb.matched_name",
+                "diagnostics.hltb.match_score",
+                "diagnostics.hltb.matched_year",
+                "diagnostics.hltb.matched_platforms",
+            ],
         ),
     ]
 
@@ -58,7 +105,7 @@ def auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame
         rowid = str(row.get("RowId", "") or "").strip()
         if not rowid:
             continue
-        tags = str(row.get("ReviewTags", "") or "").strip()
+        tags = _diag_get(row, registry, "diagnostics.review.tags")
         if not tags:
             continue
         for prov, id_col, diag_cols in rules:
@@ -73,21 +120,26 @@ def auto_unpin_likely_wrong_provider_ids(df: pd.DataFrame) -> tuple[pd.DataFrame
                 continue
 
             out.at[idx, id_col] = ""
-            for c in diag_cols:
-                if c in out.columns:
-                    out.at[idx, c] = ""
+            for key in diag_cols:
+                _diag_set(out, idx, registry, key, "")
 
-            existing = (
-                str(out.at[idx, "ReviewTags"] or "").strip() if "ReviewTags" in out.columns else ""
-            )
+            existing = str(_diag_get(out.loc[idx], registry, "diagnostics.review.tags") or "").strip()
             if f"autounpinned:{prov}" not in existing:
-                out.at[idx, "ReviewTags"] = (
-                    (existing + f", autounpinned:{prov}").strip(", ").strip()
+                _diag_set(
+                    out,
+                    idx,
+                    registry,
+                    "diagnostics.review.tags",
+                    (existing + f", autounpinned:{prov}").strip(", ").strip(),
                 )
-            if "MatchConfidence" in out.columns:
-                out.at[idx, "MatchConfidence"] = "LOW"
+            _diag_set(out, idx, registry, "diagnostics.match.confidence", "LOW")
             changed += 1
-            changed_idx.append(int(idx))
+            try:
+                pos = out.index.get_loc(idx)
+                if isinstance(pos, int):
+                    changed_idx.append(pos)
+            except Exception:
+                pass
 
     return out, changed, changed_idx
 
@@ -99,6 +151,7 @@ def resolve_catalog_pins(
     clients: dict[str, object],
     retry_missing: bool,
     apply: bool,
+    registry: MetricsRegistry,
 ) -> tuple[pd.DataFrame, ResolveStats]:
     """
     Third-pass resolution: optionally repin or unpin provider IDs based on diagnostics tags.
@@ -130,32 +183,32 @@ def resolve_catalog_pins(
                     return y
         return extract_year_hint(str(row.get("Name", "") or ""))
 
-    df = fill_eval_tags(df, sources=set(sources), clients=clients)
+    df = fill_eval_tags(df, sources=set(sources), clients=clients, registry=registry)
 
     def _majority_title_and_year(row: pd.Series) -> tuple[str, int | None] | None:
-        title_cols = {
-            "rawg": "RAWG_MatchedName",
-            "igdb": "IGDB_MatchedName",
-            "steam": "Steam_MatchedName",
-            "hltb": "HLTB_MatchedName",
-            "wikidata": "Wikidata_MatchedLabel",
+        title_keys = {
+            "rawg": "diagnostics.rawg.matched_name",
+            "igdb": "diagnostics.igdb.matched_name",
+            "steam": "diagnostics.steam.matched_name",
+            "hltb": "diagnostics.hltb.matched_name",
+            "wikidata": "diagnostics.wikidata.matched_label",
         }
-        year_cols = {
-            "rawg": "RAWG_MatchedYear",
-            "igdb": "IGDB_MatchedYear",
-            "steam": "Steam_MatchedYear",
-            "hltb": "HLTB_MatchedYear",
-            "wikidata": "Wikidata_MatchedYear",
+        year_keys = {
+            "rawg": "diagnostics.rawg.matched_year",
+            "igdb": "diagnostics.igdb.matched_year",
+            "steam": "diagnostics.steam.matched_year",
+            "hltb": "diagnostics.hltb.matched_year",
+            "wikidata": "diagnostics.wikidata.matched_year",
         }
 
         titles: dict[str, str] = {}
         years: dict[str, int] = {}
-        for p, col in title_cols.items():
-            t = str(row.get(col, "") or "").strip()
+        for p, key in title_keys.items():
+            t = _diag_get(row, registry, key)
             if t:
                 titles[p] = t
-        for p, col in year_cols.items():
-            y = _parse_int_year(row.get(col, ""))
+        for p, key in year_keys.items():
+            y = _parse_int_year(_diag_get(row, registry, key))
             if y is not None:
                 years[p] = y
 
@@ -175,13 +228,12 @@ def resolve_catalog_pins(
         best_score = -1
         maj_years: dict[str, int] = {}
         for p in consensus.majority:
-            col = title_cols.get(p)
-            if col:
-                title = str(row.get(col, "") or "").strip()
-                if title:
-                    sc = fuzzy_score(personal, title)
-                    if sc > best_score:
-                        best_title, best_score = title, sc
+            key = title_keys.get(p)
+            title = _diag_get(row, registry, str(key or ""))
+            if title:
+                sc = fuzzy_score(personal, title)
+                if sc > best_score:
+                    best_title, best_score = title, sc
             y = years.get(p)
             if y is not None:
                 maj_years[p] = y
@@ -200,7 +252,7 @@ def resolve_catalog_pins(
             iid = str(row.get("IGDB_ID", "") or "").strip()
             if iid:
                 obj = clients["igdb"].get_by_id(iid)  # type: ignore[attr-defined]
-                return str((obj or {}).get("IGDB_Name") or "").strip()
+                return str((obj or {}).get("igdb.name") or "").strip()
         if provider == "steam" and "steam" in clients:
             sid = str(row.get("Steam_AppID", "") or "").strip()
             if sid.isdigit():
@@ -210,7 +262,7 @@ def resolve_catalog_pins(
             qid = str(row.get("Wikidata_QID", "") or "").strip()
             if qid:
                 obj = clients["wikidata"].get_by_id(qid)  # type: ignore[attr-defined]
-                return str((obj or {}).get("Wikidata_Label") or "").strip()
+                return str((obj or {}).get("wikidata.label") or "").strip()
         return ""
 
     def _pick_retry_query(
@@ -236,7 +288,7 @@ def resolve_catalog_pins(
             aliases = wd.get_aliases(qid)  # type: ignore[attr-defined]
             candidates.extend(aliases[:10])
             ent = wd.get_by_id(qid)  # type: ignore[attr-defined]
-            enwiki = str((ent or {}).get("Wikidata_EnwikiTitle") or "").strip()
+            enwiki = str((ent or {}).get("wikidata.enwiki_title") or "").strip()
             if enwiki:
                 candidates.append(enwiki)
 
@@ -283,31 +335,37 @@ def resolve_catalog_pins(
     resolved_wikidata = 0
     unpinned = 0
 
-    def _clear_provider_pin(row_idx: int, provider: str) -> None:
+    def _clear_provider_pin(row_idx: object, provider: str) -> None:
         if provider == "steam":
-            for col in (
-                "Steam_AppID",
-                "Steam_MatchedName",
-                "Steam_MatchScore",
-                "Steam_MatchedYear",
-                "Steam_RejectedReason",
-                "Steam_StoreType",
+            df.at[row_idx, "Steam_AppID"] = ""
+            for k in (
+                "diagnostics.steam.matched_name",
+                "diagnostics.steam.match_score",
+                "diagnostics.steam.matched_year",
+                "diagnostics.steam.rejected_reason",
             ):
-                if col in df.columns:
-                    df.at[row_idx, col] = ""
+                _diag_set(df, row_idx, registry, k, "")
         elif provider == "rawg":
-            for col in ("RAWG_ID", "RAWG_MatchedName", "RAWG_MatchScore", "RAWG_MatchedYear"):
-                if col in df.columns:
-                    df.at[row_idx, col] = ""
+            df.at[row_idx, "RAWG_ID"] = ""
+            for k in (
+                "diagnostics.rawg.matched_name",
+                "diagnostics.rawg.match_score",
+                "diagnostics.rawg.matched_year",
+            ):
+                _diag_set(df, row_idx, registry, k, "")
         elif provider == "igdb":
-            for col in ("IGDB_ID", "IGDB_MatchedName", "IGDB_MatchScore", "IGDB_MatchedYear"):
-                if col in df.columns:
-                    df.at[row_idx, col] = ""
+            df.at[row_idx, "IGDB_ID"] = ""
+            for k in (
+                "diagnostics.igdb.matched_name",
+                "diagnostics.igdb.match_score",
+                "diagnostics.igdb.matched_year",
+            ):
+                _diag_set(df, row_idx, registry, k, "")
 
     for idx, row in df.iterrows():
         if _is_yes(row.get("Disabled", "")):
             continue
-        tags = str(row.get("ReviewTags", "") or "")
+        tags = _diag_get(row, registry, "diagnostics.review.tags")
 
         retry_targets: dict[str, str] = {}
         for prov, id_col in (
@@ -330,9 +388,7 @@ def resolve_catalog_pins(
             elif retry_missing and not id_val:
                 retry_targets[prov] = "fill_missing"
 
-        missing_wikidata_qid = (
-            "wikidata" in clients and not str(row.get("Wikidata_QID", "") or "").strip()
-        )
+        missing_wikidata_qid = "wikidata" in clients and not str(row.get("Wikidata_QID", "") or "").strip()
         if not retry_targets and not missing_wikidata_qid:
             continue
 
@@ -352,12 +408,21 @@ def resolve_catalog_pins(
             got = clients["wikidata"].resolve_by_hints(  # type: ignore[attr-defined]
                 steam_appid=steam_appid, igdb_id=igdb_id
             )
-            if got and str(got.get("Wikidata_QID", "") or "").strip():
+            if got and str(got.get("wikidata.qid", "") or "").strip():
                 if apply:
-                    df.at[idx, "Wikidata_QID"] = str(got.get("Wikidata_QID") or "").strip()
+                    df.at[idx, "Wikidata_QID"] = str(got.get("wikidata.qid") or "").strip()
                 resolved_wikidata += 1
                 if apply:
-                    df.at[idx, "ReviewTags"] = _add_tag(df.at[idx, "ReviewTags"], "wikidata_hint")
+                    _diag_set(
+                        df,
+                        idx,
+                        registry,
+                        "diagnostics.review.tags",
+                        _add_tag(
+                            _diag_get(df.loc[idx], registry, "diagnostics.review.tags"),
+                            "wikidata_hint",
+                        ),
+                    )
 
         for prov, reason in retry_targets.items():
             attempted += 1
@@ -371,9 +436,7 @@ def resolve_catalog_pins(
                     appid_str = str(search.get("id") or "").strip()
                     if appid_str.isdigit():
                         details = steam.get_app_details(int(appid_str))  # type: ignore[attr-defined]
-                        matched = str(
-                            (details or {}).get("name") or search.get("name") or ""
-                        ).strip()
+                        matched = str((details or {}).get("name") or search.get("name") or "").strip()
                         release = (details or {}).get("release_date", {}) or {}
                         m = re.search(r"\b(19\d{2}|20\d{2})\b", str(release.get("date", "") or ""))
                         y = m.group(1) if m else ""
@@ -381,17 +444,31 @@ def resolve_catalog_pins(
                         if score >= 90 or _year_close(y, majority_year):
                             if apply:
                                 df.at[idx, "Steam_AppID"] = appid_str
-                                df.at[idx, "Steam_MatchedName"] = matched
-                                df.at[idx, "Steam_MatchScore"] = (
-                                    str(fuzzy_score(name, matched)) if matched else ""
+                                _diag_set(
+                                    df,
+                                    idx,
+                                    registry,
+                                    "diagnostics.steam.matched_name",
+                                    matched,
                                 )
-                                df.at[idx, "Steam_MatchedYear"] = y
-                                df.at[idx, "Steam_StoreType"] = (
-                                    str((details or {}).get("type") or "").strip().lower()
+                                _diag_set(
+                                    df,
+                                    idx,
+                                    registry,
+                                    "diagnostics.steam.match_score",
+                                    int(fuzzy_score(name, matched)) if matched else "",
                                 )
-                                df.at[idx, "Steam_RejectedReason"] = ""
-                                df.at[idx, "ReviewTags"] = _add_tag(
-                                    df.at[idx, "ReviewTags"], "repinned_by_resolve:steam"
+                                _diag_set(df, idx, registry, "diagnostics.steam.matched_year", y)
+                                _diag_set(df, idx, registry, "diagnostics.steam.rejected_reason", "")
+                                _diag_set(
+                                    df,
+                                    idx,
+                                    registry,
+                                    "diagnostics.review.tags",
+                                    _add_tag(
+                                        _diag_get(df.loc[idx], registry, "diagnostics.review.tags"),
+                                        "repinned_by_resolve:steam",
+                                    ),
                                 )
                             repinned += 1
                             repin_ok = True
@@ -407,13 +484,30 @@ def resolve_catalog_pins(
                     if score >= 90 or _year_close(y, majority_year):
                         if apply:
                             df.at[idx, "RAWG_ID"] = str(obj.get("id") or "").strip()
-                            df.at[idx, "RAWG_MatchedName"] = matched
-                            df.at[idx, "RAWG_MatchScore"] = (
-                                str(fuzzy_score(name, matched)) if matched else ""
+                            _diag_set(
+                                df,
+                                idx,
+                                registry,
+                                "diagnostics.rawg.matched_name",
+                                matched,
                             )
-                            df.at[idx, "RAWG_MatchedYear"] = y
-                            df.at[idx, "ReviewTags"] = _add_tag(
-                                df.at[idx, "ReviewTags"], "repinned_by_resolve:rawg"
+                            _diag_set(
+                                df,
+                                idx,
+                                registry,
+                                "diagnostics.rawg.match_score",
+                                int(fuzzy_score(name, matched)) if matched else "",
+                            )
+                            _diag_set(df, idx, registry, "diagnostics.rawg.matched_year", y)
+                            _diag_set(
+                                df,
+                                idx,
+                                registry,
+                                "diagnostics.review.tags",
+                                _add_tag(
+                                    _diag_get(df.loc[idx], registry, "diagnostics.review.tags"),
+                                    "repinned_by_resolve:rawg",
+                                ),
                             )
                         repinned += 1
                         repin_ok = True
@@ -421,20 +515,37 @@ def resolve_catalog_pins(
                 igdb = clients["igdb"]
                 logging.debug(f"[RESOLVE] Retry IGDB for '{name}' using '{retry_query}'")
                 obj = igdb.search(retry_query, year_hint=retry_year)  # type: ignore[attr-defined]
-                if obj and str(obj.get("IGDB_ID", "") or "").strip():
-                    matched = str(obj.get("IGDB_Name") or "").strip()
-                    y = str(obj.get("IGDB_Year") or "").strip()
+                if obj and str(obj.get("igdb.id", "") or "").strip():
+                    matched = str(obj.get("igdb.name") or "").strip()
+                    y = str(obj.get("igdb.year") or "").strip()
                     score = fuzzy_score(majority_title or name, matched) if matched else 0
                     if score >= 90 or _year_close(y, majority_year):
                         if apply:
-                            df.at[idx, "IGDB_ID"] = str(obj.get("IGDB_ID") or "").strip()
-                            df.at[idx, "IGDB_MatchedName"] = matched
-                            df.at[idx, "IGDB_MatchScore"] = (
-                                str(fuzzy_score(name, matched)) if matched else ""
+                            df.at[idx, "IGDB_ID"] = str(obj.get("igdb.id") or "").strip()
+                            _diag_set(
+                                df,
+                                idx,
+                                registry,
+                                "diagnostics.igdb.matched_name",
+                                matched,
                             )
-                            df.at[idx, "IGDB_MatchedYear"] = y
-                            df.at[idx, "ReviewTags"] = _add_tag(
-                                df.at[idx, "ReviewTags"], "repinned_by_resolve:igdb"
+                            _diag_set(
+                                df,
+                                idx,
+                                registry,
+                                "diagnostics.igdb.match_score",
+                                int(fuzzy_score(name, matched)) if matched else "",
+                            )
+                            _diag_set(df, idx, registry, "diagnostics.igdb.matched_year", y)
+                            _diag_set(
+                                df,
+                                idx,
+                                registry,
+                                "diagnostics.review.tags",
+                                _add_tag(
+                                    _diag_get(df.loc[idx], registry, "diagnostics.review.tags"),
+                                    "repinned_by_resolve:igdb",
+                                ),
                             )
                         repinned += 1
                         repin_ok = True
@@ -448,15 +559,22 @@ def resolve_catalog_pins(
                 )
                 if apply:
                     _clear_provider_pin(idx, prov)
-                    df.at[idx, "ReviewTags"] = _add_tag(
-                        df.at[idx, "ReviewTags"], f"autounpinned:{prov}"
+                    _diag_set(
+                        df,
+                        idx,
+                        registry,
+                        "diagnostics.review.tags",
+                        _add_tag(
+                            _diag_get(df.loc[idx], registry, "diagnostics.review.tags"),
+                            f"autounpinned:{prov}",
+                        ),
                     )
                 unpinned += 1
             else:
                 kept += 1
 
     if apply and (attempted or repinned or resolved_wikidata or unpinned):
-        df = fill_eval_tags(df, sources=set(sources), clients=clients)
+        df = fill_eval_tags(df, sources=set(sources), clients=clients, registry=registry)
 
     return (
         df,

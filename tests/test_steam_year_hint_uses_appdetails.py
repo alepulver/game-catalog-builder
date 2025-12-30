@@ -133,9 +133,7 @@ def test_steam_search_skips_non_game_types(tmp_path, monkeypatch):
     assert best["id"] == 222
 
 
-def test_steam_search_prefers_base_or_edition_over_sequel_when_query_has_no_number(
-    tmp_path, monkeypatch
-):
+def test_steam_search_prefers_base_or_edition_over_sequel_when_query_has_no_number(tmp_path, monkeypatch):
     from game_catalog_builder.clients.steam_client import SteamClient
 
     def fake_get(_self, url, params=None, timeout=None):
@@ -236,9 +234,7 @@ def test_steam_rejects_dlc_type_when_appdetails_type_is_not_game(tmp_path, monke
 
     def fake_get(_self, url, params=None, timeout=None):
         if "storesearch" in url:
-            return Resp(
-                {"items": [{"id": 2112230, "name": "Car Mechanic Simulator 2021: Aston Martin"}]}
-            )
+            return Resp({"items": [{"id": 2112230, "name": "Car Mechanic Simulator 2021: Aston Martin"}]})
 
         if "appdetails" in url:
             appids = _appids_from_url(url)

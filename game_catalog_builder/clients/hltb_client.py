@@ -9,6 +9,7 @@ from howlongtobeatpy import HowLongToBeat
 
 from ..config import HLTB
 from ..utils.utilities import CacheIOTracker, extract_year_hint, fuzzy_score
+from .parse import as_str, normalize_str_list, parse_float_text, parse_int_text
 
 
 class HLTBClient:
@@ -25,11 +26,12 @@ class HLTBClient:
             "by_id_negative_fetch": 0,
         }
         self._by_id: dict[str, Any] = {}
-        # Cache query -> lightweight candidates (id/name). Raw game payloads are cached by id.
+        # Cache query -> raw results list (converted to JSON-safe dicts).
         self._by_query: dict[str, list[dict[str, Any]]] = {}
         self._cache_io = CacheIOTracker(self.stats)
         self._load_cache(self._cache_io.load_json(self.cache_path))
-        self.client = HowLongToBeat()
+        # howlongtobeatpy client (treated as an untyped dependency; tests stub it).
+        self.client: Any = HowLongToBeat()
 
     @staticmethod
     def _json_safe(value: Any) -> Any:
@@ -94,38 +96,29 @@ class HLTBClient:
         return raw
 
     def _load_cache(self, raw: Any) -> None:
-        if not isinstance(raw, dict) or not raw:
+        if not raw:
+            return
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"HLTB cache file has an unsupported format: {self.cache_path} (delete it to rebuild)."
+            )
+
+        if not raw:
             return
 
         by_id = raw.get("by_id")
         by_query = raw.get("by_query")
         if not isinstance(by_id, dict):
-            logging.warning(
-                "HLTB cache file is in an incompatible format; ignoring it (delete it to rebuild)."
+            raise ValueError(
+                f"HLTB cache file has an unsupported format: {self.cache_path} (delete it to rebuild)."
             )
-            return
 
         # by_id must contain raw HLTB-like payloads keyed by id (or synthetic key).
         # Allow storing `None` for negative by-id caches.
         self._by_id = {str(k): v for k, v in by_id.items() if isinstance(v, dict) or v is None}
 
         if isinstance(by_query, dict):
-            out: dict[str, list[dict[str, Any]]] = {}
-            for k, v in by_query.items():
-                if not isinstance(v, list):
-                    continue
-                candidates: list[dict[str, Any]] = []
-                for it in v:
-                    if not isinstance(it, dict):
-                        continue
-                    candidates.append(
-                        {
-                            "game_id": it.get("game_id", None),
-                            "game_name": it.get("game_name", "") or "",
-                        }
-                    )
-                out[str(k)] = candidates
-            self._by_query = out
+            self._by_query = {str(k): [it for it in v if isinstance(it, dict)] for k, v in by_query.items() if isinstance(v, list)}
 
     def _save_cache(self) -> None:
         self._cache_io.save_json(
@@ -151,7 +144,7 @@ class HLTBClient:
         cached = self._by_id.get(hltb_id_str)
         if isinstance(cached, dict):
             self.stats["by_id_hit"] += 1
-            return self.extract_fields(cached)
+            return self.extract_metrics(cached)
         if cached is None and hltb_id_str in self._by_id:
             self.stats["by_id_negative_hit"] += 1
             return None
@@ -160,8 +153,7 @@ class HLTBClient:
             entry = self.client.search_from_id(int(hltb_id_str))
         except Exception:
             logging.warning(
-                f"HLTB lookup failed for id={hltb_id_str} (error during lookup); "
-                "not caching as not-found."
+                f"HLTB lookup failed for id={hltb_id_str} (error during lookup); not caching as not-found."
             )
             return None
 
@@ -176,7 +168,7 @@ class HLTBClient:
         self._by_id[hltb_id_str] = raw
         self._save_cache()
         self.stats["by_id_fetch"] += 1
-        return self.extract_fields(raw)
+        return self.extract_metrics(raw)
 
     def _query_variants(self, game_name: str) -> list[str]:
         """
@@ -264,7 +256,7 @@ class HLTBClient:
                 cached = self._by_id.get(pinned_id)
                 if isinstance(cached, dict):
                     self.stats["by_id_hit"] += 1
-                    return self.extract_fields(cached)
+                    return self.extract_metrics(cached)
 
             attempted: set[str] = set()
 
@@ -290,8 +282,11 @@ class HLTBClient:
                         name = getattr(r, "game_name", "") or ""
                         if gid is not None:
                             self._by_id[str(gid)] = self._result_to_raw(r)
-                        candidates.append({"game_id": gid, "game_name": name})
-                    # Cache empty results too (negative cache) by query.
+                        candidates.append(self._result_to_raw(r))
+                        # Ensure these keys exist for candidate selection logic.
+                        candidates[-1]["game_id"] = gid
+                        candidates[-1]["game_name"] = name
+                    # Cache empty results too (negative cache) by query, preserving raw payload.
                     self._by_query[qkey] = candidates
                     self._save_cache()
                     self.stats["by_query_fetch"] += 1
@@ -313,10 +308,7 @@ class HLTBClient:
 
                 # Choose the best match by similarity against the original title; the query can be
                 # a heuristic variant and should not affect the score.
-                scored = [
-                    (fuzzy_score(game_name, str(r.get("game_name", "") or "")), r)
-                    for r in candidates
-                ]
+                scored = [(fuzzy_score(game_name, str(r.get("game_name", "") or "")), r) for r in candidates]
                 scored.sort(key=lambda x: x[0], reverse=True)
                 score, candidate = scored[0]
                 if score > best_score:
@@ -369,14 +361,12 @@ class HLTBClient:
                     f"(score: {best_score}%, query={best_query!r})"
                 )
 
-            best_id = (
-                best_candidate.get("game_id", None) if isinstance(best_candidate, dict) else None
-            )
+            best_id = best_candidate.get("game_id", None) if isinstance(best_candidate, dict) else None
             best_id_str = str(best_id) if best_id is not None else ""
             if best_id_str:
                 cached = self._by_id.get(best_id_str)
                 if isinstance(cached, dict):
-                    return self.extract_fields(cached)
+                    return self.extract_metrics(cached)
                 logging.warning(
                     f"HLTB cache missing by_id payload for '{game_name}': id={best_id_str}. "
                     "Delete cache to rebuild."
@@ -399,32 +389,40 @@ class HLTBClient:
             return None
 
     @staticmethod
-    def extract_fields(raw: dict[str, Any]) -> dict[str, str]:
+    def extract_metrics(raw: dict[str, Any]) -> dict[str, object]:
         if not isinstance(raw, dict):
             return {}
-        gid = raw.get("game_id", None)
-        release_world = raw.get("release_world", None)
-        release_year = str(release_world) if isinstance(release_world, int) else ""
-        platforms = raw.get("profile_platforms", None)
-        if isinstance(platforms, list):
-            platform_str = ", ".join(str(x) for x in platforms if str(x).strip())
+        gid_str = as_str(raw.get("game_id"))
+        if gid_str.casefold() == "nan":
+            gid_str = ""
+
+        release_year = parse_int_text(raw.get("release_world"))
+
+        platform_list = normalize_str_list(raw.get("profile_platforms"))
+        score_100: int | None = None
+        review_score = parse_float_text(raw.get("review_score"))
+        if review_score is not None and 0 <= float(review_score) <= 100:
+            score_100 = int(round(float(review_score)))
+
+        web_link = as_str(raw.get("game_web_link"))
+
+        aliases: list[str] = []
+        aliases_raw = raw.get("game_alias")
+        if isinstance(aliases_raw, str):
+            aliases = normalize_str_list([aliases_raw])
         else:
-            platform_str = ""
-        # Keep provider-only fields in cache, but only emit cross-checkable metadata + the
-        # core HLTB time fields into CSV outputs.
-        score_100 = ""
-        review_score = raw.get("review_score", None)
-        if isinstance(review_score, (int, float)) and 0 <= float(review_score) <= 100:
-            score_100 = str(int(round(float(review_score))))
+            aliases = normalize_str_list(aliases_raw)
         return {
-            "HLTB_ID": str(gid) if gid is not None else "",
-            "HLTB_Name": str(raw.get("game_name", "") or ""),
-            "HLTB_Main": str(raw.get("main_story", "") or ""),
-            "HLTB_Extra": str(raw.get("main_extra", "") or ""),
-            "HLTB_Completionist": str(raw.get("completionist", "") or ""),
-            "HLTB_ReleaseYear": release_year,
-            "HLTB_Platforms": platform_str,
-            "Score_HLTB_100": score_100,
+            "hltb.id": gid_str,
+            "hltb.name": as_str(raw.get("game_name")),
+            "hltb.time.main": parse_float_text(raw.get("main_story")),
+            "hltb.time.extra": parse_float_text(raw.get("main_extra")),
+            "hltb.time.completionist": parse_float_text(raw.get("completionist")),
+            "hltb.release_year": release_year,
+            "hltb.platforms": platform_list,
+            "hltb.score_100": score_100,
+            "hltb.url": web_link,
+            "hltb.aliases": aliases,
         }
 
     def format_cache_stats(self) -> str:

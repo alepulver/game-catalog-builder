@@ -109,9 +109,7 @@ class WikipediaPageviewsClient:
         self._fetch_disabled = False
         self._fetch_disabled_logged = False
 
-    def _parse_daily_request_key(
-        self, request_key: str
-    ) -> tuple[str, str, str, date, date, int] | None:
+    def _parse_daily_request_key(self, request_key: str) -> tuple[str, str, str, date, date, int] | None:
         parts = str(request_key or "").split("|")
         if len(parts) < 7:
             return None
@@ -172,14 +170,10 @@ class WikipediaPageviewsClient:
             self._fetch_disabled = True
             if not self._fetch_disabled_logged:
                 self._fetch_disabled_logged = True
-                logging.error(
-                    "[NETWORK] Wikipedia pageviews disabled for this run (cache-only). %s", e
-                )
+                logging.error("[NETWORK] Wikipedia pageviews disabled for this run (cache-only). %s", e)
             return None
         if data is None:
-            logging.warning(
-                "Wikipedia pageviews request failed (no response); not caching as not-found."
-            )
+            logging.warning("Wikipedia pageviews request failed (no response); not caching as not-found.")
             return None
 
         self._by_query[request_key] = data
@@ -234,10 +228,7 @@ class WikipediaPageviewsClient:
         end_s = _stamp_yyyymmdd00(end)
 
         article_enc = quote(article_norm, safe="")
-        url = (
-            f"{WIKIMEDIA_PAGEVIEWS_API}/"
-            f"{project}/{access}/user/{article_enc}/daily/{start_s}/{end_s}"
-        )
+        url = f"{WIKIMEDIA_PAGEVIEWS_API}/{project}/{access}/user/{article_enc}/daily/{start_s}/{end_s}"
         request_key = f"{project}|{access}|user|{article_norm}|daily|{start_s}|{end_s}"
         payload = self._get_cached(request_key, url)
         if payload is None and self._fetch_disabled:
@@ -247,9 +238,7 @@ class WikipediaPageviewsClient:
                 cached_payload = self._by_query.get(cached_key)
                 if cached_payload not in (None, {}):
                     self.stats["by_query_fallback_hit"] += 1
-                    daily = self._daily_views_for_range(
-                        cached_payload, start=cached_start, end=cached_end
-                    )
+                    daily = self._daily_views_for_range(cached_payload, start=cached_start, end=cached_end)
                     return daily[-days:] if len(daily) >= days else daily
         if payload is None or payload == {}:
             return []
@@ -279,10 +268,7 @@ class WikipediaPageviewsClient:
         end_s = _stamp_yyyymmdd00(end)
 
         article_enc = quote(article_norm, safe="")
-        url = (
-            f"{WIKIMEDIA_PAGEVIEWS_API}/"
-            f"{project}/{access}/user/{article_enc}/daily/{start_s}/{end_s}"
-        )
+        url = f"{WIKIMEDIA_PAGEVIEWS_API}/{project}/{access}/user/{article_enc}/daily/{start_s}/{end_s}"
         request_key = f"{project}|{access}|user|{article_norm}|daily|{start_s}|{end_s}"
         payload = self._get_cached(request_key, url)
         if payload is None or payload == {}:

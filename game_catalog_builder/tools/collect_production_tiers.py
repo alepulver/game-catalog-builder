@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import csv
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
+from ..metrics.jsonl import load_jsonl_strict
 from ..utils.company import (
     LOW_SIGNAL_COMPANY_KEYS,
     company_key,
     normalize_company_name,
-    parse_json_array_cell,
 )
 
 
@@ -97,7 +96,7 @@ def _wants_company(label: str, *, include_porting_labels: bool) -> bool:
 
 def collect_production_tiers_yaml(
     *,
-    enriched_csv: Path,
+    enriched_jsonl: Path,
     out_yaml: Path,
     base_yaml: Path | None = None,
     min_count: int = 1,
@@ -113,17 +112,17 @@ def collect_production_tiers_yaml(
     The YAML format is intentionally human/AI-editable and may include extra fields
     (count/examples); enrich only needs the `tier` field.
     """
-    publisher_cols = (
-        "Steam_Publishers",
-        "IGDB_Publishers",
-        "RAWG_Publishers",
-        "Wikidata_Publishers",
+    publisher_keys = (
+        "steam.publishers",
+        "igdb.publishers",
+        "rawg.publishers",
+        "wikidata.publishers",
     )
-    developer_cols = (
-        "Steam_Developers",
-        "IGDB_Developers",
-        "RAWG_Developers",
-        "Wikidata_Developers",
+    developer_keys = (
+        "steam.developers",
+        "igdb.developers",
+        "rawg.developers",
+        "wikidata.developers",
     )
 
     pub_counts: Counter[str] = Counter()
@@ -135,63 +134,74 @@ def collect_production_tiers_yaml(
     canonical_pub_label_by_key: dict[str, str] = {}
     canonical_dev_label_by_key: dict[str, str] = {}
 
-    with enriched_csv.open("r", encoding="utf-8", newline="") as f:
-        r = csv.DictReader(f)
-        for row in r:
-            game_name = str(row.get("Name") or "").strip()
-            for col in publisher_cols:
-                for raw in parse_json_array_cell(row.get(col, "")):
-                    if not _wants_company(raw, include_porting_labels=include_porting_labels):
-                        continue
-                    key = company_key(raw)
-                    if not key:
-                        continue
-                    label = canonical_pub_label_by_key.get(key)
+    rows = load_jsonl_strict(enriched_jsonl)
+    for row in rows:
+        raw_personal = row.get("personal")
+        personal: dict[str, object] = (
+            cast(dict[str, object], raw_personal) if isinstance(raw_personal, dict) else {}
+        )
+        raw_metrics = row.get("metrics")
+        metrics: dict[str, object] = (
+            cast(dict[str, object], raw_metrics) if isinstance(raw_metrics, dict) else {}
+        )
+        game_name = str(personal.get("Name") or "").strip()
+
+        for k in publisher_keys:
+            v = metrics.get(k)
+            if not isinstance(v, list):
+                continue
+            for raw in [str(x or "").strip() for x in v if str(x or "").strip()]:
+                if not _wants_company(raw, include_porting_labels=include_porting_labels):
+                    continue
+                key = company_key(raw)
+                if not key:
+                    continue
+                label = canonical_pub_label_by_key.get(key)
+                if not label:
+                    label = normalize_company_name(raw)
                     if not label:
-                        label = normalize_company_name(raw)
-                        if not label:
-                            continue
-                        canonical_pub_label_by_key[key] = label
-                    pub_counts[label] += 1
-                    if (
-                        game_name
-                        and game_name not in pub_examples_seen[label]
-                        and len(pub_examples[label]) < max(0, int(max_examples))
-                    ):
-                        pub_examples_seen[label].add(game_name)
-                        pub_examples[label].append(game_name)
-            for col in developer_cols:
-                for raw in parse_json_array_cell(row.get(col, "")):
-                    if not _wants_company(raw, include_porting_labels=include_porting_labels):
                         continue
-                    key = company_key(raw)
-                    if not key:
-                        continue
-                    label = canonical_dev_label_by_key.get(key)
+                    canonical_pub_label_by_key[key] = label
+                pub_counts[label] += 1
+                if (
+                    game_name
+                    and game_name not in pub_examples_seen[label]
+                    and len(pub_examples[label]) < max(0, int(max_examples))
+                ):
+                    pub_examples_seen[label].add(game_name)
+                    pub_examples[label].append(game_name)
+
+        for k in developer_keys:
+            v = metrics.get(k)
+            if not isinstance(v, list):
+                continue
+            for raw in [str(x or "").strip() for x in v if str(x or "").strip()]:
+                if not _wants_company(raw, include_porting_labels=include_porting_labels):
+                    continue
+                key = company_key(raw)
+                if not key:
+                    continue
+                label = canonical_dev_label_by_key.get(key)
+                if not label:
+                    label = normalize_company_name(raw)
                     if not label:
-                        label = normalize_company_name(raw)
-                        if not label:
-                            continue
-                        canonical_dev_label_by_key[key] = label
-                    dev_counts[label] += 1
-                    if (
-                        game_name
-                        and game_name not in dev_examples_seen[label]
-                        and len(dev_examples[label]) < max(0, int(max_examples))
-                    ):
-                        dev_examples_seen[label].add(game_name)
-                        dev_examples[label].append(game_name)
+                        continue
+                    canonical_dev_label_by_key[key] = label
+                dev_counts[label] += 1
+                if (
+                    game_name
+                    and game_name not in dev_examples_seen[label]
+                    and len(dev_examples[label]) < max(0, int(max_examples))
+                ):
+                    dev_examples_seen[label].add(game_name)
+                    dev_examples[label].append(game_name)
 
     if int(min_count) > 1:
         pub_counts = Counter({k: v for k, v in pub_counts.items() if v >= int(min_count)})
         dev_counts = Counter({k: v for k, v in dev_counts.items() if v >= int(min_count)})
 
     existing_path = base_yaml if (base_yaml is not None) else out_yaml
-    existing = (
-        _load_existing_yaml(existing_path)
-        if keep_existing
-        else {"publishers": {}, "developers": {}}
-    )
+    existing = _load_existing_yaml(existing_path) if keep_existing else {"publishers": {}, "developers": {}}
     pubs_existing_raw: dict[str, Any] = dict(existing.get("publishers", {}))
     devs_existing_raw: dict[str, Any] = dict(existing.get("developers", {}))
 

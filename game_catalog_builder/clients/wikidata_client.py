@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -17,6 +16,7 @@ from ..utils.utilities import (
     iter_chunks,
     pick_best_match,
 )
+from .parse import as_str, get_list_of_dicts, normalize_str_list, parse_int_text
 from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
@@ -34,7 +34,7 @@ class WikidataClient:
     Wikidata enrichment via MediaWiki API.
 
     Cache format:
-      - by_query: query_key -> list[search result dict] (from wbsearchentities)
+      - by_query: query_key -> raw wbsearchentities payload (dict)
       - by_hint: hint_key -> qid (external-id based resolver, e.g. Steam AppID)
       - by_id: qid -> raw wbgetentities entity dict (English labels/claims/sitelinks)
       - by_id_negative: list[str] of qids that failed
@@ -115,7 +115,7 @@ class WikidataClient:
                 context_prefix="Wikidata wbgetentities(labels)",
             ),
         )
-        self._by_query: dict[str, list[dict[str, Any]]] = {}
+        self._by_query: dict[str, dict[str, Any]] = {}
         self._by_hint: dict[str, str] = {}
         self._by_id: dict[str, dict[str, Any]] = {}
         self._labels: dict[str, str] = {}
@@ -130,11 +130,22 @@ class WikidataClient:
         if not isinstance(raw, dict) or not raw:
             return
         if isinstance(raw.get("by_query"), dict):
-            self._by_query = {
-                str(k): [it for it in v if isinstance(it, dict)]
-                for k, v in raw["by_query"].items()
-                if isinstance(v, list)
-            }
+            out: dict[str, dict[str, Any]] = {}
+            migrated = 0
+            for k, v in raw["by_query"].items():
+                # Legacy format stored the search results list; wrap into raw payload shape.
+                if isinstance(v, list):
+                    out[str(k)] = {"search": [it for it in v if isinstance(it, dict)]}
+                    migrated += 1
+                elif isinstance(v, dict):
+                    out[str(k)] = v
+            self._by_query = out
+            if migrated:
+                logging.info(
+                    "ℹ Wikidata cache migration: upgraded %d legacy by_query entries to raw search shape.",
+                    migrated,
+                )
+                self._save_cache()
         if isinstance(raw.get("by_hint"), dict):
             self._by_hint = {str(k): str(v) for k, v in raw["by_hint"].items() if str(k).strip()}
         if isinstance(raw.get("by_id"), dict):
@@ -213,7 +224,7 @@ class WikidataClient:
         *,
         steam_appid: str | None = None,
         igdb_id: str | None = None,
-    ) -> dict[str, str] | None:
+    ) -> dict[str, object] | None:
         """
         Resolve a Wikidata entity using provider-backed identifiers (no free-text search).
 
@@ -221,7 +232,7 @@ class WikidataClient:
         will return None if Wikidata does not clearly identify a video game entity.
         """
 
-        def _try(prop: str, value: str) -> dict[str, str] | None:
+        def _try(prop: str, value: str) -> dict[str, object] | None:
             hint_key = f"hint:{prop}:{value}"
             cached = self._by_hint.get(hint_key)
             if cached is not None:
@@ -263,12 +274,13 @@ class WikidataClient:
             return []
         query_key = f"lang:en|search:{q}"
         cached = self._by_query.get(query_key)
-        if cached is not None:
-            if cached:
+        if isinstance(cached, dict):
+            results = get_list_of_dicts(cached.get("search"))
+            if results:
                 self.stats["by_query_hit"] += 1
             else:
                 self.stats["by_query_negative_hit"] += 1
-            return cached
+            return results
 
         try:
             data = self._wbsearch_http.get_json(
@@ -294,15 +306,14 @@ class WikidataClient:
             )
             return []
         if not isinstance(data, dict):
-            self._by_query[query_key] = []
+            self._by_query[query_key] = {}
             self._save_cache()
             self.stats["by_query_negative_fetch"] += 1
             return []
-        items = [it for it in (data.get("search") or []) if isinstance(it, dict)]
-        self._by_query[query_key] = items
+        self._by_query[query_key] = data
         self._save_cache()
         self.stats["by_query_fetch"] += 1
-        return items
+        return get_list_of_dicts(data.get("search"))
 
     def _get_entities(
         self,
@@ -405,9 +416,7 @@ class WikidataClient:
                     continue
                 lbl = str((v.get("labels") or {}).get("en", {}).get("value") or "").strip()
                 if not lbl:
-                    enwiki_title = ((v.get("sitelinks") or {}).get("enwiki") or {}).get(
-                        "title"
-                    ) or ""
+                    enwiki_title = ((v.get("sitelinks") or {}).get("enwiki") or {}).get("title") or ""
                     lbl = str(enwiki_title).strip().replace("_", " ")
                 prev = self._labels.get(qid)
                 if prev is None or (prev in {"", IDENTITY_NOT_FOUND} and lbl):
@@ -431,7 +440,7 @@ class WikidataClient:
         # Must include sitelinks so we can derive enwiki title reliably.
         return "sitelinks" in entity
 
-    def get_by_id(self, qid: str) -> dict[str, str] | None:
+    def get_by_id(self, qid: str) -> dict[str, object] | None:
         q = str(qid or "").strip()
         if not q:
             return None
@@ -442,7 +451,7 @@ class WikidataClient:
         if isinstance(cached, dict) and self._is_complete_entity(cached):
             self.stats["by_id_hit"] += 1
             self._ensure_labels(self._collect_linked_ids(cached))
-            return self._extract_fields(cached)
+            return self._extract_metrics(cached)
 
         entities = self._get_entities(
             [q], props="labels|descriptions|aliases|claims|sitelinks", purpose="entities"
@@ -457,9 +466,9 @@ class WikidataClient:
         self._save_cache()
         self.stats["by_id_fetch"] += 1
         self._ensure_labels(self._collect_linked_ids(ent))
-        return self._extract_fields(ent)
+        return self._extract_metrics(ent)
 
-    def get_by_ids(self, qids: list[str]) -> dict[str, dict[str, str]]:
+    def get_by_ids(self, qids: list[str]) -> dict[str, dict[str, object]]:
         """
         Fetch multiple Wikidata entities and return extracted fields for each.
 
@@ -503,7 +512,7 @@ class WikidataClient:
             linked |= self._collect_linked_ids(ent)
         self._ensure_labels(linked)
 
-        return {qid: self._extract_fields(ent) for qid, ent in entities_to_extract.items()}
+        return {qid: self._extract_metrics(ent) for qid, ent in entities_to_extract.items()}
 
     def get_aliases(self, qid: str, *, language: str = "en", limit: int = 20) -> list[str]:
         """
@@ -534,7 +543,7 @@ class WikidataClient:
         seen: set[str] = set()
         return [a for a in out if not (a in seen or seen.add(a))]
 
-    def search(self, game_name: str, year_hint: int | None = None) -> dict[str, str] | None:
+    def search(self, game_name: str, year_hint: int | None = None) -> dict[str, object] | None:
         name = str(game_name or "").strip()
         if not name:
             return None
@@ -631,7 +640,7 @@ class WikidataClient:
                     return None
             return None
 
-        def _retry_disambiguation() -> dict[str, str] | None:
+        def _retry_disambiguation() -> dict[str, object] | None:
             # Wikidata has many short/ambiguous titles; try a conservative disambiguation
             # suffix that often surfaces the correct video game entry.
             if "video game" in name.lower():
@@ -642,9 +651,7 @@ class WikidataClient:
                     return got
             return None
 
-        def _try_instance_of_filtered_choice() -> tuple[
-            dict[str, Any] | None, int, list[tuple[str, int]]
-        ]:
+        def _try_instance_of_filtered_choice() -> tuple[dict[str, Any] | None, int, list[tuple[str, int]]]:
             # If search descriptions are unhelpful (or misleading), validate a small set of top
             # candidates by checking Wikidata "instance of" (P31) from cached/batched entity
             # details. This avoids selecting films/albums/demos with the same label.
@@ -664,7 +671,7 @@ class WikidataClient:
             valid_qids = {
                 qid
                 for qid, det in details_by_id.items()
-                if _is_valid_game_instance(str(det.get("Wikidata_InstanceOf", "")))
+                if _is_valid_game_instance(str(det.get("wikidata.instance_of", "")))
             }
             if not valid_qids:
                 return (None, -1, [])
@@ -827,7 +834,7 @@ class WikidataClient:
             return None
         return details
 
-    def _extract_fields(self, entity: dict[str, Any]) -> dict[str, str]:
+    def _extract_metrics(self, entity: dict[str, Any]) -> dict[str, object]:
         qid = str(entity.get("id") or "").strip()
 
         def _lang_value(obj: Any, preferred: tuple[str, ...] = ("en", "en-gb", "en-ca")) -> str:
@@ -906,10 +913,10 @@ class WikidataClient:
                             return f"{y}-{m2}-{d2}"
             return ""
 
-        def _time_year(prop: str) -> str:
+        def _time_year(prop: str) -> int | None:
             vals = claims.get(prop) or []
             if not isinstance(vals, list):
-                return ""
+                return None
             for st in vals:
                 m = (st or {}).get("mainsnak") or {}
                 dv = m.get("datavalue") or {}
@@ -920,10 +927,10 @@ class WikidataClient:
                     if len(t) >= 5 and t[0] in {"+", "-"}:
                         y = t[1:5]
                         if y.isdigit():
-                            return y
+                            return int(y)
                     if len(t) >= 4 and t[:4].isdigit():
-                        return t[:4]
-            return ""
+                        return int(t[:4])
+            return None
 
         release_year = _time_year("P577")  # publication date (year)
         release_date = _time_date("P577")  # publication date (YYYY-MM-DD when available)
@@ -958,19 +965,19 @@ class WikidataClient:
             label = enwiki_title
 
         return {
-            "Wikidata_QID": qid,
-            "Wikidata_Label": label,
-            "Wikidata_Description": desc,
-            "Wikidata_ReleaseYear": release_year,
-            "Wikidata_ReleaseDate": release_date,
-            "Wikidata_Developers": json.dumps(_labels_list("P178"), ensure_ascii=False),
-            "Wikidata_Publishers": json.dumps(_labels_list("P123"), ensure_ascii=False),
-            "Wikidata_Platforms": _labels("P400"),
-            "Wikidata_Series": _labels("P179"),
-            "Wikidata_Genres": _labels("P136"),
-            "Wikidata_InstanceOf": _labels("P31"),
-            "Wikidata_EnwikiTitle": enwiki_title,
-            "Wikidata_Wikipedia": wikipedia,
+            "wikidata.qid": qid,
+            "wikidata.label": label,
+            "wikidata.description": desc,
+            "wikidata.release_year": release_year,
+            "wikidata.release_date": release_date,
+            "wikidata.developers": _labels_list("P178"),
+            "wikidata.publishers": _labels_list("P123"),
+            "wikidata.platforms": _labels_list("P400"),
+            "wikidata.series": _labels_list("P179"),
+            "wikidata.genres": _labels_list("P136"),
+            "wikidata.instance_of": _labels_list("P31"),
+            "wikidata.enwiki_title": enwiki_title,
+            "wikidata.wikipedia": wikipedia,
         }
 
     def format_cache_stats(self) -> str:

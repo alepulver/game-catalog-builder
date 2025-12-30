@@ -1,0 +1,210 @@
+version: 2
+
+# Metrics registry (example, checked into git)
+#
+# Canonical metric keys (dotted) map to concrete CSV column names + simple types.
+# This is intentionally a pragmatic list (no DSL, no implicit fallback keys):
+# - if a CSV column is expected to appear in JSONL, it must be listed here.
+# - providers/pipelines are free to evolve internally as long as exports preserve
+#   these stable column names.
+#
+# Copy to `data/metrics-registry.yaml` to customize.
+#
+# Supported types: string|int|float|bool|json|list_csv
+
+metrics:
+  # --- RAWG ---
+  rawg.id: { column: RAWG_ID, type: string }
+  rawg.name: { column: RAWG_Name, type: string }
+  rawg.name_original: { column: RAWG_NameOriginal, type: string }
+  rawg.released: { column: RAWG_Released, type: string }
+  rawg.year: { column: RAWG_Year, type: int }
+  rawg.website: { column: RAWG_Website, type: string }
+  rawg.description_raw: { column: RAWG_DescriptionRaw, type: string }
+  rawg.reddit_url: { column: RAWG_RedditURL, type: string }
+  rawg.metacritic_url: { column: RAWG_MetacriticURL, type: string }
+  rawg.background_image: { column: RAWG_BackgroundImage, type: string }
+  rawg.genres: { column: RAWG_Genres, type: json }
+  rawg.platforms: { column: RAWG_Platforms, type: json }
+  rawg.tags: { column: RAWG_Tags, type: json }
+  rawg.esrb: { column: RAWG_ESRB, type: string }
+  rawg.score_100: { column: RAWG_Score_100, type: int }
+  rawg.ratings_count: { column: RAWG_RatingsCount, type: int }
+  rawg.metacritic_100: { column: RAWG_Metacritic, type: int }
+  rawg.popularity.added_total: { column: RAWG_Added, type: int }
+  rawg.popularity.added_by_status.owned: { column: RAWG_AddedByStatusOwned, type: int }
+  rawg.popularity.added_by_status.playing: { column: RAWG_AddedByStatusPlaying, type: int }
+  rawg.popularity.added_by_status.beaten: { column: RAWG_AddedByStatusBeaten, type: int }
+  rawg.popularity.added_by_status.toplay: { column: RAWG_AddedByStatusToplay, type: int }
+  rawg.popularity.added_by_status.dropped: { column: RAWG_AddedByStatusDropped, type: int }
+  rawg.developers: { column: RAWG_Developers, type: json }
+  rawg.publishers: { column: RAWG_Publishers, type: json }
+
+  # --- IGDB ---
+  igdb.id: { column: IGDB_ID, type: string }
+  igdb.name: { column: IGDB_Name, type: string }
+  igdb.year: { column: IGDB_Year, type: int }
+  igdb.summary: { column: IGDB_Summary, type: string }
+  igdb.websites: { column: IGDB_Websites, type: json }
+  igdb.alternative_names: { column: IGDB_AlternativeNames, type: json }
+  igdb.platforms: { column: IGDB_Platforms, type: json }
+  igdb.genres: { column: IGDB_Genres, type: json }
+  igdb.themes: { column: IGDB_Themes, type: json }
+  igdb.keywords: { column: IGDB_Keywords, type: json }
+  igdb.game_modes: { column: IGDB_GameModes, type: json }
+  igdb.perspectives: { column: IGDB_Perspectives, type: json }
+  igdb.franchise: { column: IGDB_Franchise, type: json }
+  igdb.engine: { column: IGDB_Engine, type: json }
+  igdb.relationships.parent_game: { column: IGDB_ParentGame, type: string }
+  igdb.relationships.version_parent: { column: IGDB_VersionParent, type: string }
+  igdb.relationships.dlcs: { column: IGDB_DLCs, type: json }
+  igdb.relationships.expansions: { column: IGDB_Expansions, type: json }
+  igdb.relationships.ports: { column: IGDB_Ports, type: json }
+  igdb.cross_ids.steam_app_id: { column: IGDB_SteamAppID, type: string }
+  igdb.developers: { column: IGDB_Developers, type: json }
+  igdb.publishers: { column: IGDB_Publishers, type: json }
+  igdb.score_count: { column: IGDB_ScoreCount, type: int }
+  igdb.score_100: { column: IGDB_Score_100, type: int }
+  igdb.critic_score_count: { column: IGDB_CriticScoreCount, type: int }
+  igdb.critic.score_100: { column: IGDB_CriticScore_100, type: int }
+
+  # --- Steam ---
+  steam.app_id: { column: Steam_AppID, type: string }
+  steam.name: { column: Steam_Name, type: string }
+  steam.url: { column: Steam_URL, type: string }
+  steam.website: { column: Steam_Website, type: string }
+  steam.short_description: { column: Steam_ShortDescription, type: string }
+  steam.store_type: { column: Steam_StoreType, type: string }
+  steam.release_year: { column: Steam_ReleaseYear, type: int }
+  steam.platforms: { column: Steam_Platforms, type: json }
+  steam.tags: { column: Steam_Tags, type: json }
+  steam.review_count: { column: Steam_ReviewCount, type: int }
+  steam.price: { column: Steam_Price, type: string }
+  steam.categories: { column: Steam_Categories, type: json }
+  steam.metacritic_100: { column: Steam_Metacritic, type: int }
+  steam.developers: { column: Steam_Developers, type: json }
+  steam.publishers: { column: Steam_Publishers, type: json }
+
+  # --- SteamSpy ---
+  steamspy.owners: { column: SteamSpy_Owners, type: string }
+  steamspy.players: { column: SteamSpy_Players, type: int }
+  steamspy.players_2weeks: { column: SteamSpy_Players2Weeks, type: int }
+  steamspy.ccu: { column: SteamSpy_CCU, type: int }
+  steamspy.playtime_avg: { column: SteamSpy_PlaytimeAvg, type: int }
+  steamspy.playtime_avg_2weeks: { column: SteamSpy_PlaytimeAvg2Weeks, type: int }
+  steamspy.playtime_median_2weeks: { column: SteamSpy_PlaytimeMedian2Weeks, type: int }
+  steamspy.playtime_median: { column: SteamSpy_PlaytimeMedian, type: int }
+  steamspy.positive: { column: SteamSpy_Positive, type: int }
+  steamspy.negative: { column: SteamSpy_Negative, type: int }
+  steamspy.price: { column: SteamSpy_Price, type: int }
+  steamspy.initial_price: { column: SteamSpy_InitialPrice, type: int }
+  steamspy.discount_percent: { column: SteamSpy_DiscountPercent, type: int }
+  steamspy.developer: { column: SteamSpy_Developer, type: string }
+  steamspy.publisher: { column: SteamSpy_Publisher, type: string }
+  steamspy.popularity.tags: { column: SteamSpy_Tags, type: json }
+  steamspy.popularity.tags_top: { column: SteamSpy_TagsTop, type: json }
+  steamspy.score_100: { column: SteamSpy_Score_100, type: int }
+
+  # --- HLTB ---
+  hltb.name: { column: HLTB_Name, type: string }
+  hltb.time.main: { column: HLTB_Main, type: float }
+  hltb.time.extra: { column: HLTB_Extra, type: float }
+  hltb.time.completionist: { column: HLTB_Completionist, type: float }
+  hltb.release_year: { column: HLTB_ReleaseYear, type: int }
+  hltb.platforms: { column: HLTB_Platforms, type: json }
+  hltb.score_100: { column: HLTB_Score_100, type: int }
+  hltb.url: { column: HLTB_URL, type: string }
+  hltb.aliases: { column: HLTB_Aliases, type: json }
+
+  # --- Wikidata / Wikipedia ---
+  wikidata.qid: { column: Wikidata_QID, type: string }
+  wikidata.label: { column: Wikidata_Label, type: string }
+  wikidata.description: { column: Wikidata_Description, type: string }
+  wikidata.release_year: { column: Wikidata_ReleaseYear, type: int }
+  wikidata.release_date: { column: Wikidata_ReleaseDate, type: string }
+  wikidata.developers: { column: Wikidata_Developers, type: json }
+  wikidata.publishers: { column: Wikidata_Publishers, type: json }
+  wikidata.platforms: { column: Wikidata_Platforms, type: json }
+  wikidata.series: { column: Wikidata_Series, type: json }
+  wikidata.genres: { column: Wikidata_Genres, type: json }
+  wikidata.instance_of: { column: Wikidata_InstanceOf, type: json }
+  wikidata.enwiki_title: { column: Wikidata_EnwikiTitle, type: string }
+  wikidata.wikipedia: { column: Wikidata_Wikipedia, type: string }
+  wikipedia.page_url: { column: Wikidata_WikipediaPage, type: string }
+  wikipedia.summary: { column: Wikidata_WikipediaSummary, type: string }
+  wikipedia.thumbnail: { column: Wikidata_WikipediaThumbnail, type: string }
+  wikipedia.pageviews_30d: { column: Wikidata_Pageviews30d, type: int }
+  wikipedia.pageviews_90d: { column: Wikidata_Pageviews90d, type: int }
+  wikipedia.pageviews_365d: { column: Wikidata_Pageviews365d, type: int }
+  wikipedia.pageviews_first_30d: { column: Wikidata_PageviewsFirst30d, type: int }
+  wikipedia.pageviews_first_90d: { column: Wikidata_PageviewsFirst90d, type: int }
+
+  # --- Derived / composite ---
+  derived.reach.steamspy_owners_low: { column: Reach_SteamSpyOwners_Low, type: int }
+  derived.reach.steamspy_owners_high: { column: Reach_SteamSpyOwners_High, type: int }
+  derived.reach.steamspy_owners_mid: { column: Reach_SteamSpyOwners_Mid, type: int }
+  composite.reach.score_100: { column: Reach_Composite, type: int }
+  derived.reach.steam_reviews: { column: Reach_SteamReviews, type: int }
+  derived.reach.rawg_ratings_count: { column: Reach_RAWGRatingsCount, type: int }
+  derived.reach.igdb_rating_count: { column: Reach_IGDBRatingCount, type: int }
+  derived.reach.igdb_aggregated_rating_count: { column: Reach_IGDBAggregatedRatingCount, type: int }
+  composite.launch_interest.score_100: { column: Launch_Interest_100, type: int }
+  composite.community_rating.score_100: { column: CommunityRating_Composite_100, type: int }
+  composite.critic_rating.score_100: { column: CriticRating_Composite_100, type: int }
+
+  derived.companies.developers_consensus_providers: { column: Developers_ConsensusProviders, type: string }
+  derived.companies.developers_consensus: { column: Developers_Consensus, type: list_csv }
+  derived.companies.developers_consensus_provider_count: { column: Developers_ConsensusProviderCount, type: int }
+  derived.companies.publishers_consensus_providers: { column: Publishers_ConsensusProviders, type: string }
+  derived.companies.publishers_consensus: { column: Publishers_Consensus, type: list_csv }
+  derived.companies.publishers_consensus_provider_count: { column: Publishers_ConsensusProviderCount, type: int }
+
+  derived.content_type.value: { column: ContentType, type: string }
+  derived.content_type.consensus_providers: { column: ContentType_ConsensusProviders, type: string }
+  derived.content_type.source_signals: { column: ContentType_SourceSignals, type: string }
+  derived.content_type.conflict: { column: ContentType_Conflict, type: string }
+  derived.igdb.has_dlcs: { column: HasDLCs, type: bool }
+  derived.igdb.has_expansions: { column: HasExpansions, type: bool }
+  derived.igdb.has_ports: { column: HasPorts, type: bool }
+  derived.genre.main: { column: Genre_Main, type: string }
+  derived.genre.sources: { column: Genre_MainSources, type: string }
+
+  derived.replayability.score_100: { column: Replayability_100, type: int }
+  derived.replayability.source_signals: { column: Replayability_SourceSignals, type: string }
+
+  derived.modding.has_workshop: { column: HasWorkshop, type: bool }
+  derived.modding.score_100: { column: ModdingSignal_100, type: int }
+  derived.modding.source_signals: { column: Modding_SourceSignals, type: string }
+
+  derived.production.tier: { column: Production_Tier, type: string }
+  derived.production.tier_reason: { column: Production_TierReason, type: string }
+
+  derived.now.steamspy_playtime_avg_2weeks: { column: Now_SteamSpyPlaytimeAvg2Weeks, type: int }
+  derived.now.steamspy_playtime_median_2weeks: { column: Now_SteamSpyPlaytimeMedian2Weeks, type: int }
+  composite.now.score_100: { column: Now_Composite, type: int }
+
+diagnostics:
+  diagnostics.rawg.matched_name: { column: RAWG_MatchedName, type: string }
+  diagnostics.rawg.match_score: { column: RAWG_MatchScore, type: int }
+  diagnostics.rawg.matched_year: { column: RAWG_MatchedYear, type: int }
+
+  diagnostics.igdb.matched_name: { column: IGDB_MatchedName, type: string }
+  diagnostics.igdb.match_score: { column: IGDB_MatchScore, type: int }
+  diagnostics.igdb.matched_year: { column: IGDB_MatchedYear, type: int }
+
+  diagnostics.steam.matched_name: { column: Steam_MatchedName, type: string }
+  diagnostics.steam.match_score: { column: Steam_MatchScore, type: int }
+  diagnostics.steam.matched_year: { column: Steam_MatchedYear, type: int }
+  diagnostics.steam.rejected_reason: { column: Steam_RejectedReason, type: string }
+
+  diagnostics.hltb.matched_name: { column: HLTB_MatchedName, type: string }
+  diagnostics.hltb.match_score: { column: HLTB_MatchScore, type: int }
+  diagnostics.hltb.matched_year: { column: HLTB_MatchedYear, type: int }
+  diagnostics.hltb.matched_platforms: { column: HLTB_MatchedPlatforms, type: list_csv }
+
+  diagnostics.wikidata.matched_label: { column: Wikidata_MatchedLabel, type: string }
+  diagnostics.wikidata.match_score: { column: Wikidata_MatchScore, type: int }
+  diagnostics.wikidata.matched_year: { column: Wikidata_MatchedYear, type: int }
+
+  diagnostics.review.tags: { column: ReviewTags, type: string }
+  diagnostics.match.confidence: { column: MatchConfidence, type: string }

@@ -43,6 +43,6 @@ def test_igdb_year_hint_uses_year_window_query_first(tmp_path, monkeypatch):
 
     out = client.search("Fallout", year_hint=1997)
     assert out is not None
-    assert out["IGDB_Name"] == "Fallout"
+    assert out["igdb.name"] == "Fallout"
     assert calls["post"] == 1
     assert any("first_release_date >=" in q for q in queries)

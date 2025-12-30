@@ -48,12 +48,8 @@ def _walk(prefix: str, obj: Any, out: dict[str, set[str]]) -> None:
 def generate_reference(examples_root: Path) -> str:
     lines: list[str] = []
     lines.append("# Provider field reference (auto-generated)\n")
-    lines.append(
-        "This document is generated from example provider JSON files under `docs/examples/`.\n"
-    )
-    lines.append(
-        "It lists the observed JSON paths and value types. Use provider API docs for semantics.\n"
-    )
+    lines.append("This document is generated from example provider JSON files under `docs/examples/`.\n")
+    lines.append("It lists the observed JSON paths and value types. Use provider API docs for semantics.\n")
 
     for provider_dir in sorted(p for p in examples_root.iterdir() if p.is_dir()):
         lines.append(f"\n## {provider_dir.name}\n")

@@ -58,7 +58,9 @@ def test_steam_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
 
     monkeypatch.setattr("requests.sessions.Session.get", no_get)
     c2 = SteamClient(cache_path=cache_path, min_interval_s=0.0)
-    assert c2.get_app_details(2)["name"] == "Game 2"
+    d = c2.get_app_details(2)
+    assert d is not None
+    assert d["name"] == "Game 2"
 
 
 def test_igdb_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
@@ -97,7 +99,7 @@ def test_igdb_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
     )
     c1._token = "token"
     out = c1.get_by_ids([1, 2])
-    assert out["1"]["IGDB_Name"] == "One"
+    assert out["1"]["igdb.name"] == "One"
     assert calls["post"] == 1
     c1._cache_io.flush()
 
@@ -120,5 +122,6 @@ def test_igdb_batch_fills_cache_and_single_uses_cache(tmp_path, monkeypatch):
     )
     c2._token = "token"
     single = c2.get_by_id(2)
-    assert single["IGDB_ID"] == "2"
-    assert single["IGDB_Name"] == "Two"
+    assert single is not None
+    assert single["igdb.id"] == "2"
+    assert single["igdb.name"] == "Two"

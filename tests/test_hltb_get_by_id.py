@@ -23,8 +23,7 @@ def test_hltb_get_by_id_uses_library_search_from_id(tmp_path, monkeypatch):
 
     data = client.get_by_id("8940")
     assert data is not None
-    assert data["HLTB_ID"] == "8940"
-    assert data["HLTB_Name"] == "Example Game"
+    assert data["hltb.name"] == "Example Game"
     assert calls == [8940]
 
     # Cached on second call.

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 
 
@@ -18,12 +16,12 @@ def test_validation_adds_dev_pub_disagree_tags_when_sets_disjoint():
                 "IGDB_Name": "Example",
                 "Steam_AppID": "3",
                 "Steam_Name": "Example",
-                "Steam_Developers": json.dumps(["Valve"], ensure_ascii=False),
-                "RAWG_Developers": json.dumps(["id Software"], ensure_ascii=False),
-                "IGDB_Developers": json.dumps(["id Software"], ensure_ascii=False),
-                "Steam_Publishers": json.dumps(["Valve"], ensure_ascii=False),
-                "RAWG_Publishers": json.dumps(["Bethesda"], ensure_ascii=False),
-                "IGDB_Publishers": json.dumps(["Bethesda"], ensure_ascii=False),
+                "Steam_Developers": ["Valve"],
+                "RAWG_Developers": ["id Software"],
+                "IGDB_Developers": ["id Software"],
+                "Steam_Publishers": ["Valve"],
+                "RAWG_Publishers": ["Bethesda"],
+                "IGDB_Publishers": ["Bethesda"],
             }
         ]
     )
@@ -48,9 +46,9 @@ def test_validation_does_not_flag_dev_disagree_when_provider_lists_bridge() -> N
                 "IGDB_Name": "Example",
                 "Steam_AppID": "3",
                 "Steam_Name": "Example",
-                "Steam_Developers": json.dumps(["Studio A", "Studio B"], ensure_ascii=False),
-                "RAWG_Developers": json.dumps(["Studio A"], ensure_ascii=False),
-                "IGDB_Developers": json.dumps(["Studio B"], ensure_ascii=False),
+                "Steam_Developers": ["Studio A", "Studio B"],
+                "RAWG_Developers": ["Studio A"],
+                "IGDB_Developers": ["Studio B"],
             }
         ]
     )
@@ -73,9 +71,9 @@ def test_validation_does_not_flag_dev_disagree_when_no_majority_component() -> N
                 "IGDB_Name": "Example",
                 "Steam_AppID": "3",
                 "Steam_Name": "Example",
-                "Steam_Developers": json.dumps(["Studio A"], ensure_ascii=False),
-                "RAWG_Developers": json.dumps(["Studio B"], ensure_ascii=False),
-                "IGDB_Developers": json.dumps(["Studio C"], ensure_ascii=False),
+                "Steam_Developers": ["Studio A"],
+                "RAWG_Developers": ["Studio B"],
+                "IGDB_Developers": ["Studio C"],
             }
         ]
     )

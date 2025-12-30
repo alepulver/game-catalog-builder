@@ -120,9 +120,7 @@ def compute_provider_consensus(
     has_majority = len(best) > len(present) / 2
     majority = tuple(sorted(best)) if has_majority else ()
     outliers = tuple(sorted(p for p in present if p not in best)) if has_majority else ()
-    return ProviderConsensus(
-        present=present, majority=majority, outliers=outliers, has_majority=has_majority
-    )
+    return ProviderConsensus(present=present, majority=majority, outliers=outliers, has_majority=has_majority)
 
 
 def compute_year_consensus(
@@ -295,9 +293,7 @@ def actionable_mismatch_tags(
     out: list[str] = []
     if provider_consensus and provider_consensus.has_majority:
         year_outliers = {t.split(":", 1)[1] for t in year_tags if t.startswith("year_outlier:")}
-        platform_outliers = {
-            t.split(":", 1)[1] for t in platform_tags if t.startswith("platform_outlier:")
-        }
+        platform_outliers = {t.split(":", 1)[1] for t in platform_tags if t.startswith("platform_outlier:")}
         for p in sorted(set(provider_consensus.outliers) & (year_outliers | platform_outliers)):
             out.append(f"likely_wrong:{p}")
 

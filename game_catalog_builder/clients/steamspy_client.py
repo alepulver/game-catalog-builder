@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ from ..utils.utilities import (
     RateLimiter,
 )
 from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
+from .parse import as_str, normalize_str_list, parse_int_text
 
 STEAMSPY_URL = "https://steamspy.com/api.php"
 
@@ -37,16 +37,15 @@ class SteamSpyClient:
         base_http.stats = self.stats
         self._cache_io = CacheIOTracker(self.stats)
         raw = self._cache_io.load_json(self.cache_path)
-        if isinstance(raw, dict) and isinstance(raw.get("by_id"), dict):
-            self.cache = raw.get("by_id") or {}
-        elif not raw:
+        if not raw:
             self.cache = {}
         else:
-            logging.warning(
-                "SteamSpy cache file is in an incompatible format; ignoring it "
-                "(delete it to rebuild)."
-            )
-            self.cache = {}
+            if not isinstance(raw, dict) or not isinstance(raw.get("by_id"), dict):
+                raise ValueError(
+                    f"SteamSpy cache file has an unsupported format: {self.cache_path} "
+                    "(delete it to rebuild)."
+                )
+            self.cache = raw.get("by_id") or {}
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
         self._http = ConfiguredHTTPJSONClient(
             base_http,
@@ -73,7 +72,7 @@ class SteamSpyClient:
                 self.stats["by_id_negative_hit"] += 1
                 return None
             self.stats["by_id_hit"] += 1
-            return self._extract_fields(cached)
+            return self._extract_metrics(cached)
         data = self._http.get_json(
             STEAMSPY_URL,
             params={
@@ -101,60 +100,71 @@ class SteamSpyClient:
         self.cache[key] = data
         self._save_cache()
         self.stats["by_id_fetch"] += 1
-        return self._extract_fields(data)
+        return self._extract_metrics(data)
 
     @staticmethod
-    def _extract_fields(data: dict[str, Any]) -> dict[str, str]:
-        positive = data.get("positive", "")
-        negative = data.get("negative", "")
-        score_100 = ""
-        rate = ""
-        try:
-            pos_i = int(str(positive))
-            neg_i = int(str(negative))
-            denom = pos_i + neg_i
+    def _extract_metrics(data: dict[str, Any]) -> dict[str, object]:
+        positive = parse_int_text(data.get("positive", None))
+        negative = parse_int_text(data.get("negative", None))
+        score_100: int | None = None
+        if positive is not None and negative is not None:
+            denom = int(positive) + int(negative)
             if denom > 0:
-                rate_f = pos_i / denom
-                rate = f"{rate_f:.4f}"
-                score_100 = str(int(round(rate_f * 100.0)))
-        except Exception:
-            score_100 = ""
-            rate = ""
+                score_100 = int(round((int(positive) / float(denom)) * 100.0))
+
+        price = parse_int_text(data.get("price"))
+        initialprice = parse_int_text(data.get("initialprice"))
+        discount = parse_int_text(data.get("discount"))
+        median_forever = parse_int_text(data.get("median_forever"))
+        developer = as_str(data.get("developer"))
+        publisher = as_str(data.get("publisher"))
 
         tags_obj = data.get("tags", None)
-        tags_csv = ""
-        tags_top = ""
+        tags: list[str] = []
+        tags_top: list[list[object]] = []
         if isinstance(tags_obj, dict):
             items: list[tuple[str, int]] = []
             for k, v in tags_obj.items():
-                name = str(k or "").strip()
+                name = as_str(k)
                 if not name:
                     continue
-                try:
-                    count = int(v)
-                except Exception:
+                count = parse_int_text(v)
+                if count is None:
                     continue
                 if count <= 0:
                     continue
                 items.append((name, count))
             items.sort(key=lambda x: (-x[1], x[0].casefold()))
-            tags_csv = ", ".join([name for name, _ in items[:15]])
-            tags_top = json.dumps(items[:50], ensure_ascii=False)
+            tags = [name for name, _ in items[:15]]
+            tags_top = [[name, count] for name, count in items[:50]]
+
+        owners = as_str(data.get("owners"))
+        players = parse_int_text(data.get("players_forever"))
+        players_2weeks = parse_int_text(data.get("players_2weeks"))
+        ccu = parse_int_text(data.get("ccu"))
+        playtime_avg = parse_int_text(data.get("average_forever"))
+        playtime_avg_2weeks = parse_int_text(data.get("average_2weeks"))
+        playtime_median_2weeks = parse_int_text(data.get("median_2weeks"))
 
         return {
-            "SteamSpy_Owners": str(data.get("owners", "")),
-            "SteamSpy_Players": str(data.get("players_forever", "")),
-            "SteamSpy_Players2Weeks": str(data.get("players_2weeks", "")),
-            "SteamSpy_CCU": str(data.get("ccu", "")),
-            "SteamSpy_PlaytimeAvg": str(data.get("average_forever", "")),
-            "SteamSpy_PlaytimeAvg2Weeks": str(data.get("average_2weeks", "")),
-            "SteamSpy_PlaytimeMedian2Weeks": str(data.get("median_2weeks", "")),
-            "SteamSpy_Positive": str(positive),
-            "SteamSpy_Negative": str(negative),
-            "SteamSpy_PositiveRate": rate,
-            "Score_SteamSpy_100": score_100,
-            "SteamSpy_Tags": tags_csv,
-            "SteamSpy_TagsTop": tags_top,
+            "steamspy.owners": owners,
+            "steamspy.players": players,
+            "steamspy.players_2weeks": players_2weeks,
+            "steamspy.ccu": ccu,
+            "steamspy.playtime_avg": playtime_avg,
+            "steamspy.playtime_avg_2weeks": playtime_avg_2weeks,
+            "steamspy.playtime_median_2weeks": playtime_median_2weeks,
+            "steamspy.playtime_median": median_forever,
+            "steamspy.positive": positive,
+            "steamspy.negative": negative,
+            "steamspy.score_100": score_100,
+            "steamspy.price": price,
+            "steamspy.initial_price": initialprice,
+            "steamspy.discount_percent": discount,
+            "steamspy.developer": developer,
+            "steamspy.publisher": publisher,
+            "steamspy.popularity.tags": normalize_str_list(tags),
+            "steamspy.popularity.tags_top": tags_top,
         }
 
     def format_cache_stats(self) -> str:

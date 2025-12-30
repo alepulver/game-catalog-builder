@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, Callable, Iterator, cast
 
 import pandas as pd
 
 from ..config import CLI
 from ..schema import provider_output_columns
 from ..utils.progress import Progress
-
-TKey = TypeVar("TKey")
 
 
 def total_named_rows(df: pd.DataFrame, *, col: str = "Name") -> int:
@@ -60,6 +58,12 @@ def iter_named_rows_with_progress(
     progress = Progress(label, total=total or None, every_n=CLI.progress_every_n)
     seen = 0
     for idx, row in df.iterrows():
+        try:
+            pos = df.index.get_loc(idx)
+        except Exception:
+            continue
+        if not isinstance(pos, int):
+            continue
         if skip_row is not None and skip_row(row):
             continue
         name = str(row.get("Name", "") or "").strip()
@@ -67,14 +71,14 @@ def iter_named_rows_with_progress(
             continue
         seen += 1
         progress.maybe_log(seen)
-        yield int(idx), row, name, seen
+        yield pos, row, name, seen
 
 
 def flush_pending_keys(
-    pending: dict[TKey, list[int]],
+    pending: dict[object, list[int]],
     *,
-    fetch_many: Callable[[list[TKey]], dict[Any, Any]],
-    on_item: Callable[[TKey, list[int], Any], int],
+    fetch_many: Callable[[list[object]], dict[Any, Any]],
+    on_item: Callable[[object, list[int], Any], int],
 ) -> int:
     """
     Flush a pending key->indices buffer using a batched fetch function.
@@ -86,7 +90,7 @@ def flush_pending_keys(
     """
     if not pending:
         return 0
-    keys = list(pending.keys())
+    keys: list[object] = list(pending.keys())
     by_key = fetch_many(keys)
     processed = 0
     for key, indices in list(pending.items()):
@@ -114,10 +118,21 @@ def write_provider_output_csv(
     from ..utils import write_csv
 
     cols = provider_output_columns(list(df.columns), prefix=prefix, extra=extra)
-    write_csv(df[cols], output_csv)
+    write_csv(cast(pd.DataFrame, df[cols]), output_csv)
 
 
 def write_full_csv(df: pd.DataFrame, output_csv: Path) -> None:
     from ..utils import write_csv
 
     write_csv(df, output_csv)
+
+
+def filter_rows_by_ids(df: pd.DataFrame, row_ids: set[str]) -> pd.DataFrame:
+    """
+    Return a dataframe containing only rows whose RowId is in row_ids.
+    """
+    if "RowId" not in df.columns:
+        return df.iloc[0:0].copy()
+    normalized = {str(r or "").strip() for r in row_ids if str(r or "").strip()}
+    mask = df["RowId"].astype(str).str.strip().isin(normalized)
+    return df.loc[mask].copy()

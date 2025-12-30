@@ -83,9 +83,7 @@ class WikipediaSummaryClient:
             on_fail_return=None,
         )
         if data is None:
-            logging.warning(
-                "Wikipedia summary request failed (no response); not caching as not-found."
-            )
+            logging.warning("Wikipedia summary request failed (no response); not caching as not-found.")
             return None
 
         self._by_title[title] = data

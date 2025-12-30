@@ -32,8 +32,6 @@ def test_normalize_rejects_duplicate_rowids(tmp_path: Path) -> None:
     inp = tmp_path / "user.csv"
     out = tmp_path / "catalog.csv"
 
-    pd.DataFrame([{"RowId": "rid:1", "Name": "A"}, {"RowId": "rid:1", "Name": "B"}]).to_csv(
-        inp, index=False
-    )
+    pd.DataFrame([{"RowId": "rid:1", "Name": "A"}, {"RowId": "rid:1", "Name": "B"}]).to_csv(inp, index=False)
     with pytest.raises(SystemExit):
         normalize_catalog(inp, out)

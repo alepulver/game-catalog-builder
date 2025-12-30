@@ -24,6 +24,7 @@ ENV/
 !/data/**/.gitkeep
 !/data/credentials.example.yaml
 !/data/production_tiers.example.yaml
+!/data/metrics-registry.example.yaml
 /output/
 
 # Local experiment runs (generated/local)

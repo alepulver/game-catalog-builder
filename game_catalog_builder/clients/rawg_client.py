@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -16,6 +15,7 @@ from ..utils.utilities import (
     normalize_game_name,
     pick_best_match,
 )
+from .parse import as_float, as_int, as_str, get_list_of_dicts, normalize_str_list, year_from_iso_date
 from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 RAWG_API_URL = "https://api.rawg.io/api/games"
@@ -57,9 +57,9 @@ class RAWGClient:
             ),
         )
         self._by_id: dict[str, Any] = {}
-        # Cache by the exact query string/params used, storing only a lightweight list of
-        # candidates (id/name/released). Raw game payloads are cached by id in _by_id.
-        self._by_query: dict[str, list[dict[str, Any]]] = {}
+        # Cache by the exact query string/params used, storing the raw response payload.
+        # Details payloads are cached by id in _by_id.
+        self._by_query: dict[str, dict[str, Any]] = {}
         self._cache_io = CacheIOTracker(self.stats)
         self._load_cache(self._cache_io.load_json(self.cache_path))
         self.ratelimiter = RateLimiter(min_interval_s=min_interval_s)
@@ -69,23 +69,41 @@ class RAWGClient:
         return f"{self.language}:{rawg_id}"
 
     def _load_cache(self, raw: Any) -> None:
-        if not isinstance(raw, dict) or not raw:
+        if not raw:
+            return
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"RAWG cache file has an unsupported format: {self.cache_path} (delete it to rebuild)."
+            )
+
+        if not raw:
             return
 
         by_id = raw.get("by_id")
         by_query = raw.get("by_query")
         if not isinstance(by_id, dict):
-            logging.warning(
-                "RAWG cache file is in an incompatible format; ignoring it (delete it to rebuild)."
+            raise ValueError(
+                f"RAWG cache file has an unsupported format: {self.cache_path} (delete it to rebuild)."
             )
-            return
         self._by_id = {str(k): v for k, v in by_id.items()}
         if isinstance(by_query, dict):
-            out: dict[str, list[dict[str, Any]]] = {}
+            out: dict[str, dict[str, Any]] = {}
+            dropped = 0
             for k, v in by_query.items():
+                # Legacy format stored a distilled candidates list; it cannot be upgraded to the
+                # exact raw response, so drop it (details are preserved by id).
                 if isinstance(v, list):
+                    dropped += 1
+                    continue
+                if isinstance(v, dict):
                     out[str(k)] = v
             self._by_query = out
+            if dropped:
+                logging.info(
+                    "ℹ RAWG cache migration: dropped %d legacy by_query entries (will rebuild searches as needed).",
+                    dropped,
+                )
+                self._save_cache()
 
     def _save_cache(self) -> None:
         self._cache_io.save_json(
@@ -225,17 +243,13 @@ class RAWGClient:
         # If the query has no sequel number, prefer candidates without explicit sequel numbers
         # when alternatives exist.
         if q_norm and not _series_numbers(q_norm):
-            no_nums = [
-                it for it in candidates if not _series_numbers(str(it.get("name", "") or ""))
-            ]
+            no_nums = [it for it in candidates if not _series_numbers(str(it.get("name", "") or ""))]
             if no_nums and len(no_nums) < len(candidates):
                 candidates = no_nums
 
         # Prefer to avoid DLC/demo/soundtrack-like matches unless explicitly requested.
         if not query_dlc_like:
-            non_dlc = [
-                it for it in candidates if not _looks_dlc_like(str(it.get("name", "") or ""))
-            ]
+            non_dlc = [it for it in candidates if not _looks_dlc_like(str(it.get("name", "") or ""))]
             if non_dlc and len(non_dlc) < len(candidates):
                 candidates = non_dlc
 
@@ -273,30 +287,18 @@ class RAWGClient:
 
         def _candidates_from_results(results: Any) -> list[dict[str, Any]]:
             out: list[dict[str, Any]] = []
-            if not isinstance(results, list):
-                return out
-            for r in results:
-                if not isinstance(r, dict):
-                    continue
+            for r in get_list_of_dicts(results):
                 rid = r.get("id")
                 if rid is None:
                     continue
-                out.append(
-                    {
-                        "id": rid,
-                        "name": r.get("name", ""),
-                        "released": r.get("released", ""),
-                    }
-                )
+                out.append({"id": rid, "name": r.get("name", ""), "released": r.get("released", "")})
             return out
 
-        def _fetch(query_key: str, params: dict[str, Any]) -> list[dict[str, Any]] | None:
+        def _fetch(query_key: str, params: dict[str, Any]) -> tuple[dict[str, Any] | None, bool]:
             cached = self._by_query.get(query_key)
             if cached is not None:
                 self.stats["by_query_hit"] += 1
-                if not cached:
-                    self.stats["by_query_negative_hit"] += 1
-                return cached
+                return cached, True
             got = self._http.get_json(
                 RAWG_API_URL,
                 params=params,
@@ -304,14 +306,14 @@ class RAWGClient:
                 on_fail_return=None,
             )
             if not isinstance(got, dict):
-                return None
-            candidates = _candidates_from_results(got.get("results") or [])
-            self._by_query[query_key] = candidates
+                return None, False
+            self._by_query[query_key] = got
             self._save_cache()
             self.stats["by_query_fetch"] += 1
-            if not candidates:
+            results = get_list_of_dicts(got.get("results") or [])
+            if not results:
                 self.stats["by_query_negative_fetch"] += 1
-            return candidates
+            return got, False
 
         def _year_getter(obj: dict[str, Any]) -> int | None:
             released = str(obj.get("released", "") or "").strip()
@@ -335,12 +337,16 @@ class RAWGClient:
         ) -> tuple[dict[str, Any] | None, int, list[tuple[str, int]], bool]:
             lkey = f"lang:{self.language}|search:{term}|page_size:40"
 
-            cands = _fetch(
+            raw, from_cache = _fetch(
                 lkey,
                 {"search": term, "page_size": 40, "key": self.api_key, "lang": self.language},
             )
-            if cands is None:
+            if raw is None:
                 return None, 0, [], False
+            cands = _candidates_from_results(raw.get("results") or [])
+            if not cands:
+                if from_cache:
+                    self.stats["by_query_negative_hit"] += 1
 
             best, score, top = (
                 self._select_best_candidate(query=term, candidates=cands, year_hint=year_hint)
@@ -361,8 +367,7 @@ class RAWGClient:
         best, score, top_matches, ok = _search_term(search_text)
         if not ok:
             logging.warning(
-                f"RAWG search request failed for '{game_name}' (no response); "
-                "not caching as not-found."
+                f"RAWG search request failed for '{game_name}' (no response); not caching as not-found."
             )
             return None
 
@@ -379,19 +384,14 @@ class RAWGClient:
             # Log top 5 closest matches when not found
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
-                logging.warning(
-                    f"Not found in RAWG: '{game_name}'. Closest matches: {', '.join(top_names)}"
-                )
+                logging.warning(f"Not found in RAWG: '{game_name}'. Closest matches: {', '.join(top_names)}")
             else:
                 logging.warning(f"Not found in RAWG: '{game_name}'. No matches found.")
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
         if score < 100:
-            msg = (
-                f"Close match for '{game_name}': Selected '{best.get('name', '')}' "
-                f"(score: {score}%)"
-            )
+            msg = f"Close match for '{game_name}': Selected '{best.get('name', '')}' (score: {score}%)"
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
                 msg += f", alternatives: {', '.join(top_names)}"
@@ -428,7 +428,7 @@ class RAWGClient:
     # Metadata extraction
     # ----------------------------
     @staticmethod
-    def extract_fields(rawg_obj: dict[str, Any]) -> dict[str, str]:
+    def extract_metrics(rawg_obj: dict[str, Any]) -> dict[str, object]:
         if not rawg_obj:
             return {}
 
@@ -441,76 +441,78 @@ class RAWGClient:
             return s[:max_len].rstrip() + "…"
 
         genres: list[str] = []
-        for g in rawg_obj.get("genres", []) or []:
-            if not isinstance(g, dict):
-                continue
-            n = str(g.get("name") or "").strip()
+        for g in get_list_of_dicts(rawg_obj.get("genres")):
+            n = as_str(g.get("name"))
             if n:
                 genres.append(n)
-        platforms = [p.get("platform", {}).get("name", "") for p in rawg_obj.get("platforms", [])]
-        tags = [t.get("name", "") for t in rawg_obj.get("tags", [])]
+        platforms = [
+            as_str(p.get("platform", {}).get("name", "")) for p in get_list_of_dicts(rawg_obj.get("platforms"))
+        ]
+        tags = [as_str(t.get("name", "")) for t in get_list_of_dicts(rawg_obj.get("tags"))]
         # RAWG tags can contain mixed-language duplicates; drop Cyrillic tags by default.
         tags = [t for t in tags if t and not re.search(r"[А-Яа-яЁё]", t)]
 
         released = rawg_obj.get("released") or ""
-        website = str(rawg_obj.get("website", "") or "").strip()
+        website = as_str(rawg_obj.get("website"))
         desc_raw = _truncate(rawg_obj.get("description_raw", ""))
-        esrb = str((rawg_obj.get("esrb_rating") or {}).get("name") or "").strip()
+        esrb = as_str((rawg_obj.get("esrb_rating") or {}).get("name"))
+        name_original = as_str(rawg_obj.get("name_original"))
+        reddit_url = as_str(rawg_obj.get("reddit_url"))
+        metacritic_url = as_str(rawg_obj.get("metacritic_url"))
+        background_image = as_str(rawg_obj.get("background_image"))
 
         rating_val = rawg_obj.get("rating", None)
-        score_100 = ""
-        try:
-            if rating_val is not None:
-                score_100 = str(int(round(float(rating_val) / 5.0 * 100.0)))
-        except Exception:
-            score_100 = ""
+        score_100: int | None = None
+        rating_f = as_float(rating_val)
+        if rating_f is not None:
+            score_100 = int(round(rating_f / 5.0 * 100.0))
 
-        devs = [
-            d.get("name", "") for d in (rawg_obj.get("developers", []) or []) if isinstance(d, dict)
-        ]
-        pubs = [
-            p.get("name", "") for p in (rawg_obj.get("publishers", []) or []) if isinstance(p, dict)
-        ]
-        dev_list = [str(x).strip() for x in devs if str(x).strip()]
-        pub_list = [str(x).strip() for x in pubs if str(x).strip()]
+        dev_list = normalize_str_list([as_str(d.get("name")) for d in get_list_of_dicts(rawg_obj.get("developers"))])
+        pub_list = normalize_str_list([as_str(p.get("name")) for p in get_list_of_dicts(rawg_obj.get("publishers"))])
 
-        added = rawg_obj.get("added", "")
+        added = as_int(rawg_obj.get("added"))
         added_by_status = rawg_obj.get("added_by_status", None)
-        abs_owned = ""
-        abs_playing = ""
-        abs_beaten = ""
-        abs_toplay = ""
-        abs_dropped = ""
+        abs_owned: int | None = None
+        abs_playing: int | None = None
+        abs_beaten: int | None = None
+        abs_toplay: int | None = None
+        abs_dropped: int | None = None
         if isinstance(added_by_status, dict):
-            abs_owned = str(added_by_status.get("owned", "") or "")
-            abs_playing = str(added_by_status.get("playing", "") or "")
-            abs_beaten = str(added_by_status.get("beaten", "") or "")
-            abs_toplay = str(added_by_status.get("toplay", "") or "")
-            abs_dropped = str(added_by_status.get("dropped", "") or "")
+            abs_owned = as_int(added_by_status.get("owned"))
+            abs_playing = as_int(added_by_status.get("playing"))
+            abs_beaten = as_int(added_by_status.get("beaten"))
+            abs_toplay = as_int(added_by_status.get("toplay"))
+            abs_dropped = as_int(added_by_status.get("dropped"))
+
+        released_year = year_from_iso_date(released)
+
+        ratings_count = as_int(rawg_obj.get("ratings_count"))
+        metacritic = as_int(rawg_obj.get("metacritic"))
 
         return {
-            "RAWG_ID": str(rawg_obj.get("id", "")),
-            "RAWG_Name": str(rawg_obj.get("name", "") or ""),
-            "RAWG_Released": str(released or ""),
-            "RAWG_Year": released[:4] if released else "",
-            "RAWG_Website": website,
-            "RAWG_DescriptionRaw": desc_raw,
-            "RAWG_Genre": genres[0] if len(genres) > 0 else "",
-            "RAWG_Genre2": genres[1] if len(genres) > 1 else "",
-            "RAWG_Genres": ", ".join(genres),
-            "RAWG_Platforms": ", ".join(p for p in platforms if p),
-            "RAWG_Tags": ", ".join(t for t in tags if t),
-            "RAWG_ESRB": esrb,
-            "RAWG_Rating": str(rating_val if rating_val is not None else ""),
-            "Score_RAWG_100": score_100,
-            "RAWG_RatingsCount": str(rawg_obj.get("ratings_count", "")),
-            "RAWG_Metacritic": str(rawg_obj.get("metacritic", "")),
-            "RAWG_Added": str(added),
-            "RAWG_AddedByStatusOwned": abs_owned,
-            "RAWG_AddedByStatusPlaying": abs_playing,
-            "RAWG_AddedByStatusBeaten": abs_beaten,
-            "RAWG_AddedByStatusToplay": abs_toplay,
-            "RAWG_AddedByStatusDropped": abs_dropped,
-            "RAWG_Developers": json.dumps(dev_list, ensure_ascii=False),
-            "RAWG_Publishers": json.dumps(pub_list, ensure_ascii=False),
+            "rawg.id": as_str(rawg_obj.get("id")),
+            "rawg.name": as_str(rawg_obj.get("name")),
+            "rawg.name_original": name_original,
+            "rawg.released": as_str(released),
+            "rawg.year": released_year,
+            "rawg.website": website,
+            "rawg.description_raw": desc_raw,
+            "rawg.reddit_url": reddit_url,
+            "rawg.metacritic_url": metacritic_url,
+            "rawg.background_image": background_image,
+            "rawg.genres": normalize_str_list(genres),
+            "rawg.platforms": normalize_str_list(platforms),
+            "rawg.tags": normalize_str_list(tags),
+            "rawg.esrb": esrb,
+            "rawg.score_100": score_100,
+            "rawg.ratings_count": ratings_count,
+            "rawg.metacritic_100": metacritic,
+            "rawg.popularity.added_total": added,
+            "rawg.popularity.added_by_status.owned": abs_owned,
+            "rawg.popularity.added_by_status.playing": abs_playing,
+            "rawg.popularity.added_by_status.beaten": abs_beaten,
+            "rawg.popularity.added_by_status.toplay": abs_toplay,
+            "rawg.popularity.added_by_status.dropped": abs_dropped,
+            "rawg.developers": dev_list,
+            "rawg.publishers": pub_list,
         }

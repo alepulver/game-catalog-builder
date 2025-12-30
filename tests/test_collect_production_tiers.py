@@ -8,11 +8,23 @@ from game_catalog_builder.tools.collect_production_tiers import collect_producti
 
 
 def test_collect_production_tiers_yaml_writes_tiers_only_and_preserves_tier(tmp_path: Path) -> None:
-    enriched = tmp_path / "enriched.csv"
+    enriched = tmp_path / "enriched.jsonl"
     enriched.write_text(
-        "RowId,Name,Steam_Publishers,Steam_Developers\n"
-        '1,Game A,["Pub A"],["Dev A"]\n'
-        '2,Game B,["Pub A"],["Dev B"]\n',
+        "\n".join(
+            [
+                (
+                    '{"row_id":"rid:1","personal":{"Name":"Game A"},'
+                    '"pins":{},"metrics":{"steam.publishers":["Pub A"],"steam.developers":["Dev A"]},'
+                    '"diagnostics":{},"meta":{}}'
+                ),
+                (
+                    '{"row_id":"rid:2","personal":{"Name":"Game B"},'
+                    '"pins":{},"metrics":{"steam.publishers":["Pub A"],"steam.developers":["Dev B"]},'
+                    '"diagnostics":{},"meta":{}}'
+                ),
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
     out_yaml = tmp_path / "production_tiers.yaml"
@@ -26,7 +38,7 @@ def test_collect_production_tiers_yaml_writes_tiers_only_and_preserves_tier(tmp_
         encoding="utf-8",
     )
 
-    res = collect_production_tiers_yaml(enriched_csv=enriched, out_yaml=out_yaml, max_examples=2)
+    res = collect_production_tiers_yaml(enriched_jsonl=enriched, out_yaml=out_yaml, max_examples=2)
     assert res.publishers_total == 1
     assert res.developers_total == 1
 
@@ -37,11 +49,23 @@ def test_collect_production_tiers_yaml_writes_tiers_only_and_preserves_tier(tmp_
 
 
 def test_collect_production_tiers_only_missing_filters_filled(tmp_path: Path) -> None:
-    enriched = tmp_path / "enriched.csv"
+    enriched = tmp_path / "enriched.jsonl"
     enriched.write_text(
-        "RowId,Name,Steam_Publishers,Steam_Developers\n"
-        '1,Game A,["Pub A"],["Dev A"]\n'
-        '2,Game B,["Pub B"],["Dev B"]\n',
+        "\n".join(
+            [
+                (
+                    '{"row_id":"rid:1","personal":{"Name":"Game A"},'
+                    '"pins":{},"metrics":{"steam.publishers":["Pub A"],"steam.developers":["Dev A"]},'
+                    '"diagnostics":{},"meta":{}}'
+                ),
+                (
+                    '{"row_id":"rid:2","personal":{"Name":"Game B"},'
+                    '"pins":{},"metrics":{"steam.publishers":["Pub B"],"steam.developers":["Dev B"]},'
+                    '"diagnostics":{},"meta":{}}'
+                ),
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
     out_yaml = tmp_path / "production_tiers.yaml"
@@ -56,7 +80,7 @@ def test_collect_production_tiers_only_missing_filters_filled(tmp_path: Path) ->
     )
 
     collect_production_tiers_yaml(
-        enriched_csv=enriched,
+        enriched_jsonl=enriched,
         out_yaml=out_yaml,
         max_examples=1,
         keep_existing=True,

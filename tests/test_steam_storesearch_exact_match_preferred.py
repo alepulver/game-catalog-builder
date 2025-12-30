@@ -9,10 +9,12 @@ def test_steam_search_prefers_exact_normalized_match(tmp_path, monkeypatch):
 
     # Preload storesearch results for the exact query term.
     query_key = "l:english|cc:US|term:Diablo"
-    client._by_query[query_key] = [
-        {"id": 111, "name": "Diablo IV", "type": "app"},
-        {"id": 222, "name": "Diablo", "type": "app"},
-    ]
+    client._by_query[query_key] = {
+        "items": [
+            {"id": 111, "name": "Diablo IV", "type": "app"},
+            {"id": 222, "name": "Diablo", "type": "app"},
+        ]
+    }
 
     # Preload appdetails for final guards and year checks (no network).
     client._by_id["111"] = {"type": "game", "name": "Diablo IV", "release_date": {"date": "2023"}}

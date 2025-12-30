@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def test_fill_eval_tags_adds_steam_rejected_tag_when_reason_present() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [

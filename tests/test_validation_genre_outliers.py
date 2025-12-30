@@ -10,13 +10,13 @@ def test_validation_genre_outlier_tag_when_majority_exists() -> None:
                 "Name": "Example",
                 "RAWG_ID": "1",
                 "RAWG_Name": "Example",
-                "RAWG_Genres": "Action, Shooter",
+                "RAWG_Genres": ["Action", "Shooter"],
                 "IGDB_ID": "2",
                 "IGDB_Name": "Example",
-                "IGDB_Genres": "Action",
+                "IGDB_Genres": ["Action"],
                 "Steam_AppID": "3",
                 "Steam_Name": "Example",
-                "Steam_Tags": "Puzzle",
+                "Steam_Tags": ["Puzzle"],
             }
         ]
     )
@@ -34,10 +34,10 @@ def test_validation_genre_no_consensus_when_disjoint() -> None:
                 "Name": "Example",
                 "RAWG_ID": "1",
                 "RAWG_Name": "Example",
-                "RAWG_Genres": "Action",
+                "RAWG_Genres": ["Action"],
                 "IGDB_ID": "2",
                 "IGDB_Name": "Example",
-                "IGDB_Genres": "Puzzle",
+                "IGDB_Genres": ["Puzzle"],
             }
         ]
     )

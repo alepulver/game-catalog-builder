@@ -56,9 +56,7 @@ def test_import_rejects_inferred_steam_appid_when_appdetails_not_game(tmp_path, 
     output_csv = tmp_path / "Games_Catalog.csv"
     log_file = tmp_path / "log.txt"
 
-    pd.DataFrame([{"Name": "Car Mechanic Simulator 2021", "IGDB_ID": "123"}]).to_csv(
-        input_csv, index=False
-    )
+    pd.DataFrame([{"Name": "Car Mechanic Simulator 2021", "IGDB_ID": "123"}]).to_csv(input_csv, index=False)
 
     args = argparse.Namespace(
         input=input_csv,

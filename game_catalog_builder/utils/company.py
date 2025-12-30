@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import unicodedata
 from typing import Any
@@ -121,23 +120,22 @@ def company_keys(value: Any) -> set[str]:
 
 
 def parse_json_array_cell(value: Any) -> list[str]:
-    raw = str(value or "").strip()
-    if not raw:
-        return []
-    if not raw.startswith("["):
-        return []
-    try:
-        v = json.loads(raw)
-    except Exception:
-        return []
-    if not isinstance(v, list):
-        return []
-    out: list[str] = []
-    for x in v:
-        t = str(x or "").strip()
-        if t:
-            out.append(t)
-    return out
+    """
+    Parse a list-like cell value.
+
+    Internal pipeline code should keep these values typed (list[str]) via JSONL or in-memory
+    provider payloads. CSV exports may render lists as joined strings, but those are not meant
+    to be parsed back.
+    """
+    if isinstance(value, list):
+        out: list[str] = []
+        for x in value:
+            t = str(x or "").strip()
+            if t:
+                out.append(t)
+        return out
+    # No backwards-compatible JSON parsing.
+    return []
 
 
 def company_set_from_json_array_cell(value: Any) -> set[str]:

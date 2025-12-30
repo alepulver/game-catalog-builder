@@ -37,9 +37,7 @@ def test_ensure_row_ids_in_input_fixes_duplicates(tmp_path: Path):
     from game_catalog_builder.utils.utilities import ensure_row_ids, write_csv
 
     p = tmp_path / "input.csv"
-    write_csv(
-        pd.DataFrame([{"RowId": "rid:dup", "Name": "A"}, {"RowId": "rid:dup", "Name": "B"}]), p
-    )
+    write_csv(pd.DataFrame([{"RowId": "rid:dup", "Name": "A"}, {"RowId": "rid:dup", "Name": "B"}]), p)
 
     df0 = pd.read_csv(p, dtype=str, keep_default_na=False)
     df, _ = ensure_row_ids(df0)

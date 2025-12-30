@@ -1,7 +1,5 @@
 - Keep working on derived metrics with ChatGPT (tags, estimated popularity, users, production level, replayability, mods, "must play classic", etc)
 - Support for checking mod websites such as nexus to determine activity, number of mods, etc
-- Refactor to create frontend and backend. Implement data queue with dependencies, incremental updates and DB storage (full sqlite, in addition to configurable json and csv exports)
+- Create backend: task queues with dependencies, incremental updates and DB storage (full sqlite, remove JSONL outputs by default and keep as state dump). More providers should run in parallel
+- Create frontend: look for other UIs for inspiration, add overlays and autoplay videos from gameplays, sorting, filtering, allow editing the import and enrich outputs (implement workflow, should post back to backend)
 - Can use API keys for Steam, OpenCritic, Nexus Mods and scraping for ModDB. Python packages available
-- Internal format and output configuration
-  - Make user data (input) and output columns configurable; for the latter, keep a schema or flat list of available data per provider with description (so they can be mapped to the output)
-  - Make output fields hierarchical (defined with paths from providers and types, so they can generate a JSON or CSV)

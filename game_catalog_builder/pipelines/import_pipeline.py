@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable, cast
 
 import pandas as pd
 
-from ..analysis.import_diagnostics import fill_eval_tags, platform_is_pc_like
 from ..config import CLI
+from ..metrics.registry import MetricsRegistry, default_metrics_registry_path, load_metrics_registry
+from ..pipelines.artifacts import ArtifactStore
 from ..pipelines.common import iter_named_rows_with_progress, log_cache_stats, write_full_csv
 from ..pipelines.context import PipelineContext
 from ..pipelines.protocols import (
@@ -17,7 +19,6 @@ from ..pipelines.protocols import (
     SteamClientLike,
     WikidataClientLike,
 )
-from ..schema import DIAGNOSTIC_COLUMNS
 from ..utils import (
     IDENTITY_NOT_FOUND,
     ensure_columns,
@@ -26,10 +27,36 @@ from ..utils import (
     fuzzy_score,
     read_csv,
 )
+from .diagnostics.import_diagnostics import fill_eval_tags, platform_is_pc_like
+
+
+def _default_metrics_registry_path() -> Path:
+    return default_metrics_registry_path()
+
+
+def _set_diag(
+    df: pd.DataFrame,
+    idx: int,
+    *,
+    registry: MetricsRegistry,
+    key: str,
+    value: object,
+) -> None:
+    mapped = registry.diagnostic_column_for_key(key)
+    if mapped is None:
+        return
+    col, _typ = mapped
+    if col not in df.columns:
+        df[col] = ""
+    df.at[idx, col] = value
 
 
 def normalize_catalog(
-    input_csv: Path, output_csv: Path, *, include_diagnostics: bool = True
+    input_csv: Path,
+    output_csv: Path,
+    *,
+    include_diagnostics: bool = True,
+    registry: MetricsRegistry | None = None,
 ) -> Path:
     df = read_csv(input_csv)
     if "Name" not in df.columns:
@@ -37,11 +64,7 @@ def normalize_catalog(
 
     # Preserve RowId (and pinned provider identifiers) when re-importing from a user export that
     # doesn't include RowId yet.
-    if (
-        output_csv.exists()
-        and input_csv.resolve() != output_csv.resolve()
-        and "RowId" not in df.columns
-    ):
+    if output_csv.exists() and input_csv.resolve() != output_csv.resolve() and "RowId" not in df.columns:
         prev = read_csv(output_csv)
         if "Name" in prev.columns and "RowId" in prev.columns:
             df["__occ"] = df.groupby("Name").cumcount()
@@ -100,7 +123,8 @@ def normalize_catalog(
         "Wikidata_QID": "",
     }
     if include_diagnostics:
-        required_cols.update({c: "" for c in DIAGNOSTIC_COLUMNS})
+        reg = registry or load_metrics_registry(_default_metrics_registry_path())
+        required_cols.update({c: "" for c in sorted(reg.diagnostic_columns)})
 
     df = ensure_columns(df, required_cols)
     df["Name"] = df["Name"].astype(str).str.strip()
@@ -145,6 +169,7 @@ def _match_rawg_ids(
     *,
     client: RAWGClientLike,
     include_diagnostics: bool,
+    registry: MetricsRegistry | None,
     active_total: int,
 ) -> None:
     for idx, row, name, _seen in iter_named_rows_with_progress(
@@ -155,10 +180,10 @@ def _match_rawg_ids(
     ):
         rawg_id = str(row.get("RAWG_ID", "") or "").strip()
         if rawg_id == IDENTITY_NOT_FOUND:
-            if include_diagnostics:
-                df.at[idx, "RAWG_MatchedName"] = ""
-                df.at[idx, "RAWG_MatchScore"] = ""
-                df.at[idx, "RAWG_MatchedYear"] = ""
+            if include_diagnostics and registry is not None:
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.rawg.matched_name", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.rawg.match_score", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.rawg.matched_year", value="")
             continue
 
         if rawg_id:
@@ -170,12 +195,24 @@ def _match_rawg_ids(
             if obj and obj.get("id") is not None:
                 df.at[idx, "RAWG_ID"] = str(obj.get("id") or "").strip()
 
-        if include_diagnostics and obj and isinstance(obj, dict):
+        if include_diagnostics and registry is not None and obj and isinstance(obj, dict):
             matched = str(obj.get("name") or "").strip()
             released = str(obj.get("released") or "").strip()
-            df.at[idx, "RAWG_MatchedName"] = matched
-            df.at[idx, "RAWG_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
-            df.at[idx, "RAWG_MatchedYear"] = released[:4] if len(released) >= 4 else ""
+            _set_diag(df, int(idx), registry=registry, key="diagnostics.rawg.matched_name", value=matched)
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.rawg.match_score",
+                value=int(fuzzy_score(name, matched)) if matched else "",
+            )
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.rawg.matched_year",
+                value=int(released[:4]) if released[:4].isdigit() else "",
+            )
 
 
 def _match_igdb_ids(
@@ -183,6 +220,7 @@ def _match_igdb_ids(
     *,
     client: IGDBClientLike,
     include_diagnostics: bool,
+    registry: MetricsRegistry | None,
     active_total: int,
 ) -> None:
     for idx, row, name, _seen in iter_named_rows_with_progress(
@@ -193,10 +231,10 @@ def _match_igdb_ids(
     ):
         igdb_id = str(row.get("IGDB_ID", "") or "").strip()
         if igdb_id == IDENTITY_NOT_FOUND:
-            if include_diagnostics:
-                df.at[idx, "IGDB_MatchedName"] = ""
-                df.at[idx, "IGDB_MatchScore"] = ""
-                df.at[idx, "IGDB_MatchedYear"] = ""
+            if include_diagnostics and registry is not None:
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.igdb.matched_name", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.igdb.match_score", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.igdb.matched_year", value="")
             continue
 
         if igdb_id:
@@ -205,14 +243,27 @@ def _match_igdb_ids(
             obj = client.get_by_id(igdb_id)
         else:
             obj = client.search(name, year_hint=_year_hint_from_row(row))
-            if obj and str(obj.get("IGDB_ID", "") or "").strip():
-                df.at[idx, "IGDB_ID"] = str(obj.get("IGDB_ID") or "").strip()
+            if obj and str(obj.get("igdb.id", "") or "").strip():
+                df.at[idx, "IGDB_ID"] = str(obj.get("igdb.id") or "").strip()
 
-        if include_diagnostics and obj and isinstance(obj, dict):
-            matched = str(obj.get("IGDB_Name") or "").strip()
-            df.at[idx, "IGDB_MatchedName"] = matched
-            df.at[idx, "IGDB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
-            df.at[idx, "IGDB_MatchedYear"] = str(obj.get("IGDB_Year") or "").strip()
+        if include_diagnostics and registry is not None and obj and isinstance(obj, dict):
+            matched = str(obj.get("igdb.name") or "").strip()
+            _set_diag(df, int(idx), registry=registry, key="diagnostics.igdb.matched_name", value=matched)
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.igdb.match_score",
+                value=int(fuzzy_score(name, matched)) if matched else "",
+            )
+            year = obj.get("igdb.year")
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.igdb.matched_year",
+                value=int(year) if isinstance(year, int) else "",
+            )
 
 
 def _match_steam_appids(
@@ -221,6 +272,7 @@ def _match_steam_appids(
     steam: SteamClientLike,
     igdb: IGDBClientLike | None,
     include_diagnostics: bool,
+    registry: MetricsRegistry | None,
     active_total: int,
 ) -> None:
     def _details_is_game(d: object) -> bool:
@@ -232,14 +284,28 @@ def _match_steam_appids(
     def _apply_details(row_idx: int, personal: str, d: dict) -> None:
         matched = str(d.get("name") or "").strip()
         date = str((d.get("release_date") or {}).get("date") or "").strip()
-        if include_diagnostics:
-            df.at[row_idx, "Steam_MatchedName"] = matched
-            df.at[row_idx, "Steam_MatchScore"] = (
-                str(fuzzy_score(personal, matched)) if matched else ""
+        if include_diagnostics and registry is not None:
+            _set_diag(
+                df,
+                int(row_idx),
+                registry=registry,
+                key="diagnostics.steam.matched_name",
+                value=matched,
             )
-            df.at[row_idx, "Steam_MatchedYear"] = str(extract_year_hint(date) or "")
-            if "Steam_StoreType" in df.columns:
-                df.at[row_idx, "Steam_StoreType"] = str(d.get("type") or "").strip().lower()
+            _set_diag(
+                df,
+                int(row_idx),
+                registry=registry,
+                key="diagnostics.steam.match_score",
+                value=int(fuzzy_score(personal, matched)) if matched else "",
+            )
+            _set_diag(
+                df,
+                int(row_idx),
+                registry=registry,
+                key="diagnostics.steam.matched_year",
+                value=extract_year_hint(date) or "",
+            )
 
     for idx, row, name, _seen in iter_named_rows_with_progress(
         df,
@@ -249,19 +315,24 @@ def _match_steam_appids(
     ):
         steam_id = str(row.get("Steam_AppID", "") or "").strip()
         if not platform_is_pc_like(row.get("Platform", "")) and not steam_id:
-            if include_diagnostics:
-                df.at[idx, "Steam_MatchedName"] = ""
-                df.at[idx, "Steam_MatchScore"] = ""
-                df.at[idx, "Steam_MatchedYear"] = ""
+            if include_diagnostics and registry is not None:
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.steam.matched_name", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.steam.match_score", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.steam.matched_year", value="")
             continue
 
         if steam_id == IDENTITY_NOT_FOUND:
-            if include_diagnostics:
-                df.at[idx, "Steam_MatchedName"] = ""
-                df.at[idx, "Steam_MatchScore"] = ""
-                df.at[idx, "Steam_MatchedYear"] = ""
-                if "Steam_RejectedReason" in df.columns:
-                    df.at[idx, "Steam_RejectedReason"] = ""
+            if include_diagnostics and registry is not None:
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.steam.matched_name", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.steam.match_score", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.steam.matched_year", value="")
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.steam.rejected_reason",
+                    value="",
+                )
             continue
 
         if steam_id and steam_id.isdigit():
@@ -277,7 +348,7 @@ def _match_steam_appids(
             igdb_id = str(row.get("IGDB_ID", "") or "").strip()
             if igdb_id and igdb_id != IDENTITY_NOT_FOUND:
                 igdb_obj = igdb.get_by_id(igdb_id)
-                inferred = str((igdb_obj or {}).get("IGDB_SteamAppID") or "").strip()
+                inferred = str((igdb_obj or {}).get("igdb.cross_ids.steam_app_id") or "").strip()
                 if inferred.isdigit():
                     inferred_details = steam.get_app_details(int(inferred))
                     if _details_is_game(inferred_details) and isinstance(inferred_details, dict):
@@ -290,16 +361,29 @@ def _match_steam_appids(
         matched = str((res or {}).get("name") or "").strip()
         if res and res.get("id") is not None:
             df.at[idx, "Steam_AppID"] = str(res.get("id") or "").strip()
-        if include_diagnostics:
-            df.at[idx, "Steam_MatchedName"] = matched
-            df.at[idx, "Steam_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
-            df.at[idx, "Steam_MatchedYear"] = str((res or {}).get("release_year") or "").strip()
-            if "Steam_RejectedReason" in df.columns:
-                df.at[idx, "Steam_RejectedReason"] = str(
-                    (res or {}).get("rejected_reason") or ""
-                ).strip()
-            if "Steam_StoreType" in df.columns:
-                df.at[idx, "Steam_StoreType"] = str((res or {}).get("store_type") or "").strip()
+        if include_diagnostics and registry is not None:
+            _set_diag(df, int(idx), registry=registry, key="diagnostics.steam.matched_name", value=matched)
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.steam.match_score",
+                value=int(fuzzy_score(name, matched)) if matched else "",
+            )
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.steam.matched_year",
+                value=(res or {}).get("release_year") or "",
+            )
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.steam.rejected_reason",
+                value=str((res or {}).get("rejected_reason") or "").strip(),
+            )
 
 
 def _match_hltb_ids(
@@ -307,6 +391,7 @@ def _match_hltb_ids(
     *,
     client: HLTBClientLike,
     include_diagnostics: bool,
+    registry: MetricsRegistry | None,
     active_total: int,
 ) -> None:
     for idx, row, name, _seen in iter_named_rows_with_progress(
@@ -318,37 +403,97 @@ def _match_hltb_ids(
         hltb_id = str(row.get("HLTB_ID", "") or "").strip()
         hltb_query = str(row.get("HLTB_Query", "") or "").strip() or name
         if hltb_id == IDENTITY_NOT_FOUND or hltb_query == IDENTITY_NOT_FOUND:
-            if include_diagnostics:
-                df.at[idx, "HLTB_MatchedName"] = ""
-                df.at[idx, "HLTB_MatchScore"] = ""
-                df.at[idx, "HLTB_MatchedYear"] = ""
-                df.at[idx, "HLTB_MatchedPlatforms"] = ""
+            if include_diagnostics and registry is not None:
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.hltb.matched_name", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.hltb.match_score", value="")
+                _set_diag(df, int(idx), registry=registry, key="diagnostics.hltb.matched_year", value="")
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.hltb.matched_platforms",
+                    value="",
+                )
             continue
 
         if hltb_id:
             if not include_diagnostics:
                 continue
             obj = client.get_by_id(hltb_id)
-            if obj and isinstance(obj, dict):
-                matched = str(obj.get("HLTB_Name") or "").strip()
-                df.at[idx, "HLTB_MatchedName"] = matched
-                df.at[idx, "HLTB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
-                df.at[idx, "HLTB_MatchedYear"] = str(obj.get("HLTB_ReleaseYear") or "").strip()
-                df.at[idx, "HLTB_MatchedPlatforms"] = str(obj.get("HLTB_Platforms") or "").strip()
+            if include_diagnostics and registry is not None and obj and isinstance(obj, dict):
+                matched = str(obj.get("hltb.name") or "").strip()
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.hltb.matched_name",
+                    value=matched,
+                )
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.hltb.match_score",
+                    value=int(fuzzy_score(name, matched)) if matched else "",
+                )
+                year = obj.get("hltb.release_year")
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.hltb.matched_year",
+                    value=int(year) if isinstance(year, int) else "",
+                )
+                platforms = obj.get("hltb.platforms", [])
+                if isinstance(platforms, list):
+                    _set_diag(
+                        df,
+                        int(idx),
+                        registry=registry,
+                        key="diagnostics.hltb.matched_platforms",
+                        value=[str(p or "").strip() for p in platforms if str(p or "").strip()],
+                    )
             continue
 
         res = client.search(name, query=hltb_query, hltb_id=None)
         if res and isinstance(res, dict):
-            rid = str(res.get("HLTB_ID") or "").strip()
-            if rid:
+            rid = str(res.get("hltb.id") or "").strip()
+            if rid and rid.casefold() != "nan":
                 df.at[idx, "HLTB_ID"] = rid
             df.at[idx, "HLTB_Query"] = hltb_query
-            if include_diagnostics:
-                matched = str(res.get("HLTB_Name") or "").strip()
-                df.at[idx, "HLTB_MatchedName"] = matched
-                df.at[idx, "HLTB_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
-                df.at[idx, "HLTB_MatchedYear"] = str(res.get("HLTB_ReleaseYear") or "").strip()
-                df.at[idx, "HLTB_MatchedPlatforms"] = str(res.get("HLTB_Platforms") or "").strip()
+            if include_diagnostics and registry is not None:
+                matched = str(res.get("hltb.name") or "").strip()
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.hltb.matched_name",
+                    value=matched,
+                )
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.hltb.match_score",
+                    value=int(fuzzy_score(name, matched)) if matched else "",
+                )
+                year = res.get("hltb.release_year")
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.hltb.matched_year",
+                    value=int(year) if isinstance(year, int) else "",
+                )
+                platforms = res.get("hltb.platforms", [])
+                if isinstance(platforms, list):
+                    _set_diag(
+                        df,
+                        int(idx),
+                        registry=registry,
+                        key="diagnostics.hltb.matched_platforms",
+                        value=[str(p or "").strip() for p in platforms if str(p or "").strip()],
+                    )
 
 
 def _match_wikidata_qids(
@@ -356,6 +501,7 @@ def _match_wikidata_qids(
     *,
     client: WikidataClientLike,
     include_diagnostics: bool,
+    registry: MetricsRegistry | None,
     active_total: int,
 ) -> None:
     for idx, row, name, _seen in iter_named_rows_with_progress(
@@ -366,10 +512,28 @@ def _match_wikidata_qids(
     ):
         qid = str(row.get("Wikidata_QID", "") or "").strip()
         if qid == IDENTITY_NOT_FOUND:
-            if include_diagnostics:
-                df.at[idx, "Wikidata_MatchedLabel"] = ""
-                df.at[idx, "Wikidata_MatchScore"] = ""
-                df.at[idx, "Wikidata_MatchedYear"] = ""
+            if include_diagnostics and registry is not None:
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.wikidata.matched_label",
+                    value="",
+                )
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.wikidata.match_score",
+                    value="",
+                )
+                _set_diag(
+                    df,
+                    int(idx),
+                    registry=registry,
+                    key="diagnostics.wikidata.matched_year",
+                    value="",
+                )
             continue
         if qid:
             if not include_diagnostics:
@@ -377,15 +541,32 @@ def _match_wikidata_qids(
             obj = client.get_by_id(qid)
         else:
             obj = client.search(name, year_hint=_year_hint_from_row(row))
-            if obj and str(obj.get("Wikidata_QID", "") or "").strip():
-                df.at[idx, "Wikidata_QID"] = str(obj.get("Wikidata_QID") or "").strip()
-        if include_diagnostics and obj and isinstance(obj, dict):
-            matched = str(
-                obj.get("Wikidata_Label") or obj.get("Wikidata_MatchedLabel") or ""
-            ).strip()
-            df.at[idx, "Wikidata_MatchedLabel"] = matched
-            df.at[idx, "Wikidata_MatchScore"] = str(fuzzy_score(name, matched)) if matched else ""
-            df.at[idx, "Wikidata_MatchedYear"] = str(obj.get("Wikidata_ReleaseYear") or "").strip()
+            if obj and str(obj.get("wikidata.qid", "") or "").strip():
+                df.at[idx, "Wikidata_QID"] = str(obj.get("wikidata.qid") or "").strip()
+        if include_diagnostics and registry is not None and obj and isinstance(obj, dict):
+            matched = str(obj.get("wikidata.label") or "").strip()
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.wikidata.matched_label",
+                value=matched,
+            )
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.wikidata.match_score",
+                value=int(fuzzy_score(name, matched)) if matched else "",
+            )
+            year = obj.get("wikidata.release_year")
+            _set_diag(
+                df,
+                int(idx),
+                registry=registry,
+                key="diagnostics.wikidata.matched_year",
+                value=int(year) if isinstance(year, int) else "",
+            )
 
 
 def run_import(
@@ -394,18 +575,23 @@ def run_import(
     input_csv: Path,
     output_csv: Path,
     include_diagnostics: bool,
+    write_jsonl: bool = True,
 ) -> Path:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     ctx.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    normalize_catalog(input_csv, output_csv, include_diagnostics=include_diagnostics)
+    registry: MetricsRegistry | None = None
+    if include_diagnostics or write_jsonl:
+        registry = load_metrics_registry(_default_metrics_registry_path())
+
+    normalize_catalog(input_csv, output_csv, include_diagnostics=include_diagnostics, registry=registry)
     df = read_csv(output_csv)
     _ensure_year_hint_column(df)
 
     clients = ctx.build_clients()
     active_total = sum(1 for _, r in df.iterrows() if not _is_yes(r.get("Disabled", "")))
 
-    def _run_tasks(task_fns: dict[str, callable[[], pd.DataFrame]]) -> dict[str, pd.DataFrame]:
+    def _run_tasks(task_fns: dict[str, Callable[[], pd.DataFrame]]) -> dict[str, pd.DataFrame]:
         if not task_fns:
             return {}
         max_workers = min(
@@ -439,16 +625,18 @@ def run_import(
             dst[c] = src[c]
 
     # Stage 1 (fast): RAWG + IGDB in parallel.
-    stage1: dict[str, callable[[], pd.DataFrame]] = {}
+    stage1: dict[str, Callable[[], pd.DataFrame]] = {}
     rawg = clients.get("rawg")
     if "rawg" in ctx.sources and rawg is not None:
+        rawg_client = cast(RAWGClientLike, rawg)
         stage1["rawg"] = lambda: (
             (
                 lambda d: (
                     _match_rawg_ids(
                         d,
-                        client=rawg,
+                        client=rawg_client,
                         include_diagnostics=include_diagnostics,
+                        registry=registry,
                         active_total=active_total,
                     ),
                     d,
@@ -457,13 +645,15 @@ def run_import(
         )
     igdb = clients.get("igdb")
     if "igdb" in ctx.sources and igdb is not None:
+        igdb_client = cast(IGDBClientLike, igdb)
         stage1["igdb"] = lambda: (
             (
                 lambda d: (
                     _match_igdb_ids(
                         d,
-                        client=igdb,
+                        client=igdb_client,
                         include_diagnostics=include_diagnostics,
+                        registry=registry,
                         active_total=active_total,
                     ),
                     d,
@@ -478,17 +668,19 @@ def run_import(
             _merge_prefix_cols(df, src_df, "IGDB_", ("IGDB_ID",))
 
     # Stage 2: Steam + HLTB + Wikidata in parallel (Steam may infer from IGDB_ID).
-    stage2: dict[str, callable[[], pd.DataFrame]] = {}
+    stage2: dict[str, Callable[[], pd.DataFrame]] = {}
     steam = clients.get("steam")
     if "steam" in ctx.sources and steam is not None:
+        steam_client = cast(SteamClientLike, steam)
         stage2["steam"] = lambda: (
             (
                 lambda d: (
                     _match_steam_appids(
                         d,
-                        steam=steam,
-                        igdb=igdb,
+                        steam=steam_client,
+                        igdb=cast(IGDBClientLike, igdb) if igdb is not None else None,
                         include_diagnostics=include_diagnostics,
+                        registry=registry,
                         active_total=active_total,
                     ),
                     d,
@@ -497,13 +689,15 @@ def run_import(
         )
     hltb = clients.get("hltb")
     if "hltb" in ctx.sources and hltb is not None:
+        hltb_client = cast(HLTBClientLike, hltb)
         stage2["hltb"] = lambda: (
             (
                 lambda d: (
                     _match_hltb_ids(
                         d,
-                        client=hltb,
+                        client=hltb_client,
                         include_diagnostics=include_diagnostics,
+                        registry=registry,
                         active_total=active_total,
                     ),
                     d,
@@ -512,13 +706,15 @@ def run_import(
         )
     wikidata = clients.get("wikidata")
     if "wikidata" in ctx.sources and wikidata is not None:
+        wikidata_client = cast(WikidataClientLike, wikidata)
         stage2["wikidata"] = lambda: (
             (
                 lambda d: (
                     _match_wikidata_qids(
                         d,
-                        client=wikidata,
+                        client=wikidata_client,
                         include_diagnostics=include_diagnostics,
+                        registry=registry,
                         active_total=active_total,
                     ),
                     d,
@@ -535,7 +731,7 @@ def run_import(
             _merge_prefix_cols(df, src_df, "Wikidata_", ("Wikidata_QID",))
 
     if include_diagnostics:
-        df = fill_eval_tags(df, sources=set(ctx.sources), clients=clients)
+        df = fill_eval_tags(df, sources=set(ctx.sources), clients=clients, registry=registry)
     else:
         for c in ("ReviewTags", "MatchConfidence"):
             if c in df.columns:
@@ -543,6 +739,14 @@ def run_import(
 
     log_cache_stats(clients)
 
-    write_full_csv(df, output_csv)
+    artifacts = ArtifactStore(
+        run_dir=output_csv.parent,
+        registry=registry,
+        use_jsonl=write_jsonl,
+        reuse_jsonl=False,
+        jsonl_dir=output_csv.parent / "jsonl",
+    )
+    artifacts.write_catalog(df, output_csv)
     logging.info(f"✔ Import matching completed: {output_csv}")
+
     return output_csv

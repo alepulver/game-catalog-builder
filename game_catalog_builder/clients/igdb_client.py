@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import unicodedata
@@ -19,6 +18,7 @@ from ..utils.utilities import (
     normalize_game_name,
     pick_best_match,
 )
+from .parse import as_int, as_str, get_list_of_dicts, normalize_str_list, year_from_epoch_seconds
 from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
 
 TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
@@ -58,8 +58,7 @@ class IGDBClient:
         # Cache raw IGDB game payloads keyed by id (language:id). Derived output fields are
         # computed on-demand to keep caches independent of code changes.
         self._by_id: dict[str, Any] = {}
-        # Cache by exact query string, storing only lightweight candidates
-        # (id/name/first_release_date).
+        # Cache by exact query string, storing the raw IGDB response payload (list of game dicts).
         self._by_query: dict[str, list[dict[str, Any]]] = {}
         self._cache_io = CacheIOTracker(self.stats)
         self._load_cache(self._cache_io.load_json(self.cache_path))
@@ -140,30 +139,26 @@ class IGDBClient:
         if not isinstance(data, list):
             return data
 
-        # Populate by_id with raw game payloads and store only lightweight candidates under
-        # by_query.
-        candidates: list[dict[str, Any]] = []
+        # Cache the exact raw response under by_query, and populate by_id from it.
+        raw_items: list[dict[str, Any]] = []
         for it in data:
             if not isinstance(it, dict):
                 continue
             gid = it.get("id")
             if gid is None:
                 continue
-            id_key = f"{self.language}:{gid}"
+            gid_str = str(gid).strip()
+            if not gid_str:
+                continue
+            id_key = f"{self.language}:{gid_str}"
             self._by_id[id_key] = it
-            candidates.append(
-                {
-                    "id": gid,
-                    "name": it.get("name", ""),
-                    "first_release_date": it.get("first_release_date"),
-                }
-            )
-        self._by_query[qkey] = candidates
+            raw_items.append(it)
+        self._by_query[qkey] = raw_items
         self._save_cache()
         self.stats["by_query_fetch"] += 1
-        if not candidates:
+        if not raw_items:
             self.stats["by_query_negative_fetch"] += 1
-        return candidates
+        return raw_items
 
     def get_by_id(self, igdb_id: int | str) -> dict[str, Any] | None:
         """
@@ -197,7 +192,7 @@ class IGDBClient:
             cached = self._by_id.get(id_key)
             if isinstance(cached, dict):
                 self.stats["by_id_hit"] += 1
-                out[igdb_id_str] = self._extract_fields(cached)
+                out[igdb_id_str] = self._extract_metrics(cached)
             elif cached is None and id_key in self._by_id:
                 self.stats["by_id_negative_hit"] += 1
             else:
@@ -261,7 +256,7 @@ class IGDBClient:
                 fetched_any = True
                 self.stats["by_id_fetch"] += 1
                 fetched_ids.add(gid_str)
-                out[gid_str] = self._extract_fields(it)
+                out[gid_str] = self._extract_metrics(it)
             negative_any = False
             for want in chunk:
                 if want not in fetched_ids:
@@ -393,9 +388,7 @@ class IGDBClient:
         # Normalize to NFKC to avoid odd Unicode digits (e.g. "²" -> "2") and compatibility chars.
         search_text = unicodedata.normalize("NFKC", search_text)
         # Remove control characters (including uncommon unicode separators) to avoid query errors.
-        search_text = "".join(
-            (" " if unicodedata.category(ch).startswith("C") else ch) for ch in search_text
-        )
+        search_text = "".join((" " if unicodedata.category(ch).startswith("C") else ch) for ch in search_text)
         # IGDB uses a query DSL with `search "..."`; escape quotes/backslashes and strip control
         # characters to avoid 400s for odd titles.
         search_text = search_text.replace("\\", "\\\\").replace('"', '\\"')
@@ -435,9 +428,7 @@ class IGDBClient:
             # Try a narrow year window first to avoid common pitfalls like sequels, remakes,
             # and upcoming placeholders (e.g. "Silent Hill f").
             start = int(datetime(int(year_hint) - 1, 1, 1, tzinfo=timezone.utc).timestamp())
-            end = int(
-                datetime(int(year_hint) + 1, 12, 31, 23, 59, 59, tzinfo=timezone.utc).timestamp()
-            )
+            end = int(datetime(int(year_hint) + 1, 12, 31, 23, 59, 59, tzinfo=timezone.utc).timestamp())
             query = f'''
             search "{search_text}";
             {base_fields}
@@ -459,9 +450,7 @@ class IGDBClient:
             # Fallback: try a simpler normalized term to avoid DSL parsing issues.
             fallback = normalize_game_name(stripped_name or str(game_name or "")).strip()
             fallback = unicodedata.normalize("NFKC", fallback)
-            fallback = "".join(
-                (" " if unicodedata.category(ch).startswith("C") else ch) for ch in fallback
-            )
+            fallback = "".join((" " if unicodedata.category(ch).startswith("C") else ch) for ch in fallback)
             fallback = fallback.replace("\\", "\\\\").replace('"', '\\"')
             fallback = re.sub(r"[\r\n\t]+", " ", fallback).strip()
             if fallback and fallback != search_text:
@@ -473,8 +462,7 @@ class IGDBClient:
                 data = self._post_cached("games", query)
         if data is None:
             logging.warning(
-                f"IGDB search request failed for '{game_name}' (no response); "
-                "not caching as not-found."
+                f"IGDB search request failed for '{game_name}' (no response); not caching as not-found."
             )
             return None
         if not data or not isinstance(data, list) or len(data) == 0:
@@ -491,19 +479,14 @@ class IGDBClient:
             # Log top 5 closest matches when not found
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
-                logging.warning(
-                    f"Not found in IGDB: '{game_name}'. Closest matches: {', '.join(top_names)}"
-                )
+                logging.warning(f"Not found in IGDB: '{game_name}'. Closest matches: {', '.join(top_names)}")
             else:
                 logging.warning(f"Not found in IGDB: '{game_name}'. No matches found.")
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
         if score < 100:
-            msg = (
-                f"Close match for '{game_name}': Selected '{best.get('name', '')}' "
-                f"(score: {score}%)"
-            )
+            msg = f"Close match for '{game_name}': Selected '{best.get('name', '')}' (score: {score}%)"
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
                 msg += f", alternatives: {', '.join(top_names)}"
@@ -513,10 +496,9 @@ class IGDBClient:
         if igdb_id:
             raw = self._by_id.get(f"{self.language}:{igdb_id}")
             if isinstance(raw, dict):
-                return self._extract_fields(raw)
+                return self._extract_metrics(raw)
             logging.warning(
-                f"IGDB cache missing by_id payload for '{game_name}': id={igdb_id}. "
-                "Delete cache to rebuild."
+                f"IGDB cache missing by_id payload for '{game_name}': id={igdb_id}. Delete cache to rebuild."
             )
             return None
         return None
@@ -564,29 +546,24 @@ class IGDBClient:
         seen: set[str] = set()
         return [n for n in names if not (n in seen or seen.add(n))]
 
-    def _extract_fields(self, game: dict[str, Any]) -> dict[str, str]:
-        def join_names(items: Any) -> str:
+    def _extract_metrics(self, game: dict[str, Any]) -> dict[str, object]:
+        def names_list(items: Any) -> list[str]:
             if not items:
-                return ""
-            names: list[str] = []
+                return []
             if isinstance(items, dict):
-                name = str(items.get("name", "") or "").strip()
-                if name:
-                    names.append(name)
-            elif isinstance(items, list):
+                return normalize_str_list([as_str(items.get("name"))])
+            if isinstance(items, list):
+                out: list[str] = []
                 for item in items:
                     if isinstance(item, dict):
-                        name = str(item.get("name", "") or "").strip()
-                        if name:
-                            names.append(name)
+                        out.append(as_str(item.get("name")))
                     elif isinstance(item, str):
-                        s = item.strip()
-                        if s:
-                            names.append(s)
-            return ", ".join(names)
+                        out.append(as_str(item))
+                return normalize_str_list(out)
+            return []
 
         def _truncate(text: object, max_len: int = 500) -> str:
-            s = str(text or "").strip()
+            s = as_str(text)
             if not s:
                 return ""
             if len(s) <= max_len:
@@ -602,82 +579,65 @@ class IGDBClient:
                 if not isinstance(ic, dict):
                     continue
                 company = ic.get("company") or {}
-                cname = str(
-                    (company.get("name") if isinstance(company, dict) else "") or ""
-                ).strip()
+                cname = as_str((company.get("name") if isinstance(company, dict) else ""))
                 if not cname:
                     continue
                 if ic.get("developer") is True:
                     dev_list.append(cname)
                 if ic.get("publisher") is True:
                     pub_list.append(cname)
-        # de-dup preserving order
-        seen: set[str] = set()
-        dev_list = [x for x in dev_list if not (x.casefold() in seen or seen.add(x.casefold()))]
-        seen = set()
-        pub_list = [x for x in pub_list if not (x.casefold() in seen or seen.add(x.casefold()))]
-        year = ""
-        ts = game.get("first_release_date")
-        if isinstance(ts, (int, float)) and ts > 0:
-            try:
-                year = str(datetime.fromtimestamp(ts, tz=timezone.utc).year)
-            except Exception:
-                year = ""
+        dev_list = normalize_str_list(dev_list)
+        pub_list = normalize_str_list(pub_list)
+
+        year = year_from_epoch_seconds(game.get("first_release_date"))
 
         rating = game.get("rating", None)
-        rating_count = game.get("rating_count", None)
-        score_100 = ""
+        score_100: int | None = None
         if isinstance(rating, (int, float)):
-            try:
-                score_100 = str(int(round(float(rating))))
-            except Exception:
-                score_100 = ""
+            score_100 = int(round(float(rating)))
 
         agg = game.get("aggregated_rating", None)
-        agg_count = game.get("aggregated_rating_count", None)
-        agg_100 = ""
+        agg_100: int | None = None
         if isinstance(agg, (int, float)):
-            try:
-                agg_100 = str(int(round(float(agg))))
-            except Exception:
-                agg_100 = ""
+            agg_100 = int(round(float(agg)))
+
+        rating_count = as_int(game.get("rating_count"))
+        agg_count = as_int(game.get("aggregated_rating_count"))
 
         websites: list[str] = []
-        for w in (game.get("websites") or []) if isinstance(game.get("websites"), list) else []:
-            if not isinstance(w, dict):
-                continue
-            url = str(w.get("url") or "").strip()
+        for w in get_list_of_dicts(game.get("websites")):
+            url = as_str(w.get("url"))
             if url and url not in websites:
                 websites.append(url)
-        websites_str = ", ".join(websites[:5])
+        websites = websites[:5]
 
         return {
-            "IGDB_ID": str(game.get("id", "") or ""),
-            "IGDB_Name": str(game.get("name", "") or ""),
-            "IGDB_Year": year,
-            "IGDB_Summary": _truncate(game.get("summary", "")),
-            "IGDB_Websites": websites_str,
-            "IGDB_ParentGame": join_names(game.get("parent_game")),
-            "IGDB_VersionParent": join_names(game.get("version_parent")),
-            "IGDB_DLCs": join_names(game.get("dlcs")),
-            "IGDB_Expansions": join_names(game.get("expansions")),
-            "IGDB_Ports": join_names(game.get("ports")),
-            "IGDB_Platforms": join_names(game.get("platforms")),
-            "IGDB_Genres": join_names(game.get("genres")),
-            "IGDB_Themes": join_names(game.get("themes")),
-            "IGDB_GameModes": join_names(game.get("game_modes")),
-            "IGDB_Perspectives": join_names(game.get("player_perspectives")),
-            "IGDB_Franchise": join_names(game.get("franchises")),
-            "IGDB_Engine": join_names(game.get("game_engines")),
-            "IGDB_SteamAppID": steam_appid,
-            "IGDB_Developers": json.dumps(dev_list, ensure_ascii=False),
-            "IGDB_Publishers": json.dumps(pub_list, ensure_ascii=False),
-            "IGDB_Rating": str(rating if rating is not None else ""),
-            "IGDB_RatingCount": str(rating_count if rating_count is not None else ""),
-            "IGDB_AggregatedRating": str(agg if agg is not None else ""),
-            "IGDB_AggregatedRatingCount": str(agg_count if agg_count is not None else ""),
-            "Score_IGDB_100": score_100,
-            "Score_IGDBCritic_100": agg_100,
+            "igdb.id": as_str(game.get("id")),
+            "igdb.name": as_str(game.get("name")),
+            "igdb.year": year,
+            "igdb.summary": _truncate(game.get("summary", "")),
+            "igdb.websites": websites,
+            "igdb.alternative_names": names_list(game.get("alternative_names")),
+            "igdb.relationships.parent_game": (names_list(game.get("parent_game")) or [""])[0].strip(),
+            "igdb.relationships.version_parent": (names_list(game.get("version_parent")) or [""])[0].strip(),
+            "igdb.relationships.dlcs": names_list(game.get("dlcs")),
+            "igdb.relationships.expansions": names_list(game.get("expansions")),
+            "igdb.relationships.ports": names_list(game.get("ports")),
+            "igdb.platforms": names_list(game.get("platforms")),
+            "igdb.genres": names_list(game.get("genres")),
+            "igdb.themes": names_list(game.get("themes")),
+            "igdb.keywords": names_list(game.get("keywords")),
+            "igdb.game_modes": names_list(game.get("game_modes")),
+            "igdb.perspectives": names_list(game.get("player_perspectives")),
+            "igdb.franchise": names_list(game.get("franchises")),
+            "igdb.engine": names_list(game.get("game_engines")),
+            "igdb.cross_ids.steam_app_id": steam_appid,
+            "igdb.developers": dev_list,
+            "igdb.publishers": pub_list,
+            "igdb.score_count": rating_count,
+            "igdb.critic_score_count": agg_count,
+            "igdb.score_100": score_100,
+            "igdb.critic.score_100": agg_100,
         }
 
     def _steam_appid_from_external_games(self, external_games: list[Any]) -> str:
@@ -711,9 +671,7 @@ class IGDBClient:
             # Only keep raw IGDB game dicts here. Legacy extracted dicts (IGDB_*) are ignored;
             # they should be migrated in-place from by_query where raw payloads are available.
             self._by_id = {
-                str(k): v
-                for k, v in by_id.items()
-                if (isinstance(v, dict) and "id" in v) or v is None
+                str(k): v for k, v in by_id.items() if (isinstance(v, dict) and "id" in v) or v is None
             }
         if isinstance(by_query, dict):
             out: dict[str, list[dict[str, Any]]] = {}

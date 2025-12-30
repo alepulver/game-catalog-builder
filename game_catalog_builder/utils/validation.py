@@ -16,8 +16,10 @@ from .consistency import (
 from .utilities import fuzzy_score, normalize_game_name
 
 
-def _split_csv_list(s: str) -> list[str]:
-    return [p.strip() for p in (s or "").split(",") if p.strip()]
+def _as_str_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(x or "").strip() for x in value if str(x or "").strip()]
+    return []
 
 
 def _normalize_platform_token(token: str) -> str:
@@ -40,9 +42,9 @@ def _normalize_platform_token(token: str) -> str:
     return t
 
 
-def _normalize_platforms(platforms: str) -> set[str]:
+def _normalize_platforms(platforms: object) -> set[str]:
     out: set[str] = set()
-    for token in _split_csv_list(platforms):
+    for token in _as_str_list(platforms):
         norm = _normalize_platform_token(token)
         if norm:
             out.add(norm)
@@ -114,12 +116,13 @@ def _edition_tokens(title: str) -> set[str]:
     return out
 
 
-def _steam_looks_like_dlc(steam_name: str, steam_categories: str) -> bool:
+def _steam_looks_like_dlc(steam_name: str, steam_categories: object) -> bool:
     t = normalize_game_name(steam_name)
     tokens = set(t.split())
     if any(tok in tokens for tok in _DLC_TOKENS):
         return True
-    cats = normalize_game_name(steam_categories)
+    cats_list = _as_str_list(steam_categories)
+    cats = normalize_game_name(", ".join(cats_list)) if cats_list else ""
     if "downloadable content" in cats:
         return True
     return False
@@ -273,6 +276,63 @@ def generate_validation_report(
     """
     Produce a per-row cross-provider consistency report for the merged CSV.
     """
+    return render_validation_report(
+        generate_validation_metrics(df, thresholds=thresholds, enabled_providers=enabled_providers)
+    )
+
+
+_VALIDATION_REPORT_COLUMNS: dict[str, str] = {
+    "validation.name": "Name",
+    "validation.tags": "ValidationTags",
+    "validation.missing_providers": "MissingProviders",
+    "validation.provider_names.rawg": "RAWG_Name",
+    "validation.provider_names.igdb": "IGDB_Name",
+    "validation.provider_names.steam": "Steam_Name",
+    "validation.provider_names.hltb": "HLTB_Name",
+    "validation.years": "Years",
+    "validation.steam_year_diff_vs_primary": "SteamYearDiffVsPrimary",
+    "validation.edition_tokens": "EditionTokens",
+    "validation.series_numbers": "SeriesNumbers",
+    "validation.platforms": "Platforms",
+    "validation.platform_intersection": "PlatformIntersection",
+    "validation.genres": "Genres",
+    "validation.genre_intersection": "GenreIntersection",
+    "validation.steam_app_id": "SteamAppID",
+    "validation.igdb_steam_app_id": "IGDB_SteamAppID",
+    "validation.suggested_culprit": "SuggestedCulprit",
+    "validation.suggested_canonical_title": "SuggestedCanonicalTitle",
+    "validation.suggested_canonical_source": "SuggestedCanonicalSource",
+    "validation.review_title": "ReviewTitle",
+    "validation.review_title_reason": "ReviewTitleReason",
+}
+
+
+def render_validation_report(rows: list[dict[str, str]]) -> pd.DataFrame:
+    """
+    Convert dotted validation metric rows into the stable CSV column view.
+    """
+    out_rows: list[dict[str, str]] = []
+    for r in rows:
+        out: dict[str, str] = {}
+        for k, v in r.items():
+            col = _VALIDATION_REPORT_COLUMNS.get(str(k))
+            if not col:
+                continue
+            out[col] = str(v or "")
+        out_rows.append(out)
+    return pd.DataFrame(out_rows)
+
+
+def generate_validation_metrics(
+    df: pd.DataFrame,
+    *,
+    thresholds: ValidationThresholds | None = None,
+    enabled_providers: set[str] | None = None,
+) -> list[dict[str, str]]:
+    """
+    Produce per-row cross-provider consistency rows using dotted keys, then render using
+    `render_validation_report()`.
+    """
     if thresholds is None:
         thresholds = ValidationThresholds()
     enabled = {p.strip().lower() for p in (enabled_providers or set()) if p.strip()}
@@ -307,9 +367,7 @@ def generate_validation_report(
             years.append(("HLTB", hltb_year))
 
         steam_is_edition = _steam_is_edition_or_port(steam_name)
-        steam_is_dlc = _steam_looks_like_dlc(
-            str(r.get("Steam_Name", "") or ""), str(r.get("Steam_Categories", "") or "")
-        )
+        steam_is_dlc = _steam_looks_like_dlc(str(r.get("Steam_Name", "") or ""), r.get("Steam_Categories"))
 
         year_disagree_rawg_igdb = ""
         if rawg_year is not None and igdb_year is not None:
@@ -328,9 +386,9 @@ def generate_validation_report(
                     steam_year_disagree = "YES"
 
         platforms = [
-            ("RAWG", _normalize_platforms(str(r.get("RAWG_Platforms", "") or ""))),
-            ("IGDB", _normalize_platforms(str(r.get("IGDB_Platforms", "") or ""))),
-            ("Steam", _normalize_platforms(str(r.get("Steam_Platforms", "") or ""))),
+            ("RAWG", _normalize_platforms(r.get("RAWG_Platforms"))),
+            ("IGDB", _normalize_platforms(r.get("IGDB_Platforms"))),
+            ("Steam", _normalize_platforms(r.get("Steam_Platforms"))),
         ]
         non_empty = [(k, s) for k, s in platforms if s]
         platform_disagree = ""
@@ -372,9 +430,7 @@ def generate_validation_report(
         edition_disagree = ""
         if len({frozenset(v) for v in compared.values()}) >= 2:
             edition_disagree = "YES"
-        edition_summary = "; ".join(
-            f"{k}:{','.join(sorted(v))}" for k, v in edition_by_src.items() if v
-        )
+        edition_summary = "; ".join(f"{k}:{','.join(sorted(v))}" for k, v in edition_by_src.items() if v)
 
         # Non-English-ish signals: Cyrillic titles.
         cyrillic_prov: list[str] = []
@@ -425,10 +481,10 @@ def generate_validation_report(
         # Missing-provider severity: for clearly non-PC titles, treat missing Steam/SteamSpy as
         # informational (still recorded in MissingProviders).
         platforms_union = (
-            _normalize_platforms(str(r.get("RAWG_Platforms", "") or ""))
-            | _normalize_platforms(str(r.get("IGDB_Platforms", "") or ""))
-            | _normalize_platforms(str(r.get("Steam_Platforms", "") or ""))
-            | _normalize_platforms(str(r.get("HLTB_Platforms", "") or ""))
+            _normalize_platforms(r.get("RAWG_Platforms"))
+            | _normalize_platforms(r.get("IGDB_Platforms"))
+            | _normalize_platforms(r.get("Steam_Platforms"))
+            | _normalize_platforms(r.get("HLTB_Platforms"))
         )
         is_pc_like = "pc" in platforms_union
 
@@ -460,13 +516,11 @@ def generate_validation_report(
             else:
                 # Most often the IGDB match is wrong if Steam matched the input name well.
                 culprit = (
-                    "IGDB"
-                    if (score_steam and int(score_steam) >= thresholds.title_score_warn)
-                    else "Steam"
+                    "IGDB" if (score_steam and int(score_steam) >= thresholds.title_score_warn) else "Steam"
                 )
         elif platform_disagree == "YES":
             # A single odd platform set (e.g. web-only) is often a bad match.
-            if "web browser" in str(r.get("IGDB_Platforms", "") or "").lower():
+            if any("web browser" in p.casefold() for p in _as_str_list(r.get("IGDB_Platforms"))):
                 culprit = "IGDB"
             else:
                 culprit = _pick_title_culprit(
@@ -479,15 +533,9 @@ def generate_validation_report(
         elif year_disagree_rawg_igdb == "YES":
             # If Steam exists and strongly agrees with one year, blame the other.
             if steam_year is not None:
-                if (
-                    rawg_year is not None
-                    and abs(steam_year - rawg_year) <= thresholds.year_max_diff
-                ):
+                if rawg_year is not None and abs(steam_year - rawg_year) <= thresholds.year_max_diff:
                     culprit = "IGDB"
-                elif (
-                    igdb_year is not None
-                    and abs(steam_year - igdb_year) <= thresholds.year_max_diff
-                ):
+                elif igdb_year is not None and abs(steam_year - igdb_year) <= thresholds.year_max_diff:
                     culprit = "RAWG"
             if not culprit:
                 culprit = "RAWG/IGDB"
@@ -516,11 +564,7 @@ def generate_validation_report(
         suggested_rename = ""
         review_title = "YES" if steam_is_dlc else ""
         review_reason = "steam looks like dlc/demo" if steam_is_dlc else ""
-        if (
-            canonical_title
-            and name
-            and normalize_game_name(name) != normalize_game_name(canonical_title)
-        ):
+        if canonical_title and name and normalize_game_name(name) != normalize_game_name(canonical_title):
             high_signal = any(
                 x == "YES"
                 for x in (
@@ -530,9 +574,7 @@ def generate_validation_report(
                     steam_appid_mismatch,
                 )
             )
-            strong_crosscheck = bool(
-                steam_appid and igdb_steam_appid and steam_appid == igdb_steam_appid
-            )
+            strong_crosscheck = bool(steam_appid and igdb_steam_appid and steam_appid == igdb_steam_appid)
             has_consensus = consensus_count >= 2
             if high_signal and (has_consensus or strong_crosscheck):
                 suggested_rename = "YES"
@@ -610,10 +652,10 @@ def generate_validation_report(
             validation_tags.extend(consensus.tags())
 
         platform_sets = {
-            "rawg": _normalize_platforms(str(r.get("RAWG_Platforms", "") or "")),
-            "igdb": _normalize_platforms(str(r.get("IGDB_Platforms", "") or "")),
-            "steam": _normalize_platforms(str(r.get("Steam_Platforms", "") or "")),
-            "hltb": _normalize_platforms(str(r.get("HLTB_Platforms", "") or "")),
+            "rawg": _normalize_platforms(r.get("RAWG_Platforms")),
+            "igdb": _normalize_platforms(r.get("IGDB_Platforms")),
+            "steam": _normalize_platforms(r.get("Steam_Platforms")),
+            "hltb": _normalize_platforms(r.get("HLTB_Platforms")),
         }
         platform_tags = platform_outlier_tags(platform_sets)
         validation_tags.extend(platform_tags)
@@ -621,16 +663,16 @@ def generate_validation_report(
         year_tags = year_outlier_tags(years_map, max_diff=thresholds.year_max_diff)
         validation_tags.extend(year_tags)
 
-        def _normalize_genres(genres: str) -> set[str]:
+        def _normalize_genres(genres: object) -> set[str]:
             out: set[str] = set()
-            for part in [p.strip() for p in str(genres or "").split(",") if p.strip()]:
+            for part in _as_str_list(genres):
                 out.add(normalize_game_name(part))
             return {x for x in out if x}
 
         genre_sets = {
-            "rawg": _normalize_genres(str(r.get("RAWG_Genres", "") or "")),
-            "igdb": _normalize_genres(str(r.get("IGDB_Genres", "") or "")),
-            "steam": _normalize_genres(str(r.get("Steam_Tags", "") or "")),
+            "rawg": _normalize_genres(r.get("RAWG_Genres")),
+            "igdb": _normalize_genres(r.get("IGDB_Genres")),
+            "steam": _normalize_genres(r.get("Steam_Tags")),
         }
         present_genre_providers = [p for p, s in genre_sets.items() if s]
         genre_intersection = (
@@ -644,9 +686,7 @@ def generate_validation_report(
             for p in present_genre_providers:
                 for g in genre_sets[p]:
                     counts[g] = counts.get(g, 0) + 1
-            consensus_genres = {
-                g for g, c in counts.items() if c > len(present_genre_providers) / 2
-            }
+            consensus_genres = {g for g, c in counts.items() if c > len(present_genre_providers) / 2}
             if not consensus_genres:
                 validation_tags.append("genre_no_consensus")
             else:
@@ -672,35 +712,35 @@ def generate_validation_report(
 
         rows.append(
             {
-                "Name": name,
-                "ValidationTags": ", ".join(validation_tags),
-                "MissingProviders": ", ".join(not_found),
-                "RAWG_Name": rawg_name,
-                "IGDB_Name": igdb_name,
-                "Steam_Name": steam_name,
-                "HLTB_Name": hltb_name,
-                "Years": "; ".join(f"{k}:{y}" for k, y in years),
-                "SteamYearDiffVsPrimary": steam_year_diff_vs_primary,
-                "EditionTokens": edition_summary,
-                "SeriesNumbers": series_summary,
-                "Platforms": "; ".join(f"{k}:{','.join(sorted(s))}" for k, s in non_empty),
-                "PlatformIntersection": platform_intersection,
-                "Genres": "; ".join(
+                "validation.name": name,
+                "validation.tags": ", ".join(validation_tags),
+                "validation.missing_providers": ", ".join(not_found),
+                "validation.provider_names.rawg": rawg_name,
+                "validation.provider_names.igdb": igdb_name,
+                "validation.provider_names.steam": steam_name,
+                "validation.provider_names.hltb": hltb_name,
+                "validation.years": "; ".join(f"{k}:{y}" for k, y in years),
+                "validation.steam_year_diff_vs_primary": steam_year_diff_vs_primary,
+                "validation.edition_tokens": edition_summary,
+                "validation.series_numbers": series_summary,
+                "validation.platforms": "; ".join(f"{k}:{','.join(sorted(s))}" for k, s in non_empty),
+                "validation.platform_intersection": platform_intersection,
+                "validation.genres": "; ".join(
                     f"{k}:{','.join(sorted(genre_sets[k]))}"
                     for k in ("rawg", "igdb", "steam")
                     if genre_sets.get(k)
                 ),
-                "GenreIntersection": (
+                "validation.genre_intersection": (
                     ", ".join(sorted(genre_intersection)) if genre_intersection else ""
                 ),
-                "SteamAppID": steam_appid,
-                "IGDB_SteamAppID": igdb_steam_appid,
-                "SuggestedCulprit": culprit,
-                "SuggestedCanonicalTitle": canonical_title,
-                "SuggestedCanonicalSource": canonical_source,
-                "ReviewTitle": review_title,
-                "ReviewTitleReason": review_reason,
+                "validation.steam_app_id": steam_appid,
+                "validation.igdb_steam_app_id": igdb_steam_appid,
+                "validation.suggested_culprit": culprit,
+                "validation.suggested_canonical_title": canonical_title,
+                "validation.suggested_canonical_source": canonical_source,
+                "validation.review_title": review_title,
+                "validation.review_title_reason": review_reason,
             }
         )
 
-    return pd.DataFrame(rows)
+    return rows

@@ -18,9 +18,7 @@ def test_steam_cache_is_id_based(tmp_path, monkeypatch):
                 if "storesearch" in url:
                     return {"items": [{"id": 123, "name": "Example Game", "type": "app"}]}
                 if "appdetails" in url:
-                    return {
-                        "123": {"success": True, "data": {"name": "Example Game", "is_free": True}}
-                    }
+                    return {"123": {"success": True, "data": {"name": "Example Game", "is_free": True}}}
                 raise AssertionError(f"unexpected url {url}")
 
         return Resp()
@@ -31,8 +29,10 @@ def test_steam_cache_is_id_based(tmp_path, monkeypatch):
     client = SteamClient(cache_path=cache_path, min_interval_s=0.0)
 
     best = client.search_appid("Example Game")
+    assert best is not None
     assert best["id"] == 123
     details = client.get_app_details(123)
+    assert details is not None
     assert details["name"] == "Example Game"
     client._cache_io.flush()
 
@@ -40,9 +40,7 @@ def test_steam_cache_is_id_based(tmp_path, monkeypatch):
     assert "by_query" in raw and "by_id" in raw
     assert "by_details" not in raw
     assert raw["by_id"]["123"]["name"] == "Example Game"
-    assert any(
-        k.startswith("l:english|cc:US|term:Example Game") for k in raw.get("by_query", {}).keys()
-    )
+    assert any(k.startswith("l:english|cc:US|term:Example Game") for k in raw.get("by_query", {}).keys())
 
 
 def test_steam_negative_caching_avoids_repeat_search(tmp_path, monkeypatch):
@@ -105,6 +103,7 @@ def test_rawg_cache_is_id_based(tmp_path, monkeypatch):
     client = RAWGClient(api_key="x", cache_path=cache_path, language="en", min_interval_s=0.0)
 
     best = client.search("Example Game")
+    assert best is not None
     assert best["id"] == 999
     client._cache_io.flush()
 
@@ -209,8 +208,9 @@ def test_igdb_cache_is_id_based(tmp_path, monkeypatch):
     monkeypatch.setattr(client, "_post", fake_post)
 
     enriched = client.search("Example Game")
-    assert enriched["IGDB_ID"] == "42"
-    assert enriched["IGDB_Genres"] == "Shooter"
+    assert enriched is not None
+    assert enriched["igdb.id"] == "42"
+    assert enriched["igdb.genres"] == ["Shooter"]
 
     client._cache_io.flush()
     raw = json.loads((tmp_path / "igdb_cache.json").read_text(encoding="utf-8"))

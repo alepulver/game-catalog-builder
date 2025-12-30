@@ -22,7 +22,8 @@ def build_provider_clients(
     clients: dict[str, object] = {}
 
     if "rawg" in sources:
-        api_key = str((credentials.get("rawg", {}) or {}).get("api_key", "") or "").strip()
+        rawg_creds = credentials.get("rawg")
+        api_key = str(rawg_creds.get("api_key", "") or "").strip() if isinstance(rawg_creds, dict) else ""
         if api_key:
             clients["rawg"] = RAWGClient(
                 api_key=api_key,
@@ -31,8 +32,11 @@ def build_provider_clients(
             )
 
     if "igdb" in sources:
-        client_id = str((credentials.get("igdb", {}) or {}).get("client_id", "") or "").strip()
-        secret = str((credentials.get("igdb", {}) or {}).get("client_secret", "") or "").strip()
+        igdb_creds = credentials.get("igdb")
+        client_id = str(igdb_creds.get("client_id", "") or "").strip() if isinstance(igdb_creds, dict) else ""
+        secret = (
+            str(igdb_creds.get("client_secret", "") or "").strip() if isinstance(igdb_creds, dict) else ""
+        )
         if client_id and secret:
             clients["igdb"] = IGDBClient(
                 client_id=client_id,

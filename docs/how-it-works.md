@@ -1,6 +1,6 @@
 # How the enrichment works
 
-This project enriches a “personal catalog” CSV (from MyVideoGameList) with metadata from multiple providers, then merges everything into a single output CSV.
+This project enriches a “personal catalog” CSV (from MyVideoGameList) with metadata from multiple providers, producing internal JSONL artifacts and exporting CSV/JSON views.
 
 ## Recommended workflow (spreadsheet round-trip)
 
@@ -8,12 +8,23 @@ Keep one source-of-truth catalog, and treat enriched output as an editable view:
 
 1. `import` → create/update `data/input/Games_Catalog.csv` (adds stable `RowId`, proposes provider IDs, writes diagnostics).
 2. Optional `resolve` → mutate pins only when explicitly requested (repin-or-unpin) based on diagnostics.
-3. `enrich` → generate provider outputs + `data/output/Games_Enriched.csv` from pinned IDs.
-4. Optional user edits → edit `data/output/Games_Enriched.csv` (user fields and/or provider ID pins).
-5. `sync` → copy user-editable fields and provider ID pins back into `data/input/Games_Catalog.csv`.
-6. `enrich` again → regenerate public/provider columns after pin fixes or user edits.
+3. `enrich` → generate internal JSONL (`data/output/jsonl/*`) from pinned IDs.
+4. `export` → render a user-facing view (CSV/JSON/JSONL) from JSONL.
+5. Optional user edits → edit the exported view (user fields and/or provider ID pins).
+6. `sync` → copy user-editable fields and provider ID pins back into `data/input/Games_Catalog.csv`.
+7. `enrich` again → regenerate public/provider columns after pin fixes or user edits.
 
-`Games_Catalog.csv` is the only file that should be treated as durable program input across runs.
+`Games_Catalog.csv` is the user-facing “catalog sheet”. When JSONL is enabled (default), the code
+also writes/reads a typed internal representation next to it:
+
+- `data/input/jsonl/Games_Catalog.jsonl`
+
+Notes:
+- `import` writes the catalog JSONL by default (disable with `import --no-jsonl`).
+- `enrich` reads the catalog JSONL by default (disable with `enrich --no-jsonl`).
+- `enrich` writes provider/enriched JSONL by default. Use `export` to produce CSV/JSON outputs.
+- Compatibility: `enrich --write-csv` restores the legacy behavior of writing `data/output/Games_Enriched.csv`
+  and `data/output/Provider_*.csv` directly.
 
 ## Overview
 
@@ -32,6 +43,34 @@ Keep one source-of-truth catalog, and treat enriched output as an editable view:
 Providers run in parallel at the CLI level, but each provider client itself is synchronous (no async in clients).
 
 Logging defaults to `INFO` with periodic progress lines (e.g. `25/958`); per-row provider “Processing …” lines are `DEBUG` (enable with `--debug`).
+
+## Output modes (enrich/export)
+
+`enrich` is deterministic and read-only with respect to your catalog: it never mutates `data/input/Games_Catalog.csv`.
+
+For details on metric keys, the metrics registry, and JSONL manifests, see `docs/metrics-registry.md`.
+
+Default outputs (recommended):
+
+- `enrich` writes:
+  - internal JSONL + manifests: `data/output/jsonl/*.jsonl` and `data/output/jsonl/*.manifest.json`
+- `export` writes user-facing views:
+  - CSV: `data/output/csv/*.csv`
+  - JSON: `data/output/json/*.json`
+  - JSONL view: `data/output/json/*.jsonl`
+
+Compatibility flags:
+
+- `enrich --write-csv`: also writes `data/output/Games_Enriched.csv` and `data/output/Provider_*.csv`
+  (registry-selected columns/order when JSONL is enabled).
+- `enrich --no-jsonl`: memory-only mode (no JSONL read/write; operates from CSV + provider caches).
+- `enrich --reuse-jsonl`: reuse existing provider JSONLs under `data/output/jsonl/` to skip provider calls
+  when possible.
+  - If reuse fails due to an incompatible/old JSONL format, delete the referenced
+    `data/output/jsonl/Provider_<provider>.jsonl` (and its `.manifest.json`) and rerun without
+    `--reuse-jsonl` once to regenerate.
+  - Partial reuse is supported: if a provider JSONL exists but is missing some RowIds, only the
+    missing rows are recomputed and the JSONL is rewritten.
 
 `Games_Enriched.csv` includes derived identity/consistency helpers such as:
 
@@ -159,6 +198,31 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - Final file always includes only `RowId`, `Name`, plus that provider’s prefixed columns
     (e.g. `IGDB_*`).
 
+- Internal JSONL outputs (`data/output/jsonl/*.jsonl`)
+  - Written at the end of `enrich` using the metrics registry (defaults to
+    `data/metrics-registry.yaml`, falling back to `data/metrics-registry.example.yaml`).
+  - Providers and derived-metric code emit canonical dotted metric keys (e.g. `rawg.metacritic_100`);
+    the registry defines how those keys render into CSV column names + basic types.
+  - Registry format is “metric key → CSV column + type” (version 2); it must list every metric key
+    you want preserved/exported.
+  - Uses a stable row envelope (`row_id`, `personal`, `pins`, `metrics`, …) so lists/objects can be
+    preserved (no comma-join/re-splitting).
+  - A sidecar manifest is written per JSONL file to preserve the exact CSV column set/order for
+    round-trippable exports:
+    - `data/output/jsonl/*.manifest.json`
+  - Optional: pass `--export-json` to also write `data/output/json/Games_Enriched.json` (single JSON
+    file; convenient for ad-hoc inspection but not streamable like JSONL).
+  - You can disable JSONL entirely with `enrich --no-jsonl` (exports still work if you also write CSVs,
+    but you lose typed JSONL artifacts and JSONL-based export).
+- To bypass registry selection and include every provider/derived column, use `enrich --all-metrics`
+  (unmapped columns are stored under deterministic `*.<field>` metric keys and exported via the manifest mapping).
+
+- CSV export views (`data/output/csv/*.csv`)
+  - Generated on-demand via `python run.py export` by rendering from internal JSONL (and the JSONL
+    manifest, so empty columns are preserved).
+  - `export` also supports `--format json` and `--format jsonl` for JSON/JSONL views based on the
+    same manifest column set.
+
 - Import output (`data/input/Games_Catalog.csv`)
   - Written once at the end of the import command.
   - During import, HLTB matching progress is also checkpointed every 25 processed rows because HLTB
@@ -177,8 +241,10 @@ The tool is designed to be resumable, so it persists both caches and intermediat
   - Written after all selected providers finish.
 - After merging, diagnostic/eval columns are dropped so the enriched CSV stays focused on
   user-editable fields + provider enrichment fields.
+- `enrich` re-renders `Games_Enriched.csv` and each enabled `Provider_*.csv` from internal JSONL, so
+  CSV outputs follow the registry-selected columns/order.
 - Enriched outputs include a small set of provider score fields normalized to 0–100 where possible:
-  - `Score_RAWG_100`, `Score_IGDB_100`, `Score_SteamSpy_100`, `Score_HLTB_100`
+  - `RAWG_Score_100`, `IGDB_Score_100`, `SteamSpy_Score_100`, `HLTB_Score_100`
 - Enriched outputs also include a small set of computed “signals” (Phase 1):
   - Reach: `Reach_SteamSpyOwners_*` (parsed from SteamSpy owners ranges)
   - Reach (cross-platform-ish): RAWG `added` / `added_by_status.*` is incorporated into `Reach_Composite` when present
@@ -199,7 +265,7 @@ The tool is designed to be resumable, so it persists both caches and intermediat
 - Start by copying the checked-in baseline:
   - `cp data/production_tiers.example.yaml data/production_tiers.yaml`
 - To generate a focused TODO list from an existing enriched CSV (offline; no network):
-  - `./.venv/bin/python run.py collect-production-tiers data/output/Games_Enriched.csv --only-missing --out data/production_tiers.todo.yaml --base data/production_tiers.yaml`
+  - `./.venv/bin/python run.py collect-production-tiers data/output/jsonl/Games_Enriched.jsonl --only-missing --out data/production_tiers.todo.yaml --base data/production_tiers.yaml`
 
 Notes:
 - The collector scans all available `*_Publishers` / `*_Developers` columns (Steam/IGDB/RAWG/Wikidata) in the
@@ -211,7 +277,7 @@ Recommended workflow (keep enrich deterministic and read-only):
 
 1. Run `enrich` to populate `*_Publishers` / `*_Developers`.
 2. Run `collect-production-tiers` to generate/update the TODO list (only entities missing tiers):
-   - `./.venv/bin/python run.py collect-production-tiers data/output/Games_Enriched.csv --only-missing --out data/production_tiers.todo.yaml --base data/production_tiers.yaml`
+   - `./.venv/bin/python run.py collect-production-tiers data/output/jsonl/Games_Enriched.jsonl --only-missing --out data/production_tiers.todo.yaml --base data/production_tiers.yaml`
 3. Curate tiers in `data/production_tiers.yaml` (`AAA` / `AA` / `Indie`), then re-run `enrich` to recompute `Production_Tier`.
 
 ## Logs (how to read them)
@@ -268,6 +334,7 @@ Recommended workflow (keep enrich deterministic and read-only):
 - Wikipedia signals (summary + pageviews) are fetched as soon as the Wikidata entity provides an `enwiki` title (pipelined; does not wait for all rows/QIDs).
 - Linked entity labels (developers/publishers/platforms/genres/etc) are fetched via `wbgetentities&props=labels` in batches and cached.
   - During `import`, existing `Wikidata_QID` values are prefetched in bulk so warm-cache imports don’t do per-row Wikidata requests.
+  - `enrich` does not do name-based Wikidata searches when `Wikidata_QID` is missing; pin QIDs during `import` (or use `resolve` to retry).
 
 ## Merge behavior
 

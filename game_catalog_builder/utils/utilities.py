@@ -132,7 +132,13 @@ def read_csv(path: str | Path) -> pd.DataFrame:
 
 def write_csv(df: pd.DataFrame, path: str | Path) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
+    from ..metrics.csv_render import to_csv_cell
+
+    # Avoid leaking NaN/NaT into output CSVs (pandas would stringify them as "nan").
+    out = df.copy()
+    for c in out.columns:
+        out[c] = out[c].map(to_csv_cell)
+    out.to_csv(path, index=False)
 
 
 def ensure_columns(df: pd.DataFrame, cols_with_defaults: dict[str, Any]) -> pd.DataFrame:
@@ -153,7 +159,7 @@ def ensure_row_ids(df: pd.DataFrame, *, col: str = "RowId") -> tuple[pd.DataFram
     created = 0
 
     if col not in out.columns:
-        out.insert(0, col, [""] * len(out))
+        out.insert(0, col, pd.Series([""] * len(out), index=out.index, dtype=str))
 
     vals = out[col].astype(str).fillna("").str.strip()
     missing_mask = vals == ""
@@ -569,7 +575,7 @@ def with_retries(
     retries: int = RETRY.retries,
     base_sleep_s: float = RETRY.base_sleep_s,
     jitter_s: float = RETRY.jitter_s,
-    retry_on: tuple[type, ...] = (Exception,),
+    retry_on: tuple[type[BaseException], ...] = (Exception,),
     on_fail_return: Any = None,
     context: str | None = None,
     retry_stats: dict[str, Any] | None = None,
@@ -643,24 +649,16 @@ def with_retries(
                         )
                         http_types = (requests.exceptions.HTTPError,)
                         if isinstance(last_exc, net_types):
-                            logging.error(
-                                f"[NETWORK] {context}: {type(last_exc).__name__}: {last_exc}"
-                            )
+                            logging.error(f"[NETWORK] {context}: {type(last_exc).__name__}: {last_exc}")
                         elif isinstance(last_exc, http_types):
-                            logging.error(
-                                f"[HTTP] {context}: {type(last_exc).__name__}: {last_exc}"
-                            )
+                            logging.error(f"[HTTP] {context}: {type(last_exc).__name__}: {last_exc}")
                         else:
-                            logging.error(
-                                f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}"
-                            )
+                            logging.error(f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}")
                     except Exception:
                         logging.error(f"[REQUEST] {context}: {type(last_exc).__name__}: {last_exc}")
                 if retry_stats is not None:
                     if is_network:
-                        retry_stats["network_failures"] = (
-                            int(retry_stats.get("network_failures", 0)) + 1
-                        )
+                        retry_stats["network_failures"] = int(retry_stats.get("network_failures", 0)) + 1
                     if is_http:
                         retry_stats["http_failures"] = int(retry_stats.get("http_failures", 0)) + 1
                 return on_fail_return
@@ -670,12 +668,10 @@ def with_retries(
             if retry_stats is not None:
                 retry_stats["retry_attempts"] = int(retry_stats.get("retry_attempts", 0)) + 1
                 if is_429:
-                    retry_stats["http_429_retries"] = (
-                        int(retry_stats.get("http_429_retries", 0)) + 1
+                    retry_stats["http_429_retries"] = int(retry_stats.get("http_429_retries", 0)) + 1
+                    retry_stats["http_429_backoff_ms"] = int(retry_stats.get("http_429_backoff_ms", 0)) + int(
+                        round(sleep * 1000.0)
                     )
-                    retry_stats["http_429_backoff_ms"] = int(
-                        retry_stats.get("http_429_backoff_ms", 0)
-                    ) + int(round(sleep * 1000.0))
             time.sleep(sleep)
     return on_fail_return
 
@@ -689,9 +685,7 @@ def network_failures_count(stats: dict[str, Any] | None) -> int:
         return 0
 
 
-def raise_on_new_network_failure(
-    stats: dict[str, Any] | None, *, before: int, context: str
-) -> None:
+def raise_on_new_network_failure(stats: dict[str, Any] | None, *, before: int, context: str) -> None:
     """
     Raise a clear error when a network failure happened during a provider request.
 
@@ -700,9 +694,7 @@ def raise_on_new_network_failure(
     """
     after = network_failures_count(stats)
     if after > before:
-        raise RuntimeError(
-            f"Network unavailable while calling {context}. Enable internet access and rerun."
-        )
+        raise RuntimeError(f"Network unavailable while calling {context}. Enable internet access and rerun.")
 
 
 @dataclass
@@ -730,12 +722,10 @@ class CacheIOTracker:
         t0 = time.perf_counter()
         raw = load_json_cache(path)
         t1 = time.perf_counter()
-        self.stats[f"{self.prefix}_load_count"] = (
-            int(self.stats.get(f"{self.prefix}_load_count", 0) or 0) + 1
+        self.stats[f"{self.prefix}_load_count"] = int(self.stats.get(f"{self.prefix}_load_count", 0) or 0) + 1
+        self.stats[f"{self.prefix}_load_ms"] = int(self.stats.get(f"{self.prefix}_load_ms", 0) or 0) + int(
+            round((t1 - t0) * 1000.0)
         )
-        self.stats[f"{self.prefix}_load_ms"] = int(
-            self.stats.get(f"{self.prefix}_load_ms", 0) or 0
-        ) + int(round((t1 - t0) * 1000.0))
         return raw
 
     def save_json(self, cache: dict[str, Any], path: str | Path) -> None:
@@ -766,12 +756,8 @@ class CacheIOTracker:
         t1 = time.perf_counter()
         self._last_save_s = time.monotonic()
         dur_ms = int(round((t1 - t0) * 1000.0))
-        self.stats[f"{self.prefix}_save_count"] = (
-            int(self.stats.get(f"{self.prefix}_save_count", 0) or 0) + 1
-        )
-        self.stats[f"{self.prefix}_save_ms"] = (
-            int(self.stats.get(f"{self.prefix}_save_ms", 0) or 0) + dur_ms
-        )
+        self.stats[f"{self.prefix}_save_count"] = int(self.stats.get(f"{self.prefix}_save_count", 0) or 0) + 1
+        self.stats[f"{self.prefix}_save_ms"] = int(self.stats.get(f"{self.prefix}_save_ms", 0) or 0) + dur_ms
 
         slow_ms = int(getattr(CACHE, "slow_save_log_ms", 0) or 0)
         if slow_ms > 0 and dur_ms >= slow_ms:

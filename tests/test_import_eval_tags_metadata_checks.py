@@ -22,8 +22,8 @@ class _IGDBStub:
         self,
         *,
         year: str,
-        platforms: str,
-        genres: str,
+        platforms: list[str],
+        genres: list[str],
         version_parent: str = "",
         ports: str = "",
     ):
@@ -35,21 +35,21 @@ class _IGDBStub:
 
     def get_by_id(self, _id: str):
         return {
-            "IGDB_Year": self._year,
-            "IGDB_Platforms": self._platforms,
-            "IGDB_Genres": self._genres,
-            "IGDB_VersionParent": self._version_parent,
-            "IGDB_Ports": self._ports,
+            "igdb.year": self._year,
+            "igdb.platforms": self._platforms,
+            "igdb.genres": self._genres,
+            "igdb.relationships.version_parent": self._version_parent,
+            "igdb.relationships.ports": self._ports,
         }
 
 
 class _HLTBStub:
-    def __init__(self, *, year: str, platforms: str):
+    def __init__(self, *, year: str, platforms: list[str]):
         self._year = year
         self._platforms = platforms
 
     def get_by_id(self, _id: str):
-        return {"HLTB_ReleaseYear": self._year, "HLTB_Platforms": self._platforms}
+        return {"hltb.release_year": self._year, "hltb.platforms": self._platforms}
 
 
 class _SteamStub:
@@ -61,7 +61,7 @@ class _SteamStub:
 
 
 def test_fill_eval_tags_flags_year_outlier_when_rawg_igdb_agree() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -86,8 +86,8 @@ def test_fill_eval_tags_flags_year_outlier_when_rawg_igdb_agree() -> None:
         sources={"rawg", "igdb", "hltb"},
         clients={
             "rawg": _RAWGStub(released="1993-12-10", platforms=["PC"], genres=["Shooter"]),
-            "igdb": _IGDBStub(year="1993", platforms="PC", genres="Shooter"),
-            "hltb": _HLTBStub(year="2016", platforms="PC"),
+            "igdb": _IGDBStub(year="1993", platforms=["PC"], genres=["Shooter"]),
+            "hltb": _HLTBStub(year="2016", platforms=["PC"]),
         },
     )
     tags = out.iloc[0]["ReviewTags"]
@@ -97,7 +97,7 @@ def test_fill_eval_tags_flags_year_outlier_when_rawg_igdb_agree() -> None:
 
 
 def test_fill_eval_tags_flags_platform_outlier() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -122,8 +122,8 @@ def test_fill_eval_tags_flags_platform_outlier() -> None:
         sources={"rawg", "igdb", "hltb"},
         clients={
             "rawg": _RAWGStub(released="1993-12-10", platforms=["PC"], genres=["Shooter"]),
-            "igdb": _IGDBStub(year="1993", platforms="PC", genres="Shooter"),
-            "hltb": _HLTBStub(year="1993", platforms="PlayStation 2"),
+            "igdb": _IGDBStub(year="1993", platforms=["PC"], genres=["Shooter"]),
+            "hltb": _HLTBStub(year="1993", platforms=["PlayStation 2"]),
         },
     )
     tags = out.iloc[0]["ReviewTags"]
@@ -132,7 +132,7 @@ def test_fill_eval_tags_flags_platform_outlier() -> None:
 
 
 def test_fill_eval_tags_flags_genre_disagree_rawg_igdb() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -154,7 +154,7 @@ def test_fill_eval_tags_flags_genre_disagree_rawg_igdb() -> None:
         sources={"rawg", "igdb"},
         clients={
             "rawg": _RAWGStub(released="1993-12-10", platforms=["PC"], genres=["Shooter"]),
-            "igdb": _IGDBStub(year="1993", platforms="PC", genres="Role-playing (RPG)"),
+            "igdb": _IGDBStub(year="1993", platforms=["PC"], genres=["Role-playing (RPG)"]),
         },
     )
     tags = out.iloc[0]["ReviewTags"]
@@ -163,7 +163,7 @@ def test_fill_eval_tags_flags_genre_disagree_rawg_igdb() -> None:
 
 
 def test_fill_eval_tags_adds_provider_outlier_when_two_agree() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -188,8 +188,8 @@ def test_fill_eval_tags_adds_provider_outlier_when_two_agree() -> None:
         sources={"rawg", "igdb", "hltb"},
         clients={
             "rawg": _RAWGStub(released="2001-06-22", platforms=["PC"], genres=["Shooter"]),
-            "igdb": _IGDBStub(year="2001", platforms="PC", genres="Shooter"),
-            "hltb": _HLTBStub(year="2009", platforms="PC"),
+            "igdb": _IGDBStub(year="2001", platforms=["PC"], genres=["Shooter"]),
+            "hltb": _HLTBStub(year="2009", platforms=["PC"]),
         },
     )
     tags = out.iloc[0]["ReviewTags"]
@@ -198,7 +198,7 @@ def test_fill_eval_tags_adds_provider_outlier_when_two_agree() -> None:
 
 
 def test_fill_eval_tags_adds_provider_no_consensus_when_all_disagree() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -227,7 +227,7 @@ def test_fill_eval_tags_adds_provider_no_consensus_when_all_disagree() -> None:
 
 
 def test_fill_eval_tags_downgrades_missing_steam_when_platforms_non_pc() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -247,9 +247,7 @@ def test_fill_eval_tags_downgrades_missing_steam_when_platforms_non_pc() -> None
         df,
         sources={"rawg", "steam"},
         clients={
-            "rawg": _RAWGStub(
-                released="2000-01-01", platforms=["PlayStation 2"], genres=["Action"]
-            ),
+            "rawg": _RAWGStub(released="2000-01-01", platforms=["PlayStation 2"], genres=["Action"]),
         },
     )
     tags = out.iloc[0]["ReviewTags"]
@@ -260,7 +258,7 @@ def test_fill_eval_tags_downgrades_missing_steam_when_platforms_non_pc() -> None
 
 
 def test_fill_eval_tags_tags_edition_or_port_suspected_for_steam_year_outlier() -> None:
-    from game_catalog_builder.analysis.import_diagnostics import fill_eval_tags
+    from game_catalog_builder.pipelines.diagnostics.import_diagnostics import fill_eval_tags
 
     df = pd.DataFrame(
         [
@@ -287,8 +285,8 @@ def test_fill_eval_tags_tags_edition_or_port_suspected_for_steam_year_outlier() 
             "rawg": _RAWGStub(released="1993-12-10", platforms=["PC"], genres=["Shooter"]),
             "igdb": _IGDBStub(
                 year="1993",
-                platforms="PC",
-                genres="Shooter",
+                platforms=["PC"],
+                genres=["Shooter"],
                 version_parent="Doom (1993)",
             ),
             "steam": _SteamStub(year=2016),

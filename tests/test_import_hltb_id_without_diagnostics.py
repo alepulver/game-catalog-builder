@@ -8,20 +8,18 @@ def test_import_hltb_populates_id_even_without_diagnostics(tmp_path, monkeypatch
 
     # Minimal catalog-like CSV (no RowId; import will generate it).
     input_csv = tmp_path / "user.csv"
-    pd.DataFrame([{"Name": "Spider-Man 2 (2004)", "YearHint": "2004"}]).to_csv(
-        input_csv, index=False
-    )
+    pd.DataFrame([{"Name": "Spider-Man 2 (2004)", "YearHint": "2004"}]).to_csv(input_csv, index=False)
 
     out_csv = tmp_path / "catalog.csv"
 
     def fake_search(self, game_name, *, query=None, hltb_id=None):
         assert game_name == "Spider-Man 2 (2004)"
         return {
-            "HLTB_ID": "8940",
-            "HLTB_Name": "Spider-Man 2",
-            "HLTB_Main": "1",
-            "HLTB_Extra": "",
-            "HLTB_Completionist": "",
+            "hltb.id": "8940",
+            "hltb.name": "Spider-Man 2",
+            "hltb.time.main": "1",
+            "hltb.time.extra": "",
+            "hltb.time.completionist": "",
         }
 
     monkeypatch.setattr("game_catalog_builder.clients.hltb_client.HLTBClient.search", fake_search)

@@ -26,7 +26,10 @@ def test_build_personal_base_for_enrich_strips_provider_columns() -> None:
             }
         ]
     )
-    out = build_personal_base_for_enrich(df)
+    out = build_personal_base_for_enrich(
+        df,
+        diagnostic_columns={"RAWG_MatchScore", "MatchConfidence", "ReviewTags", "NeedsReview"},
+    )
     cols = set(out.columns)
     assert "RAWG_ID" in cols
     assert "IGDB_ID" in cols

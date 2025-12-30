@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -18,6 +17,7 @@ from ..utils.utilities import (
     pick_best_match,
 )
 from .http_client import ConfiguredHTTPJSONClient, HTTPJSONClient, HTTPRequestDefaults
+from .parse import as_int, as_str, get_list_of_dicts, normalize_str_list, year_from_iso_date
 
 STEAM_SEARCH_URL = "https://store.steampowered.com/api/storesearch"
 STEAM_APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
@@ -52,8 +52,8 @@ class SteamClient:
             "http_packagedetails": 0,
         }
         base_http.stats = self.stats
-        # Cache search results by exact query (list of {id,name,type}).
-        self._by_query: dict[str, list[dict[str, Any]]] = {}
+        # Cache storesearch results by exact query (raw response payload).
+        self._by_query: dict[str, dict[str, Any]] = {}
         # Cache raw appdetails payloads keyed by appid.
         self._by_id: dict[str, Any] = {}
         self._by_id_negative: set[str] = set()
@@ -99,21 +99,15 @@ class SteamClient:
         )
 
     def _load_cache(self, raw: Any) -> None:
-        if not isinstance(raw, dict) or not raw:
+        if not raw:
             return
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"Steam cache file has an unsupported format: {self.cache_path} (delete it to rebuild)."
+            )
 
-        def _looks_like_appdetails(v: Any) -> bool:
-            if not isinstance(v, dict):
-                return False
-            # Legacy caches sometimes stored storesearch items under by_id; those are small dicts
-            # like {id,name,type}. Appdetails payloads include richer metadata.
-            if "release_date" in v or "platforms" in v or "developers" in v or "publishers" in v:
-                return True
-            if "steam_appid" in v or "categories" in v or "genres" in v:
-                return True
-            if "is_free" in v or "price_overview" in v:
-                return True
-            return False
+        if not raw:
+            return
 
         by_query = raw.get("by_query")
         by_id = raw.get("by_id")
@@ -121,19 +115,30 @@ class SteamClient:
         by_id_negative = raw.get("by_id_negative")
         by_package_negative = raw.get("by_package_negative")
         if not isinstance(by_id, dict):
-            logging.warning(
-                "Steam cache file is in an incompatible format; ignoring it (delete it to rebuild)."
+            raise ValueError(
+                f"Steam cache file has an unsupported format: {self.cache_path} (delete it to rebuild)."
             )
-            return
-        # by_id must contain appdetails payloads only.
-        self._by_id = {str(k): v for k, v in by_id.items() if _looks_like_appdetails(v)}
+        self._by_id = {str(k): v for k, v in by_id.items() if isinstance(v, dict)}
 
         if isinstance(by_query, dict):
-            out: dict[str, list[dict[str, Any]]] = {}
+            out: dict[str, dict[str, Any]] = {}
+            migrated = 0
             for k, v in by_query.items():
+                # Legacy format stored the `items` list only. Wrap it into a dict to match the
+                # raw storesearch output shape.
                 if isinstance(v, list):
-                    out[str(k)] = [it for it in v if isinstance(it, dict)]
+                    migrated += 1
+                    out[str(k)] = {"items": [it for it in v if isinstance(it, dict)]}
+                    continue
+                if isinstance(v, dict):
+                    out[str(k)] = v
             self._by_query = out
+            if migrated:
+                logging.info(
+                    "ℹ Steam cache migration: upgraded %d legacy by_query entries to raw storesearch shape.",
+                    migrated,
+                )
+                self._save_cache()
         if isinstance(by_package, dict):
             self._by_package = {str(k): v for k, v in by_package.items() if isinstance(v, dict)}
         if isinstance(by_id_negative, list):
@@ -219,9 +224,7 @@ class SteamClient:
 
         stripped_name = _strip_trailing_paren_year(str(game_name or "").strip())
         base_name = _strip_common_editions_for_search(stripped_name)
-        search_terms: list[str] = (
-            [stripped_name] if stripped_name else [str(game_name or "").strip()]
-        )
+        search_terms: list[str] = [stripped_name] if stripped_name else [str(game_name or "").strip()]
         if base_name and base_name not in search_terms:
             search_terms.append(base_name)
         if str(game_name or "").strip() and str(game_name or "").strip() not in search_terms:
@@ -239,8 +242,12 @@ class SteamClient:
                 continue
 
             query_key = f"l:english|cc:US|term:{term}"
-            cached_items = self._by_query.get(query_key)
-            if cached_items is None:
+            cached_payload = self._by_query.get(query_key)
+            cached_items: list[dict[str, Any]] | None = None
+            if isinstance(cached_payload, dict):
+                cached_items = get_list_of_dicts(cached_payload.get("items"))
+
+            if cached_payload is None:
                 data = self._storesearch_http.get_json(
                     STEAM_SEARCH_URL,
                     params={
@@ -252,9 +259,9 @@ class SteamClient:
                     on_fail_return=None,
                 )
                 if isinstance(data, dict):
-                    cached_items = [it for it in (data.get("items") or []) if isinstance(it, dict)]
-                    # Cache empty results too (negative cache) by query key.
-                    self._by_query[query_key] = cached_items
+                    cached_items = get_list_of_dicts(data.get("items"))
+                    # Cache raw payload (including empty results) by query key.
+                    self._by_query[query_key] = data
                     self._save_cache()
                     self.stats["by_query_fetch"] += 1
                     if not cached_items:
@@ -316,9 +323,7 @@ class SteamClient:
             seen = set()
             appids = [a for a in appids if not (a in seen or seen.add(a))]
             if appids:
-                details_by_id = self.get_app_details_many(
-                    appids[: STEAM.appdetails_refine_candidates]
-                )
+                details_by_id = self.get_app_details_many(appids[: STEAM.appdetails_refine_candidates])
                 detail_candidates: list[dict[str, Any]] = []
                 for appid, details in details_by_id.items():
                     if not isinstance(details, dict):
@@ -371,8 +376,7 @@ class SteamClient:
         if not results:
             if request_failed:
                 logging.warning(
-                    f"Steam search request failed for '{game_name}' (no response); "
-                    "not caching as not-found."
+                    f"Steam search request failed for '{game_name}' (no response); not caching as not-found."
                 )
                 return None
             logging.warning(f"Not found on Steam: '{game_name}'. No results from API.")
@@ -505,9 +509,7 @@ class SteamClient:
                 results = app_like
 
             # Also drop obviously DLC-like titles when we have any non-DLC-like alternatives.
-            non_dlc_like = [
-                it for it in results if not _looks_dlc_like(str(it.get("name", "") or ""))
-            ]
+            non_dlc_like = [it for it in results if not _looks_dlc_like(str(it.get("name", "") or ""))]
             if non_dlc_like and len(non_dlc_like) < len(results):
                 results = non_dlc_like
 
@@ -584,9 +586,7 @@ class SteamClient:
 
             if not query_dlc_like:
                 detail_candidates = [
-                    c
-                    for c in detail_candidates
-                    if not _looks_dlc_like(str(c.get("name", "") or ""))
+                    c for c in detail_candidates if not _looks_dlc_like(str(c.get("name", "") or ""))
                 ]
 
             def _details_year_getter(obj: dict[str, Any]) -> int | None:
@@ -659,8 +659,7 @@ class SteamClient:
             chosen = str(best.get("name", "") or "").strip()
             if chosen and _looks_dlc_like(chosen):
                 logging.warning(
-                    f"Not found on Steam: '{game_name}'. "
-                    f"Selected title looks like DLC/non-game: '{chosen}'"
+                    f"Not found on Steam: '{game_name}'. Selected title looks like DLC/non-game: '{chosen}'"
                 )
                 return None
 
@@ -668,19 +667,14 @@ class SteamClient:
             # Log top 5 closest matches when not found
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
-                logging.warning(
-                    f"Not found on Steam: '{game_name}'. Closest matches: {', '.join(top_names)}"
-                )
+                logging.warning(f"Not found on Steam: '{game_name}'. Closest matches: {', '.join(top_names)}")
             else:
                 logging.warning(f"Not found on Steam: '{game_name}'. No matches found.")
             return None
 
         # Warn if there are close matches (but not if it's a perfect 100% match)
         if score < 100:
-            msg = (
-                f"Close match for '{game_name}': Selected '{best.get('name', '')}' "
-                f"(score: {score}%)"
-            )
+            msg = f"Close match for '{game_name}': Selected '{best.get('name', '')}' (score: {score}%)"
             if top_matches:
                 top_names = [f"'{name}' ({s}%)" for name, s in top_matches[:5]]
                 msg += f", alternatives: {', '.join(top_names)}"
@@ -797,29 +791,31 @@ class SteamClient:
     # Metadata extraction
     # -------------------------------------------------
     @staticmethod
-    def extract_fields(appid: int, details: dict[str, Any]) -> dict[str, str]:
+    def extract_metrics(appid: int, details: dict[str, Any]) -> dict[str, object]:
         if not details:
             return {}
-
-        def extract_year(text: str) -> str:
-            m = re.search(r"\b(19\d{2}|20\d{2})\b", text or "")
-            return m.group(1) if m else ""
 
         price = ""
         if details.get("is_free"):
             price = "Free"
         elif "price_overview" in details:
-            price = str(details["price_overview"].get("final_formatted", ""))
+            po = details.get("price_overview")
+            if isinstance(po, dict):
+                price = as_str(po.get("final_formatted"))
 
-        categories = [c.get("description", "") for c in details.get("categories", [])]
+        categories = [as_str(c.get("description")) for c in get_list_of_dicts(details.get("categories"))]
 
         # Real Steam tags come indirectly from genres + categories + metadata
-        genres = [g.get("description", "") for g in details.get("genres", [])]
+        genres = [as_str(g.get("description")) for g in get_list_of_dicts(details.get("genres"))]
 
         recommendations = details.get("recommendations", {})
-        review_count = recommendations.get("total", "")
+        review_count: int | None = None
+        if isinstance(recommendations, dict):
+            review_count = as_int(recommendations.get("total"))
         metacritic = details.get("metacritic", {}) or {}
-        metacritic_score = metacritic.get("score", "")
+        metacritic_score: int | None = None
+        if isinstance(metacritic, dict):
+            metacritic_score = as_int(metacritic.get("score"))
         store_url = ""
         try:
             if str(appid).isdigit():
@@ -829,7 +825,7 @@ class SteamClient:
         store_type = str(details.get("type", "") or "").strip().lower()
 
         release = details.get("release_date", {}) or {}
-        release_year = extract_year(str(release.get("date", "") or ""))
+        release_year = year_from_iso_date(as_str(release.get("date")) if isinstance(release, dict) else "")
 
         platforms = details.get("platforms", {}) or {}
         platform_names: list[str] = []
@@ -902,23 +898,22 @@ class SteamClient:
             if isinstance(publishers, list)
             else []
         )
-        dev_str = json.dumps(dev_list, ensure_ascii=False)
-        pub_str = json.dumps(pub_list, ensure_ascii=False)
+        # Keep structured company lists; CSV rendering handles presentation.
 
         return {
-            "Steam_AppID": str(appid),
-            "Steam_Name": str(details.get("name", "") or ""),
-            "Steam_URL": store_url,
-            "Steam_Website": str(details.get("website", "") or "").strip(),
-            "Steam_ShortDescription": str(details.get("short_description", "") or "").strip(),
-            "Steam_StoreType": store_type,
-            "Steam_ReleaseYear": release_year,
-            "Steam_Platforms": ", ".join(platform_names),
-            "Steam_Tags": ", ".join(genres),
-            "Steam_ReviewCount": str(review_count),
-            "Steam_Price": price,
-            "Steam_Categories": ", ".join(categories),
-            "Steam_Metacritic": str(metacritic_score),
-            "Steam_Developers": dev_str,
-            "Steam_Publishers": pub_str,
+            "steam.app_id": str(appid),
+            "steam.name": as_str(details.get("name")),
+            "steam.url": as_str(store_url),
+            "steam.website": as_str(details.get("website")),
+            "steam.short_description": as_str(details.get("short_description")),
+            "steam.store_type": as_str(store_type),
+            "steam.release_year": release_year,
+            "steam.platforms": normalize_str_list(platform_names),
+            "steam.tags": normalize_str_list(genres),
+            "steam.review_count": review_count,
+            "steam.price": as_str(price),
+            "steam.categories": normalize_str_list(categories),
+            "steam.metacritic_100": metacritic_score,
+            "steam.developers": normalize_str_list(dev_list),
+            "steam.publishers": normalize_str_list(pub_list),
         }

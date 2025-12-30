@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 def test_wikidata_resolve_by_hints_uses_cache(tmp_path, monkeypatch) -> None:
     from game_catalog_builder.clients.wikidata_client import (
         WIKIDATA_PROP_STEAM_APPID,
@@ -50,9 +53,7 @@ def test_wikidata_sparql_parses_qids(tmp_path, monkeypatch) -> None:
         def json(self):
             return {
                 "results": {
-                    "bindings": [
-                        {"item": {"type": "uri", "value": "http://www.wikidata.org/entity/Q279446"}}
-                    ]
+                    "bindings": [{"item": {"type": "uri", "value": "http://www.wikidata.org/entity/Q279446"}}]
                 }
             }
 
